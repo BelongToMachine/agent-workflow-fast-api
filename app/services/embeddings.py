@@ -35,7 +35,9 @@ async def embed_texts(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(
+            timeout=current_settings.embedding_provider_timeout_seconds
+        ) as client:
             response = await client.post(
                 f"{current_settings.embedding_base_url.rstrip('/')}/embeddings",
                 headers={"Authorization": f"Bearer {current_settings.embedding_api_key}"},

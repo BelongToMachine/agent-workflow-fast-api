@@ -284,6 +284,7 @@ KNOWLEDGE_EMBEDDINGS_ENABLED=1
 EMBEDDING_API_KEY=your-embedding-provider-key
 EMBEDDING_BASE_URL=https://api.openai.com/v1
 EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_PROVIDER_TIMEOUT_SECONDS=60
 ```
 
 可以先执行只读预检：
@@ -303,6 +304,8 @@ make migrate-knowledge-embeddings
 文件元数据并返回 `pending`，再由 FastAPI background task 解析、按固定窗口切片并更新为
 `ready` 或 `failed`。打开 Embedding 开关后，切片会调用 OpenAI-compatible `/embeddings`
 接口并写入 pgvector；搜索接口会先验证 workspace/知识库权限，再执行 cosine search。
+Embedding provider 请求默认在 60 秒后超时，可通过 `EMBEDDING_PROVIDER_TIMEOUT_SECONDS`
+调整（范围 1–300 秒），避免解析任务或搜索请求无限等待上游服务。
 默认使用本地磁盘。生产环境可以设置 `KNOWLEDGE_STORAGE_PROVIDER=s3`，并提供
 `KNOWLEDGE_S3_BUCKET`、可选的 `KNOWLEDGE_S3_ENDPOINT_URL`、region 和 credentials，
 FastAPI 会让上传、后台解析读取和删除统一经过 S3-compatible storage；真实对象存储和数据库

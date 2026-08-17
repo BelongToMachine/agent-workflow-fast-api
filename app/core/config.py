@@ -249,6 +249,15 @@ class Settings(BaseSettings):
         default="text-embedding-3-small",
         validation_alias=AliasChoices("EMBEDDING_MODEL", "ASIANODE_EMBEDDING_MODEL"),
     )
+    embedding_provider_timeout_seconds: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=300.0,
+        validation_alias=AliasChoices(
+            "EMBEDDING_PROVIDER_TIMEOUT_SECONDS",
+            "ASIANODE_EMBEDDING_PROVIDER_TIMEOUT_SECONDS",
+        ),
+    )
     rate_limit_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("RATE_LIMIT_ENABLED", "ASIANODE_RATE_LIMIT_ENABLED"),
