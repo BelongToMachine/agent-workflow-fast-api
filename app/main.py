@@ -1,0 +1,29 @@
+from fastapi import FastAPI
+
+from app.api.router import api_router
+from app.core.config import get_settings
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+
+    application = FastAPI(
+        title=settings.app_name,
+        version="0.1.0",
+        description="Backend service for the Asianode Agent platform.",
+    )
+    application.include_router(api_router)
+
+    @application.get("/", tags=["meta"])
+    def read_root() -> dict[str, str]:
+        return {
+            "service": settings.app_name,
+            "status": "running",
+            "docs": "/docs",
+        }
+
+    return application
+
+
+app = create_app()
+
