@@ -47,6 +47,10 @@ SUPPORTED_EXTENSIONS = {
     ".txt": "text/plain",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+FILE_SIGNATURES = {
+    ".pdf": (b"%PDF-",),
+    ".xlsx": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
+}
 SAFE_FILENAME_PATTERN = re.compile(r"[^a-zA-Z0-9._-]+")
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 120
@@ -249,6 +253,13 @@ def _safe_filename(filename: str) -> str:
 
 def _extension(filename: str) -> str:
     return Path(filename).suffix.lower()
+
+
+def _content_matches_extension(extension: str, content: bytes) -> bool:
+    signatures = FILE_SIGNATURES.get(extension)
+    if not signatures:
+        return True
+    return any(content.startswith(signature) for signature in signatures)
 
 
 def _storage_path(settings: Settings, storage_key: str) -> Path:
@@ -494,6 +505,14 @@ async def upload_knowledge_file(
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="The knowledge file is larger than the configured limit.",
+        )
+    if not _content_matches_extension(extension, content):
+        return JSONResponse(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            content={
+                "code": "knowledge_ingestion:invalid_content",
+                "message": "The uploaded bytes do not match the declared file type.",
+            },
         )
 
     file_id = uuid4()

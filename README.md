@@ -312,6 +312,7 @@ make migrate-knowledge-embeddings
 文件元数据并返回 `pending`，再由 FastAPI background task 解析、按固定窗口切片并更新为
 `ready` 或 `failed`。打开 Embedding 开关后，切片会调用 OpenAI-compatible `/embeddings`
 接口并写入 pgvector；搜索接口会先验证 workspace/知识库权限，再执行 cosine search。
+PDF 和 XLSX 会在写入对象存储前校验文件签名，不能仅通过伪造扩展名进入解析任务。
 Embedding provider 请求默认在 60 秒后超时，可通过 `EMBEDDING_PROVIDER_TIMEOUT_SECONDS`
 调整（范围 1–300 秒），避免解析任务或搜索请求无限等待上游服务。
 默认使用本地磁盘。生产环境可以设置 `KNOWLEDGE_STORAGE_PROVIDER=s3`，并提供

@@ -11,6 +11,7 @@ from app.api.routes.knowledge_files import (
     FILE_LIST_QUERY,
     KnowledgeFileSummary,
     _chunk_text,
+    _content_matches_extension,
     _extract_text,
     _safe_filename,
     _storage_path,
@@ -66,6 +67,14 @@ def test_file_parser_supports_csv_and_xlsx() -> None:
     extracted = _extract_text("data.xlsx", output.getvalue())
     assert "[Sheet: Products]" in extracted
     assert "chair\t10" in extracted
+
+
+def test_binary_file_signatures_match_the_declared_extension() -> None:
+    assert _content_matches_extension(".pdf", b"%PDF-1.7 content")
+    assert _content_matches_extension(".xlsx", b"PK\x03\x04workbook")
+    assert not _content_matches_extension(".pdf", b"not-a-pdf")
+    assert not _content_matches_extension(".xlsx", b"not-a-workbook")
+    assert _content_matches_extension(".csv", b"name,price\nchair,10")
 
 
 def test_file_name_and_storage_path_are_sandboxed(tmp_path) -> None:
