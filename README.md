@@ -149,6 +149,8 @@ local provider 返回带 HMAC 签名和过期时间的 FastAPI URL；S3-compatib
 预签名 URL，并复用 `KNOWLEDGE_S3_*` 配置。生产环境使用 local provider 时，必须设置
 `ATTACHMENT_PUBLIC_BASE_URL` 为浏览器可访问的 FastAPI 地址。关闭
 `USE_FASTAPI_ATTACHMENT_UPLOAD` 后，原有 Vercel Blob `/api/files/upload` 会继续作为回滚路径。
+FastAPI 不只信任 multipart 的 `Content-Type`，还会校验 PNG/JPEG magic bytes；声明为图片但
+内容不匹配的上传会被拒绝。
 
 设置 `REDIS_URL` 后，FastAPI 会按 chat 保存短期 SSE chunks，并提供
 `GET /api/v1/chat/{chat_id}/stream` 给 AI SDK 自动断线重连。恢复接口会再次校验当前用户、

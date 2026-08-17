@@ -10,6 +10,7 @@ from app.core.config import Settings, get_settings
 from app.core.workspace_access import require_workspace_permission
 from app.services.attachments import (
     SUPPORTED_ATTACHMENT_TYPES,
+    attachment_content_matches_type,
     build_attachment_storage,
     build_attachment_storage_key,
     create_local_attachment_token,
@@ -75,6 +76,14 @@ async def upload_attachment(
         return JSONResponse(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             content={"error": "File size should be less than 5MB."},
+        )
+    if not attachment_content_matches_type(content_type, content):
+        return JSONResponse(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            content={
+                "code": "attachments:invalid_content",
+                "error": "The uploaded bytes do not match the declared image type.",
+            },
         )
 
     original_name = safe_attachment_filename(file.filename or "attachment")

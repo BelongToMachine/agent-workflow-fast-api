@@ -14,12 +14,23 @@ from app.services.storage import (
 )
 
 SUPPORTED_ATTACHMENT_TYPES = frozenset({"image/jpeg", "image/png"})
+ATTACHMENT_SIGNATURES = {
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+}
 SAFE_FILENAME_PATTERN = re.compile(r"[^a-zA-Z0-9._-]+")
 
 
 def safe_attachment_filename(filename: str) -> str:
     candidate = SAFE_FILENAME_PATTERN.sub("_", filename).strip("._")
     return (candidate or "attachment")[:160]
+
+
+def attachment_content_matches_type(content_type: str, content: bytes) -> bool:
+    return any(
+        content.startswith(signature)
+        for signature in ATTACHMENT_SIGNATURES.get(content_type, ())
+    )
 
 
 def build_attachment_storage(settings: Settings) -> LocalKnowledgeStorage | S3KnowledgeStorage:

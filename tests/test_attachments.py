@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings, get_settings
 from app.main import app
 from app.services.attachments import (
+    attachment_content_matches_type,
     create_local_attachment_token,
     verify_local_attachment_token,
 )
@@ -29,10 +30,11 @@ def enabled_local_attachments(tmp_path):
 def test_attachment_upload_returns_legacy_compatible_shape_and_signed_url(
     enabled_local_attachments: Settings,
 ) -> None:
+    content = b"\x89PNG\r\n\x1a\npng-bytes"
     response = client.post(
         "/api/v1/files/upload",
         params={"workspace_id": "00000000-0000-0000-0000-000000000001"},
-        files={"file": ("../brief image.png", b"png-bytes", "image/png")},
+        files={"file": ("../brief image.png", content, "image/png")},
     )
 
     assert response.status_code == 200
@@ -43,8 +45,28 @@ def test_attachment_upload_returns_legacy_compatible_shape_and_signed_url(
     attachment_url = urlsplit(payload["url"])
     downloaded = client.get(attachment_url.path)
     assert downloaded.status_code == 200
-    assert downloaded.content == b"png-bytes"
+    assert downloaded.content == content
     assert downloaded.headers["content-type"] == "image/png"
+
+
+def test_attachment_content_signature_matches_declared_type() -> None:
+    assert attachment_content_matches_type("image/png", b"\x89PNG\r\n\x1a\nrest")
+    assert attachment_content_matches_type("image/jpeg", b"\xff\xd8\xff\xe0rest")
+    assert not attachment_content_matches_type("image/png", b"not-a-png")
+    assert not attachment_content_matches_type("image/gif", b"GIF89a")
+
+
+def test_attachment_upload_rejects_mismatched_content(
+    enabled_local_attachments: Settings,
+) -> None:
+    response = client.post(
+        "/api/v1/files/upload",
+        params={"workspace_id": "00000000-0000-0000-0000-000000000001"},
+        files={"file": ("brief.png", b"not-a-png", "image/png")},
+    )
+
+    assert response.status_code == 415
+    assert response.json()["code"] == "attachments:invalid_content"
 
 
 def test_attachment_download_rejects_a_tampered_signature(
