@@ -1,15 +1,22 @@
+import base64
+import hashlib
+import hmac
+import json
 import time
 from typing import Any
 
 import httpx
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.config import Settings, get_settings
 
 JWKS_CACHE_TTL_SECONDS = 300
+NEXTAUTH_BRIDGE_TTL_MS = 5 * 60 * 1000
+NEXTAUTH_BRIDGE_FUTURE_SKEW_MS = 30 * 1000
+NEXTAUTH_BRIDGE_FALLBACK_SECRET = "atlas-trade-copilot-nextauth-bridge"
 bearer_scheme = HTTPBearer(auto_error=False)
 _jwks_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -21,6 +28,10 @@ class AuthenticatedUser(BaseModel):
     email: str | None = None
     roles: list[str] = Field(default_factory=list)
     workspace_id: str | None = None
+    role: str | None = None
+    permissions: list[str] = Field(default_factory=list)
+    is_guest: bool = False
+    is_internal_bridge: bool = False
     claims: dict[str, Any] = Field(default_factory=dict)
     is_development: bool = False
 
@@ -31,6 +42,84 @@ class AuthConfigurationError(Exception):
 
 class AuthTokenError(Exception):
     """Raised when an access token is malformed, expired, or unverifiable."""
+
+
+class NextAuthBridgeContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    email: str | None = None
+    is_guest: bool = Field(alias="isGuest", default=False)
+    issued_at: int = Field(alias="issuedAt")
+    permissions: list[str] = Field(default_factory=list)
+    role: str
+    subject: str = Field(min_length=1)
+    workspace_id: str = Field(alias="workspaceId", min_length=1)
+
+
+def _nextauth_bridge_secret(settings: Settings) -> str:
+    return (
+        settings.nextauth_bridge_secret
+        or settings.auth_secret
+        or NEXTAUTH_BRIDGE_FALLBACK_SECRET
+    )
+
+
+def _decode_base64_json(encoded: str) -> dict[str, Any] | None:
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        value = json.loads(
+            base64.urlsafe_b64decode(encoded + padding).decode("utf-8")
+        )
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _verify_nextauth_bridge(
+    context: str | None,
+    signature: str | None,
+    settings: Settings,
+) -> AuthenticatedUser | None:
+    if not context or not signature:
+        return None
+
+    expected_signature = base64.urlsafe_b64encode(
+        hmac.new(
+            _nextauth_bridge_secret(settings).encode("utf-8"),
+            context.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+    ).rstrip(b"=").decode("ascii")
+    if not hmac.compare_digest(expected_signature, signature):
+        return None
+
+    payload = _decode_base64_json(context)
+    if payload is None:
+        return None
+
+    try:
+        bridge = NextAuthBridgeContext.model_validate(payload)
+    except ValidationError:
+        return None
+
+    now = int(time.time() * 1000)
+    if (
+        now - bridge.issued_at > NEXTAUTH_BRIDGE_TTL_MS
+        or bridge.issued_at > now + NEXTAUTH_BRIDGE_FUTURE_SKEW_MS
+    ):
+        return None
+
+    return AuthenticatedUser(
+        user_id=bridge.subject,
+        email=bridge.email,
+        roles=[bridge.role],
+        workspace_id=bridge.workspace_id,
+        role=bridge.role,
+        permissions=bridge.permissions,
+        is_guest=bridge.is_guest,
+        is_internal_bridge=True,
+        claims=payload,
+    )
 
 
 def _auth_is_required(settings: Settings) -> bool:
@@ -176,8 +265,30 @@ async def verify_access_token(token: str, settings: Settings) -> AuthenticatedUs
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     settings: Settings = Depends(get_settings),
+    x_asianode_auth_context: str | None = Header(default=None),
+    x_asianode_auth_signature: str | None = Header(default=None),
 ) -> AuthenticatedUser:
     if credentials is None:
+        bridge_context = (
+            x_asianode_auth_context if isinstance(x_asianode_auth_context, str) else None
+        )
+        bridge_signature = (
+            x_asianode_auth_signature if isinstance(x_asianode_auth_signature, str) else None
+        )
+        if bridge_context or bridge_signature:
+            bridge_user = _verify_nextauth_bridge(
+                bridge_context,
+                bridge_signature,
+                settings,
+            )
+            if bridge_user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Internal authentication context is invalid or expired.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            return bridge_user
+
         if _auth_is_required(settings):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

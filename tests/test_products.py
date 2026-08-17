@@ -37,3 +37,22 @@ def test_product_query_contains_nextjs_advanced_filters() -> None:
     assert 'operation."operationStatus" = :operation_status' in sql
     assert params["operation_status"] == "review"
     assert params["source_file_names"] == ["products.xlsx"]
+
+
+def test_product_query_can_apply_knowledge_base_grants() -> None:
+    source_id = UUID("00000000-0000-0000-0000-000000000002")
+    query, params = _build_product_search_query(
+        workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+        query=None,
+        category=None,
+        operation_status=None,
+        target_channel=None,
+        proposer=None,
+        logistics=None,
+        qualification=None,
+        source_file_names=[],
+        authorized_source_ids=[source_id],
+    )
+
+    assert 'source."id" IN' in str(query)
+    assert params["authorized_source_ids"] == [source_id]

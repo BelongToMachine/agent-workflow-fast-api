@@ -69,6 +69,31 @@ class Settings(BaseSettings):
         default="RS256",
         validation_alias=AliasChoices("AUTH_ALGORITHMS", "ASIANODE_AUTH_ALGORITHMS"),
     )
+    auth_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AUTH_SECRET", "ASIANODE_AUTH_SECRET"),
+    )
+    dev_oidc_internal_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "DEV_OIDC_INTERNAL_SECRET",
+            "ASIANODE_DEV_OIDC_INTERNAL_SECRET",
+        ),
+    )
+    nextauth_bridge_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "NEXTAUTH_BRIDGE_SECRET",
+            "ASIANODE_NEXTAUTH_BRIDGE_SECRET",
+        ),
+    )
+    knowledge_grants_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_GRANTS_ENABLED",
+            "ASIANODE_KNOWLEDGE_GRANTS_ENABLED",
+        ),
+    )
 
     model_config = SettingsConfigDict(
         env_file=("../.env.local", ".env"),

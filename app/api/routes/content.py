@@ -9,6 +9,8 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser, get_current_user
+from app.core.knowledge_access import get_authorized_source_ids
+from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
 router = APIRouter(tags=["content"])
@@ -152,6 +154,7 @@ def _build_content_search_query(
     submitter: str | None,
     source_ids: list[UUID],
     limit: int,
+    authorized_source_ids: list[UUID] | None = None,
 ) -> tuple[object, dict[str, object]]:
     conditions = ['source."workspaceId" = :workspace_id']
     params: dict[str, object] = {
@@ -162,6 +165,10 @@ def _build_content_search_query(
     if source_ids:
         conditions.append('record."sourceId" IN :source_ids')
         params["source_ids"] = source_ids
+
+    if authorized_source_ids is not None:
+        conditions.append('record."sourceId" IN :authorized_source_ids')
+        params["authorized_source_ids"] = authorized_source_ids
 
     text_filters = {
         "language": ('record."language"', language),
@@ -222,6 +229,8 @@ def _build_content_search_query(
     bind_params = []
     if source_ids:
         bind_params.append(bindparam("source_ids", expanding=True))
+    if authorized_source_ids is not None:
+        bind_params.append(bindparam("authorized_source_ids", expanding=True))
     if bind_params:
         query_text = query_text.bindparams(*bind_params)
     return query_text, params
@@ -252,6 +261,13 @@ async def search_content(
     payload: ContentSearchRequest,
     _current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> ContentSearchResponse | JSONResponse:
+    await require_workspace_permission(_current_user, payload.workspace_id, "knowledge.read")
+    authorized_source_ids = await get_authorized_source_ids(
+        _current_user,
+        payload.workspace_id,
+    )
+    if authorized_source_ids == []:
+        return _empty_response("No knowledge source is authorized for this account.")
     normalized_source_file_names = _normalized_values(payload.source_file_names)
 
     try:
@@ -267,6 +283,13 @@ async def search_content(
                     },
                 )
                 source_rows = source_result.mappings().all()
+                if authorized_source_ids is not None:
+                    authorized_source_id_set = set(authorized_source_ids)
+                    source_rows = [
+                        row
+                        for row in source_rows
+                        if row["source_id"] in authorized_source_id_set
+                    ]
                 found_source_names = {row["display_name"] for row in source_rows}
                 source_ids = [row["source_id"] for row in source_rows]
                 missing_source_file_names = [
@@ -287,6 +310,7 @@ async def search_content(
                 status=payload.status,
                 submitter=payload.submitter,
                 source_ids=source_ids,
+                authorized_source_ids=authorized_source_ids,
                 limit=payload.limit,
             )
             result = await connection.execute(search_query, params)

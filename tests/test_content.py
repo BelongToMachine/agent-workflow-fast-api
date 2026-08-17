@@ -69,5 +69,25 @@ def test_content_query_contains_nextjs_filters() -> None:
     assert params["limit"] == 20
 
 
+def test_content_query_can_apply_knowledge_base_grants() -> None:
+    source_id = UUID("00000000-0000-0000-0000-000000000002")
+    query, params = _build_content_search_query(
+        workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+        account=None,
+        language=None,
+        product=None,
+        query=None,
+        record_type=None,
+        status=None,
+        submitter=None,
+        source_ids=[],
+        limit=20,
+        authorized_source_ids=[source_id],
+    )
+
+    assert 'record."sourceId" IN' in str(query)
+    assert params["authorized_source_ids"] == [source_id]
+
+
 def test_content_timestamp_matches_nextjs_iso_format() -> None:
     assert _iso_timestamp(datetime(2026, 6, 8, 15, 59, 17)) == ("2026-06-08T15:59:17.000Z")

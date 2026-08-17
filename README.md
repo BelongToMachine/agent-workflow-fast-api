@@ -32,6 +32,11 @@ make dev
 - 健康检查：http://127.0.0.1:8000/api/v1/healthz
 - 商品查询：`GET http://127.0.0.1:8000/api/v1/products?workspace_id={workspace_id}`
 - 内容查询：`POST http://127.0.0.1:8000/api/v1/content/search`
+- 当前用户：`GET http://127.0.0.1:8000/api/v1/me`
+- 知识库数据源：`GET http://127.0.0.1:8000/api/v1/knowledge-sources?workspace_id={workspace_id}`
+- 成员列表：`GET http://127.0.0.1:8000/api/v1/admin/members?workspace_id={workspace_id}`
+- 成员权限更新：`PATCH http://127.0.0.1:8000/api/v1/admin/members?workspace_id={workspace_id}`
+- 本地 Mock OIDC consent：`POST http://127.0.0.1:8000/api/v1/dev/oidc/consent`
 - 聊天接口：`POST http://127.0.0.1:8000/api/v1/chat`
 - Swagger：http://127.0.0.1:8000/docs
 
@@ -60,6 +65,40 @@ NEXT_PUBLIC_FASTAPI_BASE_URL=http://127.0.0.1:8000
 - 配置 `AUTH_ISSUER`、`AUTH_AUDIENCE` 和 `AUTH_JWKS_URL` 后，FastAPI 会校验 JWT 签名、`kid`、issuer、audience、过期时间和 `sub`。
 - 当前 NextAuth 的服务端 cookie 不是 OIDC access token，不能直接交给 FastAPI 当作普通 JWT 解码。过渡阶段应由 Next.js BFF 或 Logto 登录流程提供 Bearer access token。
 
+本地 Mock OIDC 目前也已经迁移了 consent/code 签发逻辑：`/dev/oidc` 页面仍通过
+Next.js BFF 发起请求，Next.js 只验证当前 NextAuth session 并发送签名的临时 actor
+context，FastAPI 负责校验 consent 参数、权限和 loopback redirect，并生成与原实现
+兼容的 5 分钟 HMAC code。FastAPI 生成的 code 可以由现有 Next.js result 页面继续验证。
+
+如果要使用单独的桥接密钥，在根目录 `.env.local` 和 FastAPI 运行环境中同时设置：
+
+```env
+DEV_OIDC_INTERNAL_SECRET=your-local-development-secret
+```
+
+未设置时，本地会回退到 `AUTH_SECRET`；生产/staging 环境会直接关闭该 dev endpoint。
+
+成员管理迁移期间，Next.js BFF 使用签名的 NextAuth bridge 调用 FastAPI。可以通过
+`NEXTAUTH_BRIDGE_SECRET` 配置独立的 bridge secret；未设置时使用 `AUTH_SECRET`。
+FastAPI 会校验 bridge 的 HMAC 签名和 5 分钟有效期，不接受浏览器提交的 userId、role
+或 workspaceId 作为可信身份。
+
+## 知识库授权迁移
+
+`migrations/0001_knowledge_base_grants.sql` 新增了过渡版
+`KnowledgeBaseGrant` 表。当前每个 `KnowledgeSource` 暂时视为一个知识库，授权主体
+可以是用户或角色。没有 grant 的旧知识库继续使用 workspace 权限；存在 grant 的知识库
+只允许匹配的用户/角色访问。
+
+应用迁移 SQL 后，再设置：
+
+```env
+KNOWLEDGE_GRANTS_ENABLED=1
+```
+
+在开关关闭时，产品、内容和知识库列表保持原有 workspace 级行为，避免数据库迁移尚未
+执行时导致现有接口不可用。
+
 本地可以使用以下配置测试未登录请求是否被拒绝：
 
 ```env
@@ -79,13 +118,20 @@ make lint
 app/
 ├── api/
 │   ├── routes/
+│   │   ├── admin_members.py
 │   │   ├── chat.py
 │   │   ├── content.py
+│   │   ├── dev_oidc.py
 │   │   ├── health.py
+│   │   ├── knowledge_sources.py
+│   │   ├── me.py
 │   │   └── products.py
 │   ├── core/
 │   │   ├── auth.py
-│   │   └── config.py
+│   │   ├── config.py
+│   │   ├── knowledge_access.py
+│   │   ├── permissions.py
+│   │   └── workspace_access.py
 │   └── router.py
 └── main.py
 tests/
@@ -99,7 +145,7 @@ tests/
 1. ✅ 迁移商品查询及高级过滤，并与 Next.js 查询结果做对比。
 2. ✅ 迁移内容查询接口。
 3. 🚧 完成认证配置，并接入 Logto Token 验证。
-4. 增加企业、成员、角色和知识库权限模型。
+4. 🚧 基于现有 Workspace/WorkspaceMember 完成企业、成员、角色和知识库权限模型，再增加单知识库 grant。
 5. 增加文件上传、解析、向量检索和 AI Agent 接口。
 
 商品和内容查询当前已经迁移到 FastAPI，并完成了与 Next.js 查询结果的真实数据对比。

@@ -93,7 +93,7 @@ def test_verify_access_token_rejects_a_tampered_token(monkeypatch) -> None:
         return {"keys": [public_jwk]}
 
     monkeypatch.setattr(auth, "_fetch_jwks", fake_fetch_jwks)
-    tampered_token = f"{token[:-1]}{'a' if token[-1] != 'a' else 'b'}"
+    tampered_token = f"{token.rsplit('.', 1)[0]}.invalid-signature"
 
     try:
         asyncio.run(auth.verify_access_token(tampered_token, settings))
