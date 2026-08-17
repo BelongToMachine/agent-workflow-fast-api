@@ -7,12 +7,12 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
+from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.db.session import get_db_connection
 
-AUTHORIZED_SOURCE_IDS_QUERY = text(
-    """
+AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE = """
     SELECT source."id" AS source_id
-    FROM "KnowledgeSource" AS source
+    FROM {knowledge_base_table} AS source
     WHERE source."workspaceId" = :workspace_id
       AND source."status" = 'ready'
       AND (
@@ -46,10 +46,8 @@ AUTHORIZED_SOURCE_IDS_QUERY = text(
       )
     ORDER BY source."displayName" ASC
     """
-)
 
-KNOWLEDGE_BASE_ACCESS_QUERY = text(
-    """
+KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE = """
     SELECT
         source."id" AS source_id,
         (
@@ -84,21 +82,32 @@ KNOWLEDGE_BASE_ACCESS_QUERY = text(
                 )
             )
         ) AS permitted
-    FROM "KnowledgeSource" AS source
+    FROM {knowledge_base_table} AS source
     WHERE source."id" = :knowledge_base_id
       AND source."workspaceId" = :workspace_id
     LIMIT 1
     """
+
+KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE = """
+    SELECT source."id" AS source_id
+    FROM {knowledge_base_table} AS source
+    WHERE source."id" = :knowledge_base_id
+      AND source."workspaceId" = :workspace_id
+    LIMIT 1
+    """
+
+AUTHORIZED_SOURCE_IDS_QUERY = text(
+    AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE.replace("{knowledge_base_table}", '"KnowledgeSource"')
+)
+
+KNOWLEDGE_BASE_ACCESS_QUERY = text(
+    KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE
+    .replace("{knowledge_base_table}", '"KnowledgeSource"')
 )
 
 KNOWLEDGE_BASE_EXISTS_QUERY = text(
-    """
-    SELECT source."id" AS source_id
-    FROM "KnowledgeSource" AS source
-    WHERE source."id" = :knowledge_base_id
-      AND source."workspaceId" = :workspace_id
-    LIMIT 1
-    """
+    KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE
+    .replace("{knowledge_base_table}", '"KnowledgeSource"')
 )
 
 
@@ -112,6 +121,7 @@ async def get_authorized_source_ids(
     """Return allowed source IDs, or None while the grant rollout is disabled."""
     if not get_settings().knowledge_grants_enabled or current_user.is_development:
         return None
+    settings = get_settings()
 
     try:
         user_id = UUID(current_user.user_id)
@@ -132,7 +142,7 @@ async def get_authorized_source_ids(
     try:
         async with get_db_connection() as connection:
             result = await connection.execute(
-                AUTHORIZED_SOURCE_IDS_QUERY,
+                text(render_knowledge_base_query(AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE, settings)),
                 {
                     "role": role,
                     "is_restricted": is_restricted,
@@ -178,11 +188,17 @@ async def require_knowledge_base_permission(
             detail="The authenticated user is not linked to a local workspace.",
         ) from error
 
-    if not get_settings().knowledge_grants_enabled:
+    settings = get_settings()
+    if not settings.knowledge_grants_enabled:
         try:
             async with get_db_connection() as connection:
                 result = await connection.execute(
-                    KNOWLEDGE_BASE_EXISTS_QUERY,
+                    text(
+                        render_knowledge_base_query(
+                            KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE,
+                            settings,
+                        )
+                    ),
                     {
                         "knowledge_base_id": knowledge_base_id,
                         "workspace_id": workspace_id,
@@ -218,7 +234,7 @@ async def require_knowledge_base_permission(
     try:
         async with get_db_connection() as connection:
             result = await connection.execute(
-                KNOWLEDGE_BASE_ACCESS_QUERY,
+                text(render_knowledge_base_query(KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE, settings)),
                 {
                     "is_restricted": is_restricted,
                     "knowledge_base_id": knowledge_base_id,

@@ -9,6 +9,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes.admin_knowledge_grants import _write_audit_log
 from app.core.auth import AuthenticatedUser, get_current_user
+from app.core.config import Settings, get_settings
+from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -49,8 +51,7 @@ class KnowledgeBaseWriteRequest(BaseModel):
         return normalized
 
 
-KNOWLEDGE_BASE_SELECT = text(
-    """
+KNOWLEDGE_BASE_SELECT_TEMPLATE = """
     SELECT
         "id" AS knowledge_base_id,
         "displayName" AS display_name,
@@ -60,13 +61,11 @@ KNOWLEDGE_BASE_SELECT = text(
         "workspaceId" AS workspace_id,
         "createdAt" AS created_at,
         "updatedAt" AS updated_at
-    FROM "KnowledgeSource"
+    FROM {knowledge_base_table}
     WHERE "workspaceId" = :workspace_id
     """
-)
-KNOWLEDGE_BASE_INSERT = text(
-    """
-    INSERT INTO "KnowledgeSource"
+KNOWLEDGE_BASE_INSERT_TEMPLATE = """
+    INSERT INTO {knowledge_base_table}
         (
             "createdAt", "displayName", "id", "sourceType", "status",
             "updatedAt", "version", "workspaceId"
@@ -76,10 +75,8 @@ KNOWLEDGE_BASE_INSERT = text(
          'ready', CURRENT_TIMESTAMP, 1, :workspace_id)
     RETURNING "id"
     """
-)
-KNOWLEDGE_BASE_UPDATE = text(
-    """
-    UPDATE "KnowledgeSource"
+KNOWLEDGE_BASE_UPDATE_TEMPLATE = """
+    UPDATE {knowledge_base_table}
     SET "displayName" = :display_name,
         "sourceType" = :source_type,
         "updatedAt" = CURRENT_TIMESTAMP,
@@ -88,7 +85,25 @@ KNOWLEDGE_BASE_UPDATE = text(
       AND "workspaceId" = :workspace_id
     RETURNING "id"
     """
-)
+
+
+def knowledge_base_select_query(settings: Settings | None = None) -> object:
+    return text(render_knowledge_base_query(KNOWLEDGE_BASE_SELECT_TEMPLATE, settings))
+
+
+def knowledge_base_insert_query(settings: Settings | None = None) -> object:
+    return text(render_knowledge_base_query(KNOWLEDGE_BASE_INSERT_TEMPLATE, settings))
+
+
+def knowledge_base_update_query(settings: Settings | None = None) -> object:
+    return text(render_knowledge_base_query(KNOWLEDGE_BASE_UPDATE_TEMPLATE, settings))
+
+
+# Keep import-time query constants for callers and tests that still exercise the
+# transitional KnowledgeSource path directly.
+KNOWLEDGE_BASE_SELECT = knowledge_base_select_query()
+KNOWLEDGE_BASE_INSERT = knowledge_base_insert_query()
+KNOWLEDGE_BASE_UPDATE = knowledge_base_update_query()
 
 
 def _iso_timestamp(value: object) -> str:
@@ -138,12 +153,13 @@ def _require_persisted_identity(current_user: AuthenticatedUser) -> UUID:
 async def list_knowledge_bases(
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> KnowledgeBaseListResponse | JSONResponse:
     await require_workspace_permission(current_user, workspace_id, "knowledge.read")
     try:
         async with get_db_connection() as connection:
             result = await connection.execute(
-                KNOWLEDGE_BASE_SELECT,
+                knowledge_base_select_query(settings),
                 {"workspace_id": workspace_id},
             )
             rows = result.mappings().all()
@@ -162,6 +178,7 @@ async def create_knowledge_base(
     payload: KnowledgeBaseWriteRequest,
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> KnowledgeBaseSummary | JSONResponse:
     await require_workspace_permission(current_user, workspace_id, "knowledge.manage")
     actor_id = _require_persisted_identity(current_user)
@@ -171,7 +188,7 @@ async def create_knowledge_base(
         async with get_db_connection() as connection:
             async with connection.begin():
                 await connection.execute(
-                    KNOWLEDGE_BASE_INSERT,
+                    knowledge_base_insert_query(settings),
                     {
                         "display_name": payload.display_name,
                         "knowledge_base_id": knowledge_base_id,
@@ -180,7 +197,7 @@ async def create_knowledge_base(
                     },
                 )
                 result = await connection.execute(
-                    KNOWLEDGE_BASE_SELECT,
+                    knowledge_base_select_query(settings),
                     {"workspace_id": workspace_id},
                 )
                 row = next(
@@ -215,6 +232,7 @@ async def update_knowledge_base(
     payload: KnowledgeBaseWriteRequest,
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> KnowledgeBaseSummary | JSONResponse:
     await require_workspace_permission(current_user, workspace_id, "knowledge.manage")
     actor_id = _require_persisted_identity(current_user)
@@ -223,7 +241,7 @@ async def update_knowledge_base(
         async with get_db_connection() as connection:
             async with connection.begin():
                 result = await connection.execute(
-                    KNOWLEDGE_BASE_UPDATE,
+                    knowledge_base_update_query(settings),
                     {
                         "display_name": payload.display_name,
                         "knowledge_base_id": knowledge_base_id,
@@ -237,7 +255,7 @@ async def update_knowledge_base(
                         detail="Knowledge base not found in this workspace.",
                     )
                 result = await connection.execute(
-                    KNOWLEDGE_BASE_SELECT,
+                    knowledge_base_select_query(settings),
                     {"workspace_id": workspace_id},
                 )
                 row = next(

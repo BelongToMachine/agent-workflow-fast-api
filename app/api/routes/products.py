@@ -9,7 +9,9 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser, get_current_user
+from app.core.config import Settings, get_settings
 from app.core.knowledge_access import get_authorized_source_ids
+from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -70,7 +72,7 @@ OPERATION_STATUS_ALIASES = {
     "调研": "review",
 }
 
-PRODUCT_SEARCH_SELECT = """
+PRODUCT_SEARCH_SELECT_TEMPLATE = """
     SELECT
         research."id" AS research_id,
         research."category" AS category,
@@ -94,7 +96,7 @@ PRODUCT_SEARCH_SELECT = """
         operation."targetChannels" AS target_channels,
         source."displayName" AS source_file_name
     FROM "RealProductResearch" AS research
-    INNER JOIN "KnowledgeSource" AS source
+    INNER JOIN {knowledge_base_table} AS source
         ON source."id" = research."sourceId"
     LEFT JOIN "ProductOperation" AS operation
         ON operation."researchId" = research."id"
@@ -102,17 +104,29 @@ PRODUCT_SEARCH_SELECT = """
     ORDER BY research."productName" ASC
 """
 
-SOURCE_NAMES_QUERY = text(
-    """
+SOURCE_NAMES_QUERY_TEMPLATE = """
     SELECT
         "displayName" AS display_name,
         "id" AS source_id
-    FROM "KnowledgeSource"
+    FROM {knowledge_base_table}
     WHERE "workspaceId" = :workspace_id
       AND "status" = 'ready'
       AND "displayName" IN :source_file_names
     """
-).bindparams(bindparam("source_file_names", expanding=True))
+
+
+def source_names_query(settings: Settings | None = None) -> object:
+    return text(
+        render_knowledge_base_query(SOURCE_NAMES_QUERY_TEMPLATE, settings)
+    ).bindparams(bindparam("source_file_names", expanding=True))
+
+
+# Import-time compatibility constants keep the legacy query available to unit
+# tests and callers that have not enabled the independent entity yet.
+PRODUCT_SEARCH_SELECT = PRODUCT_SEARCH_SELECT_TEMPLATE.replace(
+    "{knowledge_base_table}", '"KnowledgeSource"'
+)
+SOURCE_NAMES_QUERY = source_names_query()
 
 PRODUCT_PRICES_QUERY = text(
     """
@@ -185,6 +199,7 @@ def _build_product_search_query(
     qualification: str | None,
     source_file_names: list[str],
     authorized_source_ids: list[UUID] | None = None,
+    settings: Settings | None = None,
 ) -> tuple[object, dict[str, object]]:
     conditions = [
         'source."workspaceId" = :workspace_id',
@@ -233,7 +248,14 @@ def _build_product_search_query(
         conditions.append('source."id" IN :authorized_source_ids')
         params["authorized_source_ids"] = authorized_source_ids
 
-    query_text = text(PRODUCT_SEARCH_SELECT.format(conditions=" AND ".join(conditions)))
+    query_text = text(
+        render_knowledge_base_query(
+            PRODUCT_SEARCH_SELECT_TEMPLATE.replace(
+                "{conditions}", " AND ".join(conditions)
+            ),
+            settings,
+        )
+    )
     bind_params = []
     if source_file_names:
         bind_params.append(bindparam("source_file_names", expanding=True))
@@ -276,6 +298,7 @@ async def search_products(
     source_file_names: list[str] | None = Query(
         default=None, alias="sourceFileNames", max_length=50
     ),
+    settings: Settings = Depends(get_settings),
 ) -> ProductSearchResponse | JSONResponse:
     workspace_access = await require_workspace_permission(
         _current_user,
@@ -297,7 +320,7 @@ async def search_products(
             missing_source_file_names: list[str] = []
             if normalized_source_file_names:
                 source_result = await connection.execute(
-                    SOURCE_NAMES_QUERY,
+                    source_names_query(settings),
                     {
                         "source_file_names": normalized_source_file_names,
                         "workspace_id": str(workspace_id),
@@ -337,6 +360,7 @@ async def search_products(
                 qualification=qualification,
                 source_file_names=normalized_source_file_names,
                 authorized_source_ids=authorized_source_ids,
+                settings=settings,
             )
             result = await connection.execute(search_query, params)
             rows = result.mappings().all()

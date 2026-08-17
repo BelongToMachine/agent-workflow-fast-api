@@ -9,7 +9,9 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser, get_current_user
+from app.core.config import Settings, get_settings
 from app.core.knowledge_access import get_authorized_source_ids
+from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -80,7 +82,7 @@ class ContentSearchResponse(BaseModel):
     message: str | None = None
 
 
-CONTENT_SEARCH_SELECT = """
+CONTENT_SEARCH_SELECT_TEMPLATE = """
     SELECT
         record."accountDirection" AS account_direction,
         record."accountName" AS account_name,
@@ -114,24 +116,36 @@ CONTENT_SEARCH_SELECT = """
         record."usageStatus" AS usage_status,
         record."videoType" AS video_type
     FROM "ContentRecord" AS record
-    INNER JOIN "KnowledgeSource" AS source
+    INNER JOIN {knowledge_base_table} AS source
         ON source."id" = record."sourceId"
     WHERE {conditions}
     ORDER BY record."plannedAt" ASC, record."sourceRow" ASC
     LIMIT :limit
 """
 
-SOURCE_NAMES_QUERY = text(
-    """
+SOURCE_NAMES_QUERY_TEMPLATE = """
     SELECT
         "displayName" AS display_name,
         "id" AS source_id
-    FROM "KnowledgeSource"
+    FROM {knowledge_base_table}
     WHERE "workspaceId" = :workspace_id
       AND "status" = 'ready'
       AND "displayName" IN :source_file_names
     """
-).bindparams(bindparam("source_file_names", expanding=True))
+
+
+def source_names_query(settings: Settings | None = None) -> object:
+    return text(
+        render_knowledge_base_query(SOURCE_NAMES_QUERY_TEMPLATE, settings)
+    ).bindparams(bindparam("source_file_names", expanding=True))
+
+
+# Import-time compatibility constants keep the legacy query available to unit
+# tests and callers that have not enabled the independent entity yet.
+CONTENT_SEARCH_SELECT = CONTENT_SEARCH_SELECT_TEMPLATE.replace(
+    "{knowledge_base_table}", '"KnowledgeSource"'
+)
+SOURCE_NAMES_QUERY = source_names_query()
 
 
 def _pattern(value: str | None) -> str | None:
@@ -155,6 +169,7 @@ def _build_content_search_query(
     source_ids: list[UUID],
     limit: int,
     authorized_source_ids: list[UUID] | None = None,
+    settings: Settings | None = None,
 ) -> tuple[object, dict[str, object]]:
     conditions = ['source."workspaceId" = :workspace_id']
     params: dict[str, object] = {
@@ -225,7 +240,14 @@ def _build_content_search_query(
         conditions.append('record."searchText" ILIKE :query_pattern')
         params["query_pattern"] = query_pattern
 
-    query_text = text(CONTENT_SEARCH_SELECT.format(conditions=" AND ".join(conditions)))
+    query_text = text(
+        render_knowledge_base_query(
+            CONTENT_SEARCH_SELECT_TEMPLATE.replace(
+                "{conditions}", " AND ".join(conditions)
+            ),
+            settings,
+        )
+    )
     bind_params = []
     if source_ids:
         bind_params.append(bindparam("source_ids", expanding=True))
@@ -260,6 +282,7 @@ def _iso_timestamp(value: object) -> str | None:
 async def search_content(
     payload: ContentSearchRequest,
     _current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> ContentSearchResponse | JSONResponse:
     workspace_access = await require_workspace_permission(
         _current_user,
@@ -282,7 +305,7 @@ async def search_content(
             missing_source_file_names: list[str] = []
             if normalized_source_file_names:
                 source_result = await connection.execute(
-                    SOURCE_NAMES_QUERY,
+                    source_names_query(settings),
                     {
                         "source_file_names": normalized_source_file_names,
                         "workspace_id": str(payload.workspace_id),
@@ -318,6 +341,7 @@ async def search_content(
                 source_ids=source_ids,
                 authorized_source_ids=authorized_source_ids,
                 limit=payload.limit,
+                settings=settings,
             )
             result = await connection.execute(search_query, params)
             rows = result.mappings().all()

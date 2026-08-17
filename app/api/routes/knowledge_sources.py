@@ -8,7 +8,9 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser, get_current_user
+from app.core.config import Settings, get_settings
 from app.core.knowledge_access import get_authorized_source_ids
+from app.core.knowledge_base_entity import knowledge_base_table_name, render_knowledge_base_query
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -38,7 +40,7 @@ class KnowledgeSourceListResponse(BaseModel):
     source_table: str = Field(default="KnowledgeSource", alias="sourceTable")
 
 
-KNOWLEDGE_SOURCES_SELECT = """
+KNOWLEDGE_SOURCES_SELECT_TEMPLATE = """
     SELECT
         source."id" AS source_id,
         source."displayName" AS display_name,
@@ -50,7 +52,7 @@ KNOWLEDGE_SOURCES_SELECT = """
         source."workspaceId" AS workspace_id,
         source."createdAt" AS created_at,
         source."updatedAt" AS updated_at
-    FROM "KnowledgeSource" AS source
+    FROM {knowledge_base_table} AS source
     WHERE source."workspaceId" = :workspace_id
       AND source."status" = 'ready'
     {authorization_condition}
@@ -61,6 +63,7 @@ KNOWLEDGE_SOURCES_SELECT = """
 def _build_knowledge_sources_query(
     workspace_id: UUID,
     authorized_source_ids: list[UUID] | None,
+    settings: Settings | None = None,
 ) -> tuple[object, dict[str, object]]:
     params: dict[str, object] = {"workspace_id": str(workspace_id)}
     authorization_condition = ""
@@ -69,7 +72,12 @@ def _build_knowledge_sources_query(
         params["authorized_source_ids"] = authorized_source_ids
 
     query = text(
-        KNOWLEDGE_SOURCES_SELECT.format(authorization_condition=authorization_condition)
+        render_knowledge_base_query(
+            KNOWLEDGE_SOURCES_SELECT_TEMPLATE.replace(
+                "{authorization_condition}", authorization_condition
+            ),
+            settings,
+        )
     )
     if authorized_source_ids is not None:
         query = query.bindparams(bindparam("authorized_source_ids", expanding=True))
@@ -90,6 +98,7 @@ def _iso_timestamp(value: object) -> str:
 async def list_knowledge_sources(
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> KnowledgeSourceListResponse | JSONResponse:
     workspace_access = await require_workspace_permission(
         current_user,
@@ -102,7 +111,11 @@ async def list_knowledge_sources(
         is_guest=workspace_access.is_guest,
         workspace_role=workspace_access.role,
     )
-    query, params = _build_knowledge_sources_query(workspace_id, authorized_source_ids)
+    query, params = _build_knowledge_sources_query(
+        workspace_id,
+        authorized_source_ids,
+        settings,
+    )
 
     try:
         async with get_db_connection() as connection:
@@ -134,5 +147,6 @@ async def list_knowledge_sources(
                 }
             )
             for row in rows
-        ]
+        ],
+        sourceTable=knowledge_base_table_name(settings),
     )

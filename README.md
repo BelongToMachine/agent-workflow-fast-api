@@ -150,6 +150,32 @@ make migrate-knowledge-grants
 runner 在 staging/production 环境会拒绝执行；共享环境应通过正式部署迁移流程应用
 `migrations/0001_knowledge_base_grants.sql`。
 
+## 独立 KnowledgeBase 实体
+
+`migrations/0004_knowledge_bases.sql` 会把现有 `KnowledgeSource` 以原 ID 回填到独立的
+`KnowledgeBase` 表，并将 `KnowledgeBaseGrant`、`KnowledgeFile` 和 `KnowledgeChunk` 的
+外键切换到新表。旧表会保留，方便旧 Next.js 路径回滚；FastAPI 通过开关选择查询边界：
+
+```env
+KNOWLEDGE_BASE_ENTITY_ENABLED=1
+```
+
+先执行只读预检：
+
+```bash
+uv run python -m app.db.migrate_knowledge_bases
+```
+
+确认连接的是本地开发数据库、完成数据核对后，再显式应用：
+
+```bash
+make migrate-knowledge-bases
+```
+
+迁移应用前不要打开 `KNOWLEDGE_BASE_ENTITY_ENABLED`；开关关闭时 FastAPI 继续使用
+`KnowledgeSource` 兼容路径。runner 在 staging/production 环境会拒绝本地执行，正式环境
+应通过部署系统审查并应用 SQL。
+
 ## 知识库文件入库
 
 文件入库默认关闭。确认本地数据库已经应用 `migrations/0002_knowledge_ingestion.sql` 后，设置：
@@ -187,8 +213,8 @@ make migrate-knowledge-embeddings
 FastAPI 会让上传、后台解析读取和删除统一经过 S3-compatible storage；真实对象存储和数据库
 验证仍待部署环境验证。
 
-在开关关闭时，产品、内容和知识库列表保持原有 workspace 级行为，避免数据库迁移尚未
-执行时导致现有接口不可用。
+在知识库 grant 或独立实体开关关闭时，产品、内容和知识库列表保持原有 workspace 级行为，
+避免数据库迁移尚未执行时导致现有接口不可用。
 
 管理员 grant 管理接口同样受该开关保护，并要求 `members.manage` 权限。Next.js 的
 `/api/admin/knowledge-base-grants` BFF 只负责 NextAuth actor 校验和签名 bridge，实际
@@ -245,7 +271,7 @@ tests/
 1. ✅ 迁移商品查询及高级过滤，并与 Next.js 查询结果做对比。
 2. ✅ 迁移内容查询接口。
 3. 🚧 完成认证配置，并接入 Logto Token 验证。
-4. 🚧 基于现有 Workspace/WorkspaceMember 完成企业、成员、角色和知识库权限模型，再完成独立 KnowledgeBase 实体。
+4. 🚧 基于现有 Workspace/WorkspaceMember 完成企业、成员、角色和知识库权限模型；独立 KnowledgeBase 实体代码、回填 SQL 和 FastAPI feature flag 已完成，等待数据库迁移与真实数据验证。
 5. 🚧 增加文件上传、解析、切片、Embedding 和带权限过滤的向量检索；默认关闭，等待本地 migration 验证。
 6. ✅ 增加 S3-compatible 对象存储和带知识库检索工具的 AI Agent 接口。
 

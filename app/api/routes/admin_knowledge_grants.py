@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
+from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.core.workspace_access import WorkspaceAccess, require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -57,7 +58,7 @@ class UpsertKnowledgeBaseGrantRequest(BaseModel):
         return normalized
 
 
-GRANTS_SELECT = """
+GRANTS_SELECT_TEMPLATE = """
     SELECT
         grant_record."id" AS grant_id,
         grant_record."knowledgeBaseId" AS knowledge_base_id,
@@ -69,11 +70,45 @@ GRANTS_SELECT = """
         grant_record."createdAt" AS created_at,
         grant_record."updatedAt" AS updated_at
     FROM "KnowledgeBaseGrant" AS grant_record
-    INNER JOIN "KnowledgeSource" AS source
+    INNER JOIN {knowledge_base_table} AS source
         ON source."id" = grant_record."knowledgeBaseId"
     WHERE grant_record."workspaceId" = :workspace_id
 """
 
+GRANT_KNOWLEDGE_BASE_QUERY_TEMPLATE = """
+    SELECT "id" AS knowledge_base_id
+    FROM {knowledge_base_table}
+    WHERE "id" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+      AND "status" = 'ready'
+    LIMIT 1
+    """
+
+
+def grants_select_query(settings: Settings | None = None) -> object:
+    return text(render_knowledge_base_query(GRANTS_SELECT_TEMPLATE, settings))
+
+
+def grant_by_id_query(settings: Settings | None = None) -> object:
+    return text(
+        render_knowledge_base_query(
+            GRANTS_SELECT_TEMPLATE
+            + """
+      AND grant_record."id" = :grant_id
+    LIMIT 1
+    """,
+            settings,
+        )
+    )
+
+
+def grant_knowledge_base_query(settings: Settings | None = None) -> object:
+    return text(render_knowledge_base_query(GRANT_KNOWLEDGE_BASE_QUERY_TEMPLATE, settings))
+
+
+# Keep import-time constants for compatibility with existing unit tests and
+# callers that inspect the transitional SQL directly.
+GRANTS_SELECT = render_knowledge_base_query(GRANTS_SELECT_TEMPLATE)
 GRANT_BY_ID_QUERY = text(
     GRANTS_SELECT
     + """
@@ -82,16 +117,7 @@ GRANT_BY_ID_QUERY = text(
     """
 )
 
-GRANT_KNOWLEDGE_BASE_QUERY = text(
-    """
-    SELECT "id" AS knowledge_base_id
-    FROM "KnowledgeSource"
-    WHERE "id" = :knowledge_base_id
-      AND "workspaceId" = :workspace_id
-      AND "status" = 'ready'
-    LIMIT 1
-    """
-)
+GRANT_KNOWLEDGE_BASE_QUERY = grant_knowledge_base_query()
 
 UPSERT_GRANT_QUERY = text(
     """
@@ -199,9 +225,10 @@ async def _load_grant(
     connection: object,
     workspace_id: UUID,
     grant_id: UUID,
+    settings: Settings | None = None,
 ) -> KnowledgeBaseGrantView | None:
     result = await connection.execute(
-        GRANT_BY_ID_QUERY,
+        grant_by_id_query(settings),
         {"grant_id": grant_id, "workspace_id": workspace_id},
     )
     row = result.mappings().first()
@@ -254,7 +281,7 @@ async def list_knowledge_base_grants(
     if not settings.knowledge_grants_enabled:
         return _grants_disabled()
 
-    query = GRANTS_SELECT
+    query = render_knowledge_base_query(GRANTS_SELECT_TEMPLATE, settings)
     params: dict[str, object] = {"workspace_id": workspace_id}
     if knowledge_base_id is not None:
         query += '      AND grant_record."knowledgeBaseId" = :knowledge_base_id\n'
@@ -301,7 +328,7 @@ async def upsert_knowledge_base_grant(
         async with get_db_connection() as connection:
             async with connection.begin():
                 knowledge_base_result = await connection.execute(
-                    GRANT_KNOWLEDGE_BASE_QUERY,
+                    grant_knowledge_base_query(settings),
                     {
                         "knowledge_base_id": body.knowledge_base_id,
                         "workspace_id": workspace_id,
@@ -324,7 +351,7 @@ async def upsert_knowledge_base_grant(
                     },
                 )
                 grant_id = result.scalar_one()
-                grant = await _load_grant(connection, workspace_id, grant_id)
+                grant = await _load_grant(connection, workspace_id, grant_id, settings)
                 await _write_audit_log(
                     connection,
                     action="workspace.knowledge_base_grant_updated",
