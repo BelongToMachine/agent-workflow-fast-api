@@ -319,6 +319,19 @@ make test
 make lint
 ```
 
+PostgreSQL/Redis 集成测试不会读取普通的 `POSTGRES_URL` 或 `REDIS_URL`，必须显式提供
+测试地址，避免误连共享数据库：
+
+```bash
+FASTAPI_TEST_POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode \
+FASTAPI_TEST_REDIS_URL=redis://127.0.0.1:6379/0 \
+make test-integration
+```
+
+该命令只读检查四个知识库 migration 是否完整，并对 Redis 执行带过期时间的临时 key
+往返测试。未提供 `FASTAPI_TEST_*` 时，集成测试会明确跳过；远程地址默认拒绝，只有设置
+`FASTAPI_ALLOW_REMOTE_INTEGRATION=1` 后才允许执行。
+
 ## 当前目录结构
 
 ```text

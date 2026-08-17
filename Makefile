@@ -1,4 +1,4 @@
-.PHONY: setup dev test lint infra-up infra-down infra-status infra-logs migration-status migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings
+.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= compose.yaml
@@ -23,6 +23,9 @@ infra-logs:
 
 test:
 	uv run pytest
+
+test-integration:
+	uv run pytest -m integration
 
 lint:
 	uv run ruff check .

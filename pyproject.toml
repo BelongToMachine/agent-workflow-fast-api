@@ -28,6 +28,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: requires explicitly configured local PostgreSQL and/or Redis services",
+]
 
 [tool.ruff]
 line-length = 100
