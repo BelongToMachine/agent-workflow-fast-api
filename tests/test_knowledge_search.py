@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes.knowledge_bases import KnowledgeBaseListResponse
+from app.api.routes.knowledge_files import KnowledgeFileListResponse
 from app.api.routes.knowledge_search import SEARCH_QUERY, KnowledgeSearchRequest
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
@@ -12,6 +13,7 @@ from app.main import app
 from app.services.agent_tools import (
     AgentToolError,
     KnowledgeBaseToolInput,
+    KnowledgeFileListToolInput,
     agent_tool_definitions,
     execute_agent_tool,
 )
@@ -30,6 +32,7 @@ def test_agent_tools_expose_only_read_only_enterprise_search_tools() -> None:
         "searchProductsTool",
         "searchContentTool",
         "listKnowledgeBasesTool",
+        "listKnowledgeFilesTool",
         "searchKnowledgeBaseTool",
     ]
     assert all(item["function"]["parameters"]["type"] == "object" for item in definitions)
@@ -45,6 +48,7 @@ def test_disabled_knowledge_embeddings_do_not_expose_knowledge_base_tool() -> No
         "searchProductsTool",
         "searchContentTool",
         "listKnowledgeBasesTool",
+        "listKnowledgeFilesTool",
     ]
 
 
@@ -76,6 +80,13 @@ def test_knowledge_base_tool_requires_a_valid_knowledge_base_id() -> None:
     with pytest.raises(ValueError):
         KnowledgeBaseToolInput.model_validate(
             {"knowledgeBaseId": "not-a-uuid", "query": "pricing"}
+        )
+
+
+def test_knowledge_file_list_tool_requires_a_valid_knowledge_base_id() -> None:
+    with pytest.raises(ValueError):
+        KnowledgeFileListToolInput.model_validate(
+            {"knowledgeBaseId": "not-a-uuid"}
         )
 
 
@@ -137,6 +148,35 @@ def test_list_knowledge_bases_tool_calls_permission_checked_discovery(monkeypatc
     assert result == {"knowledgeBases": []}
     assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
     assert captured["current_user"].is_development is True
+
+
+def test_list_knowledge_files_tool_calls_permission_checked_listing(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_list_knowledge_files(**kwargs):
+        captured.update(kwargs)
+        return KnowledgeFileListResponse(files=[])
+
+    monkeypatch.setattr(
+        "app.services.agent_tools.list_knowledge_files",
+        fake_list_knowledge_files,
+    )
+
+    result = asyncio.run(
+        execute_agent_tool(
+            "listKnowledgeFilesTool",
+            {"knowledgeBaseId": "00000000-0000-0000-0000-000000000002"},
+            current_user=AuthenticatedUser(user_id="development-user", is_development=True),
+            workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+            can_query_knowledge=True,
+        )
+    )
+
+    assert result == {"files": []}
+    assert captured["knowledge_base_id"] == UUID(
+        "00000000-0000-0000-0000-000000000002"
+    )
+    assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
 
 
 def test_knowledge_base_tool_cannot_bypass_chat_knowledge_permission() -> None:

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.routes.content import search_content
 from app.api.routes.knowledge_bases import list_knowledge_bases
+from app.api.routes.knowledge_files import list_knowledge_files
 from app.api.routes.knowledge_search import (
     KnowledgeSearchRequest,
     search_knowledge_base,
@@ -75,6 +76,12 @@ class KnowledgeBaseToolInput(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
 
 
+class KnowledgeFileListToolInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    knowledge_base_id: UUID = Field(alias="knowledgeBaseId")
+
+
 class ListKnowledgeBasesToolInput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -119,6 +126,19 @@ def agent_tool_definitions(
                         "Use the returned knowledgeBaseId with searchKnowledgeBaseTool."
                     ),
                     "parameters": ListKnowledgeBasesToolInput.model_json_schema(),
+                },
+            },
+        )
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "listKnowledgeFilesTool",
+                    "description": (
+                        "List files and processing status in one authorized knowledge base. "
+                        "Only use a knowledgeBaseId returned by listKnowledgeBasesTool."
+                    ),
+                    "parameters": KnowledgeFileListToolInput.model_json_schema(),
                 },
             },
         )
@@ -221,6 +241,16 @@ async def execute_agent_tool(
         if name == "listKnowledgeBasesTool":
             ListKnowledgeBasesToolInput.model_validate(arguments)
             response = await list_knowledge_bases(
+                workspace_id=workspace_id,
+                current_user=current_user,
+                settings=get_settings(),
+            )
+            return _response_payload(response)
+
+        if name == "listKnowledgeFilesTool":
+            payload = KnowledgeFileListToolInput.model_validate(arguments)
+            response = await list_knowledge_files(
+                knowledge_base_id=payload.knowledge_base_id,
                 workspace_id=workspace_id,
                 current_user=current_user,
                 settings=get_settings(),
