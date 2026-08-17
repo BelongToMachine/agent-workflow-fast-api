@@ -90,6 +90,7 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 - 聊天接口：`POST http://127.0.0.1:8000/api/v1/chat`
 - Chat Stream 恢复：`GET http://127.0.0.1:8000/api/v1/chat/{chat_id}/stream?workspace_id={workspace_id}`
 - 独立 Agent 查询：`POST http://127.0.0.1:8000/api/v1/agents/query?workspace_id={workspace_id}`
+- 独立 Agent workflow：`POST http://127.0.0.1:8000/api/v1/agents/run?workspace_id={workspace_id}`
 - 知识库迁移状态：`make migration-status`
 - 知识库文件列表：`GET http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件上传：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
@@ -145,7 +146,9 @@ workspace 和 chat 归属；没有配置 Redis 时会退化为普通 SSE，不�
 
 独立 Agent 查询接口只接受预定义的只读工具名和工具参数，不接受调用方提交的 user、role、
 permission 或 workspace 身份字段。FastAPI 会从 Bearer Token/NextAuth bridge 取得身份，
-先检查 workspace 的 `knowledge.read` 权限，再执行产品、内容或指定知识库搜索。
+先检查 workspace 的 `knowledge.read` 权限，再执行产品、内容或指定知识库搜索。独立 Agent
+workflow 使用同一组工具执行有限轮次的模型调用和工具调用，但不会创建 Chat/Message，适合
+知识库问答或后台任务入口；调用方只能提交 prompt 和最多 5 轮的 `maxSteps`。
 
 当当前用户具备 `knowledge.read` 时，FastAPI 会向模型注册只读的
 `searchProductsTool`、`searchContentTool`、`listKnowledgeBasesTool`、`listKnowledgeFilesTool`、

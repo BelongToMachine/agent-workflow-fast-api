@@ -16,6 +16,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/admin/knowledge-base-grants",
     "/api/v1/admin/knowledge-base-grants/{grant_id}",
     "/api/v1/agents/query",
+    "/api/v1/agents/run",
     "/api/v1/files/upload",
     "/api/v1/files/attachments/{token}",
     "/api/v1/chat",
@@ -52,6 +53,11 @@ def test_openapi_declares_bearer_security_for_business_paths() -> None:
 def test_openapi_includes_contract_request_models() -> None:
     schemas = app.openapi()["components"]["schemas"]
 
-    assert {"AgentQueryRequest", "ChatRequest", "KnowledgeBaseWriteRequest"} <= set(
+    assert {
+        "AgentQueryRequest",
+        "AgentRunRequest",
+        "ChatRequest",
+        "KnowledgeBaseWriteRequest",
+    } <= set(
         schemas
     )
