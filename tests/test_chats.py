@@ -19,6 +19,7 @@ from app.api.routes.chat import (
     _prepare_chat_persistence,
     _resolve_workspace_id,
     chat,
+    resume_chat_stream,
     stream_chat,
     to_openai_messages,
 )
@@ -99,6 +100,29 @@ def chat_connection_context(connection: FakeChatConnection):
     return context
 
 
+class FakeResumeStore:
+    def __init__(self, stream_id: str | None = "stream-1") -> None:
+        self.stream_id = stream_id
+        self.active_calls: list[str] = []
+        self.resume_calls: list[tuple[str, str]] = []
+
+    async def active_stream_id(self, chat_id: str) -> str | None:
+        self.active_calls.append(chat_id)
+        return self.stream_id
+
+    def resume(self, chat_id: str, stream_id: str):
+        self.resume_calls.append((chat_id, stream_id))
+
+        async def source():
+            yield "data: resumed\n\n"
+
+        return source()
+
+
+async def collect_stream(stream) -> list[str]:
+    return [chunk async for chunk in stream]
+
+
 @pytest.fixture
 def auth_required_settings():
     settings = Settings(environment="development", auth_required=True)
@@ -174,6 +198,160 @@ def test_history_rejects_two_cursors_before_database_access() -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_resume_stream_checks_workspace_and_owner_before_replay(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    chat_id = UUID("00000000-0000-0000-0000-000000000010")
+    user_id = UUID("00000000-0000-0000-0000-000000000011")
+    connection = FakeChatConnection(
+        workspace_chat={
+            "id": chat_id,
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+        }
+    )
+    store = FakeResumeStore()
+    captured_permission: dict[str, object] = {}
+
+    async def fake_require_workspace_permission(
+        current_user,
+        requested_workspace_id,
+        requested_permission,
+    ):
+        captured_permission.update(
+            {
+                "user_id": current_user.user_id,
+                "workspace_id": requested_workspace_id,
+                "permission": requested_permission,
+            }
+        )
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.require_workspace_permission",
+        fake_require_workspace_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        chat_connection_context(connection),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_resumable_stream_store",
+        lambda *_args: store,
+    )
+
+    response = asyncio.run(
+        resume_chat_stream(
+            chat_id=chat_id,
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(user_id=str(user_id), role="employee"),
+            settings=Settings(redis_url="redis://127.0.0.1:6379/0"),
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.media_type == "text/event-stream"
+    assert asyncio.run(collect_stream(response.body_iterator)) == [
+        "data: resumed\n\n"
+    ]
+    assert captured_permission == {
+        "user_id": str(user_id),
+        "workspace_id": workspace_id,
+        "permission": "chat.read",
+    }
+    assert store.active_calls == [str(chat_id)]
+    assert store.resume_calls == [(str(chat_id), "stream-1")]
+    assert connection.calls[0][1] == {
+        "chat_id": chat_id,
+        "workspace_id": workspace_id,
+    }
+
+
+def test_resume_stream_rejects_chat_owned_by_another_user(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    chat_id = UUID("00000000-0000-0000-0000-000000000010")
+    connection = FakeChatConnection(
+        workspace_chat={
+            "id": chat_id,
+            "user_id": UUID("00000000-0000-0000-0000-000000000099"),
+            "workspace_id": workspace_id,
+        }
+    )
+    store = FakeResumeStore()
+
+    async def fake_require_workspace_permission(*_args, **_kwargs):
+        return SimpleNamespace(permissions=["chat.read"])
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.require_workspace_permission",
+        fake_require_workspace_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        chat_connection_context(connection),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_resumable_stream_store",
+        lambda *_args: store,
+    )
+
+    with pytest.raises(Exception) as error:
+        asyncio.run(
+            resume_chat_stream(
+                chat_id=chat_id,
+                workspace_id=workspace_id,
+                current_user=AuthenticatedUser(
+                    user_id="00000000-0000-0000-0000-000000000011",
+                    role="employee",
+                ),
+                settings=Settings(redis_url="redis://127.0.0.1:6379/0"),
+            )
+        )
+
+    assert getattr(error.value, "status_code", None) == 403
+    assert "does not belong" in str(error.value.detail)
+    assert store.active_calls == []
+    assert store.resume_calls == []
+
+
+def test_resume_stream_returns_no_content_for_another_workspace(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    chat_id = UUID("00000000-0000-0000-0000-000000000010")
+    connection = FakeChatConnection()
+    store = FakeResumeStore()
+
+    async def fake_require_workspace_permission(*_args, **_kwargs):
+        return SimpleNamespace(permissions=["chat.read"])
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.require_workspace_permission",
+        fake_require_workspace_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        chat_connection_context(connection),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_resumable_stream_store",
+        lambda *_args: store,
+    )
+
+    response = asyncio.run(
+        resume_chat_stream(
+            chat_id=chat_id,
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(
+                user_id="00000000-0000-0000-0000-000000000011",
+                role="employee",
+            ),
+            settings=Settings(redis_url="redis://127.0.0.1:6379/0"),
+        )
+    )
+
+    assert response.status_code == 204
+    assert store.active_calls == []
+    assert store.resume_calls == []
+    assert connection.calls[0][1]["workspace_id"] == workspace_id
 
 
 def test_chat_request_keeps_tool_parts_for_model_and_persistence() -> None:
