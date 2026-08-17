@@ -2,12 +2,13 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.auth import AuthenticatedUser, get_current_user
 from app.db.session import get_db_connection
 
 router = APIRouter(tags=["content"])
@@ -249,6 +250,7 @@ def _iso_timestamp(value: object) -> str | None:
 @router.post("/content/search", response_model=ContentSearchResponse)
 async def search_content(
     payload: ContentSearchRequest,
+    _current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> ContentSearchResponse | JSONResponse:
     normalized_source_file_names = _normalized_values(payload.source_file_names)
 

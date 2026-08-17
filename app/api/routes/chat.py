@@ -3,10 +3,11 @@ from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import get_settings
 
 router = APIRouter(tags=["chat"])
@@ -135,7 +136,11 @@ async def stream_chat(
 
 
 @router.post("/chat", response_model=None)
-async def chat(payload: ChatRequest, request: Request) -> StreamingResponse | JSONResponse:
+async def chat(
+    payload: ChatRequest,
+    request: Request,
+    _current_user: AuthenticatedUser = Depends(get_current_user),
+) -> StreamingResponse | JSONResponse:
     request_id = request.headers.get("x-request-id", str(uuid4()))
     settings = get_settings()
     messages = to_openai_messages(payload)
@@ -144,9 +149,7 @@ async def chat(payload: ChatRequest, request: Request) -> StreamingResponse | JS
         return error_response("A text message is required.", request_id, 400)
 
     if not settings.deepseek_api_key:
-        return error_response(
-            "DEEPSEEK_API_KEY is not configured for FastAPI.", request_id, 503
-        )
+        return error_response("DEEPSEEK_API_KEY is not configured for FastAPI.", request_id, 503)
 
     return StreamingResponse(
         stream_chat(

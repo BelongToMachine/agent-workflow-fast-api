@@ -2,12 +2,13 @@ import re
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.auth import AuthenticatedUser, get_current_user
 from app.db.session import get_db_connection
 
 router = APIRouter(tags=["products"])
@@ -242,6 +243,7 @@ def _format_price(price: dict[str, object]) -> str:
 
 @router.get("/products", response_model=ProductSearchResponse)
 async def search_products(
+    _current_user: AuthenticatedUser = Depends(get_current_user),
     workspace_id: UUID = Query(..., alias="workspace_id"),
     query: str | None = Query(default=None, max_length=200),
     category: str | None = Query(default=None, max_length=100),

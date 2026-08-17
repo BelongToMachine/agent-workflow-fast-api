@@ -31,6 +31,7 @@ make dev
 - API 根路径：http://127.0.0.1:8000/
 - 健康检查：http://127.0.0.1:8000/api/v1/healthz
 - 商品查询：`GET http://127.0.0.1:8000/api/v1/products?workspace_id={workspace_id}`
+- 内容查询：`POST http://127.0.0.1:8000/api/v1/content/search`
 - 聊天接口：`POST http://127.0.0.1:8000/api/v1/chat`
 - Swagger：http://127.0.0.1:8000/docs
 
@@ -48,7 +49,22 @@ FASTAPI_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_FASTAPI_BASE_URL=http://127.0.0.1:8000
 ```
 
-聊天请求会由浏览器直接发送到 FastAPI `8000` 端口，FastAPI 负责模型调用和 SSE 返回。当前本地聊天接口还未接入正式 Token 验证，因此只适合开发环境；生产环境接入 Logto 后再开放跨域访问。
+聊天请求会由浏览器直接发送到 FastAPI `8000` 端口，FastAPI 负责模型调用和 SSE 返回。本地默认使用开发身份，生产环境需要配置 OIDC/Logto Token 后再开放跨域访问。
+
+## 当前认证行为
+
+商品、内容和聊天接口都经过统一的 Bearer Token 依赖：
+
+- `development` 环境且 `AUTH_REQUIRED=false` 时，未携带 Token 会使用明确标记的 `development-user`，方便本地开发。
+- `staging` 和 `production` 环境默认要求 Token；即使没有显式设置 `AUTH_REQUIRED` 也不会允许匿名访问。
+- 配置 `AUTH_ISSUER`、`AUTH_AUDIENCE` 和 `AUTH_JWKS_URL` 后，FastAPI 会校验 JWT 签名、`kid`、issuer、audience、过期时间和 `sub`。
+- 当前 NextAuth 的服务端 cookie 不是 OIDC access token，不能直接交给 FastAPI 当作普通 JWT 解码。过渡阶段应由 Next.js BFF 或 Logto 登录流程提供 Bearer access token。
+
+本地可以使用以下配置测试未登录请求是否被拒绝：
+
+```env
+AUTH_REQUIRED=true
+```
 
 ## 测试和代码检查
 
@@ -64,23 +80,28 @@ app/
 ├── api/
 │   ├── routes/
 │   │   ├── chat.py
-│   │   └── health.py
+│   │   ├── content.py
+│   │   ├── health.py
+│   │   └── products.py
+│   ├── core/
+│   │   ├── auth.py
+│   │   └── config.py
 │   └── router.py
-├── core/
-│   └── config.py
 └── main.py
 tests/
+├── test_auth.py
+├── test_content.py
 └── test_health.py
 ```
 
 ## 后续建设顺序
 
-1. 补齐商品高级过滤，并与 Next.js 查询结果做对比。
-2. 迁移内容查询接口。
-3. 接入 Logto Token 验证。
+1. ✅ 迁移商品查询及高级过滤，并与 Next.js 查询结果做对比。
+2. ✅ 迁移内容查询接口。
+3. 🚧 完成认证配置，并接入 Logto Token 验证。
 4. 增加企业、成员、角色和知识库权限模型。
 5. 增加文件上传、解析、向量检索和 AI Agent 接口。
 
-商品查询当前已完成基础只读版本，支持 `workspace_id`、`query`、`category` 和 `limit`；价格、运营状态、知识源文件等高级过滤将在后续对照 Next.js 查询逻辑继续迁移。
+商品和内容查询当前已经迁移到 FastAPI，并完成了与 Next.js 查询结果的真实数据对比。
 
-当前聊天接口还未迁移消息持久化、工具调用和 FastAPI 侧的用户权限验证；这些能力会在后续迁移阶段补齐。当前多轮上下文由 Web 前端暂时随请求传给 FastAPI，因此刷新页面后仍依赖现有 Next.js 消息接口。
+当前聊天接口还未迁移消息持久化和工具调用；统一用户身份验证已经接入，但 workspace/role/knowledge-base 授权会在后续权限模型阶段补齐。当前多轮上下文由 Web 前端暂时随请求传给 FastAPI，因此刷新页面后仍依赖现有 Next.js 消息接口。

@@ -19,15 +19,11 @@ class Settings(BaseSettings):
     )
     deepseek_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "DEEPSEEK_API_KEY", "ASIANODE_DEEPSEEK_API_KEY"
-        ),
+        validation_alias=AliasChoices("DEEPSEEK_API_KEY", "ASIANODE_DEEPSEEK_API_KEY"),
     )
     deepseek_base_url: str = Field(
         default="https://api.deepseek.com/v1",
-        validation_alias=AliasChoices(
-            "DEEPSEEK_BASE_URL", "ASIANODE_DEEPSEEK_BASE_URL"
-        ),
+        validation_alias=AliasChoices("DEEPSEEK_BASE_URL", "ASIANODE_DEEPSEEK_BASE_URL"),
     )
     chat_model: str = Field(
         default="deepseek-chat",
@@ -40,6 +36,38 @@ class Settings(BaseSettings):
     cors_origins: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
         validation_alias=AliasChoices("CORS_ORIGINS", "ASIANODE_CORS_ORIGINS"),
+    )
+    auth_required: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AUTH_REQUIRED", "ASIANODE_AUTH_REQUIRED"),
+    )
+    auth_issuer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AUTH_ISSUER",
+            "ASIANODE_AUTH_ISSUER",
+            "LOGTO_ISSUER",
+        ),
+    )
+    auth_audience: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AUTH_AUDIENCE",
+            "ASIANODE_AUTH_AUDIENCE",
+            "LOGTO_AUDIENCE",
+        ),
+    )
+    auth_jwks_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AUTH_JWKS_URL",
+            "ASIANODE_AUTH_JWKS_URL",
+            "LOGTO_JWKS_URL",
+        ),
+    )
+    auth_algorithms: str = Field(
+        default="RS256",
+        validation_alias=AliasChoices("AUTH_ALGORITHMS", "ASIANODE_AUTH_ALGORITHMS"),
     )
 
     model_config = SettingsConfigDict(
