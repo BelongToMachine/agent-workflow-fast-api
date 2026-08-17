@@ -148,10 +148,10 @@ permission 或 workspace 身份字段。FastAPI 会从 Bearer Token/NextAuth bri
 先检查 workspace 的 `knowledge.read` 权限，再执行产品、内容或指定知识库搜索。
 
 当当前用户具备 `knowledge.read` 时，FastAPI 会向模型注册只读的
-`searchProductsTool`、`searchContentTool`、`listKnowledgeBasesTool` 和
-`listKnowledgeFilesTool`；知识库向量检索开关开启时再注册
+`searchProductsTool`、`searchContentTool`、`listKnowledgeBasesTool`、`listKnowledgeFilesTool`、
+`getKnowledgeBaseTool` 和 `getKnowledgeFileTool`；知识库向量检索开关开启时再注册
 `searchKnowledgeBaseTool`。模型应先通过 `listKnowledgeBasesTool` 发现当前用户可以读取的
-知识库，再使用返回的 ID 查看文件状态或检索内容。模型产生 tool call 后由 FastAPI 服务端
+知识库，再使用返回的 ID 查看单个知识库、文件状态或检索内容。模型产生 tool call 后由 FastAPI 服务端
 执行，工具内部继续复用 workspace 和知识库授权过滤；客户端不能直接伪造工具结果。
 
 ## 安全防护

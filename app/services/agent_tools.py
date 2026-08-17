@@ -82,6 +82,19 @@ class KnowledgeFileListToolInput(BaseModel):
     knowledge_base_id: UUID = Field(alias="knowledgeBaseId")
 
 
+class KnowledgeBaseLookupToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    knowledge_base_id: UUID = Field(alias="knowledgeBaseId")
+
+
+class KnowledgeFileLookupToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    file_id: UUID = Field(alias="fileId")
+    knowledge_base_id: UUID = Field(alias="knowledgeBaseId")
+
+
 class ListKnowledgeBasesToolInput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -142,6 +155,32 @@ def agent_tool_definitions(
                 },
             },
         )
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "getKnowledgeBaseTool",
+                    "description": (
+                        "Get one knowledge base the current user can read. "
+                        "Only use a knowledgeBaseId returned by listKnowledgeBasesTool."
+                    ),
+                    "parameters": KnowledgeBaseLookupToolInput.model_json_schema(),
+                },
+            },
+        )
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "getKnowledgeFileTool",
+                    "description": (
+                        "Get one authorized knowledge file and its processing status. "
+                        "Only use a fileId and knowledgeBaseId returned by the knowledge file list."
+                    ),
+                    "parameters": KnowledgeFileLookupToolInput.model_json_schema(),
+                },
+            },
+        )
         if include_knowledge_base_search is None:
             include_knowledge_base_search = True
     if include_knowledge_base and include_knowledge_base_search:
@@ -174,13 +213,19 @@ def _response_payload(response: object) -> dict[str, Any]:
                 "Enterprise search is currently unavailable.",
                 status_code=response.status_code,
             )
-        message = (
-            payload.get("cause")
-            or payload.get("message")
-            or payload.get("detail")
-            or "Enterprise search failed."
-        )
-        raise AgentToolError(str(message), status_code=response.status_code)
+        if response.status_code >= 400:
+            message = (
+                payload.get("cause")
+                or payload.get("message")
+                or payload.get("detail")
+                or "Enterprise search failed."
+            )
+            raise AgentToolError(str(message), status_code=response.status_code)
+        if not isinstance(payload, dict):
+            raise AgentToolError(
+                "The enterprise search service returned an unsupported response."
+            )
+        return payload
     if isinstance(response, BaseModel):
         return response.model_dump(by_alias=True)
     raise AgentToolError("The enterprise search service returned an unsupported response.")
@@ -237,6 +282,55 @@ async def execute_agent_tool(
                 settings=get_settings(),
             )
             return _response_payload(response)
+
+        if name == "getKnowledgeBaseTool":
+            payload = KnowledgeBaseLookupToolInput.model_validate(arguments)
+            response = await list_knowledge_bases(
+                workspace_id=workspace_id,
+                current_user=current_user,
+                settings=get_settings(),
+            )
+            result = _response_payload(response)
+            knowledge_bases = result.get("knowledgeBases", [])
+            selected = next(
+                (
+                    item
+                    for item in knowledge_bases
+                    if item.get("knowledgeBaseId") == str(payload.knowledge_base_id)
+                ),
+                None,
+            )
+            if selected is None:
+                raise AgentToolError(
+                    "The user cannot access this knowledge base.",
+                    status_code=404,
+                )
+            return {"knowledgeBase": selected}
+
+        if name == "getKnowledgeFileTool":
+            payload = KnowledgeFileLookupToolInput.model_validate(arguments)
+            response = await list_knowledge_files(
+                knowledge_base_id=payload.knowledge_base_id,
+                workspace_id=workspace_id,
+                current_user=current_user,
+                settings=get_settings(),
+            )
+            result = _response_payload(response)
+            files = result.get("files", [])
+            selected = next(
+                (
+                    item
+                    for item in files
+                    if item.get("fileId") == str(payload.file_id)
+                ),
+                None,
+            )
+            if selected is None:
+                raise AgentToolError(
+                    "The user cannot access this knowledge file.",
+                    status_code=404,
+                )
+            return {"file": selected}
 
         if name == "listKnowledgeBasesTool":
             ListKnowledgeBasesToolInput.model_validate(arguments)

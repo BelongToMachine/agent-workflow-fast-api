@@ -12,6 +12,8 @@ from app.services.agent_tools import AgentToolError, execute_agent_tool
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 AgentToolName = Literal[
+    "getKnowledgeBaseTool",
+    "getKnowledgeFileTool",
     "listKnowledgeFilesTool",
     "listKnowledgeBasesTool",
     "searchProductsTool",
