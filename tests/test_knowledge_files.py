@@ -7,6 +7,7 @@ from openpyxl import Workbook
 from pydantic import ValidationError
 
 from app.api.routes.knowledge_files import (
+    FILE_INSERT_QUERY,
     FILE_LIST_QUERY,
     KnowledgeFileSummary,
     _chunk_text,
@@ -89,6 +90,7 @@ def test_ingestion_migration_is_idempotent_and_contains_chunk_table() -> None:
     assert 'CREATE TABLE IF NOT EXISTS "KnowledgeFile"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "KnowledgeChunk"' in sql
     assert '"workspaceId" = :workspace_id' in str(FILE_LIST_QUERY)
+    assert ":storage_provider" in str(FILE_INSERT_QUERY)
 
 
 def test_upload_is_gated_until_ingestion_migration_is_applied(

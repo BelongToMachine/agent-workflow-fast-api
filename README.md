@@ -157,6 +157,7 @@ runner 在 staging/production 环境会拒绝执行；共享环境应通过正�
 ```env
 KNOWLEDGE_INGESTION_ENABLED=1
 KNOWLEDGE_STORAGE_DIR=storage/knowledge
+KNOWLEDGE_STORAGE_PROVIDER=local
 KNOWLEDGE_MAX_FILE_BYTES=26214400
 KNOWLEDGE_EMBEDDINGS_ENABLED=1
 EMBEDDING_API_KEY=your-embedding-provider-key
@@ -181,7 +182,10 @@ make migrate-knowledge-embeddings
 文件元数据并返回 `pending`，再由 FastAPI background task 解析、按固定窗口切片并更新为
 `ready` 或 `failed`。打开 Embedding 开关后，切片会调用 OpenAI-compatible `/embeddings`
 接口并写入 pgvector；搜索接口会先验证 workspace/知识库权限，再执行 cosine search。
-当前存储是本地磁盘，对象存储和真实数据库验证仍待接入。
+默认使用本地磁盘。生产环境可以设置 `KNOWLEDGE_STORAGE_PROVIDER=s3`，并提供
+`KNOWLEDGE_S3_BUCKET`、可选的 `KNOWLEDGE_S3_ENDPOINT_URL`、region 和 credentials，
+FastAPI 会让上传、后台解析读取和删除统一经过 S3-compatible storage；真实对象存储和数据库
+验证仍待部署环境验证。
 
 在开关关闭时，产品、内容和知识库列表保持原有 workspace 级行为，避免数据库迁移尚未
 执行时导致现有接口不可用。
@@ -243,7 +247,7 @@ tests/
 3. 🚧 完成认证配置，并接入 Logto Token 验证。
 4. 🚧 基于现有 Workspace/WorkspaceMember 完成企业、成员、角色和知识库权限模型，再完成独立 KnowledgeBase 实体。
 5. 🚧 增加文件上传、解析、切片、Embedding 和带权限过滤的向量检索；默认关闭，等待本地 migration 验证。
-6. 增加对象存储和带知识库检索工具的 AI Agent 接口。
+6. ✅ 增加 S3-compatible 对象存储和带知识库检索工具的 AI Agent 接口。
 
 商品和内容查询当前已经迁移到 FastAPI，并完成了与 Next.js 查询结果的真实数据对比。
 

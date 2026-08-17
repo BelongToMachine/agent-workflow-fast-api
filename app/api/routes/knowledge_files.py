@@ -29,6 +29,13 @@ from app.core.config import Settings, get_settings
 from app.core.knowledge_access import require_knowledge_base_permission
 from app.db.session import get_db_connection
 from app.services.embeddings import embed_texts, vector_literal
+from app.services.storage import (
+    LocalKnowledgeStorage,
+    StorageConfigurationError,
+    StorageError,
+    get_knowledge_storage,
+    get_knowledge_storage_for_provider,
+)
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge"])
 
@@ -126,7 +133,7 @@ FILE_INSERT_QUERY = text(
     VALUES
         (
             :byte_size, :file_hash, :file_id, :knowledge_base_id, :mime_type,
-            :original_name, :storage_key, 'local', :uploaded_by, :workspace_id
+            :original_name, :storage_key, :storage_provider, :uploaded_by, :workspace_id
         )
     ON CONFLICT ("knowledgeBaseId", "fileHash") DO NOTHING
     RETURNING "id"
@@ -187,7 +194,7 @@ FILE_DELETE_QUERY = text(
     WHERE "id" = :file_id
       AND "knowledgeBaseId" = :knowledge_base_id
       AND "workspaceId" = :workspace_id
-    RETURNING "storageKey"
+    RETURNING "storageKey", "storageProvider"
     """
 )
 
@@ -245,11 +252,23 @@ def _extension(filename: str) -> str:
 
 
 def _storage_path(settings: Settings, storage_key: str) -> Path:
-    root = Path(settings.knowledge_storage_dir).resolve()
-    path = (root / storage_key).resolve()
-    if root != path and root not in path.parents:
-        raise HTTPException(status_code=400, detail="Invalid knowledge file storage key.")
-    return path
+    storage = get_knowledge_storage(settings)
+    if not isinstance(storage, LocalKnowledgeStorage):
+        raise HTTPException(
+            status_code=400,
+            detail="Storage paths are only available for local knowledge storage.",
+        )
+    try:
+        return storage.path_for(storage_key)
+    except StorageError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+async def _best_effort_delete(settings: Settings, storage_key: str) -> None:
+    try:
+        await get_knowledge_storage(settings).delete(storage_key)
+    except (StorageConfigurationError, StorageError):
+        return
 
 
 def _extract_text(filename: str, content: bytes) -> str:
@@ -324,8 +343,11 @@ async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
                     },
                 )
 
-        storage_path = _storage_path(settings, str(row["storage_key"]))
-        content = await asyncio.to_thread(storage_path.read_bytes)
+        storage = get_knowledge_storage_for_provider(
+            settings,
+            str(row["storage_provider"]),
+        )
+        content = await storage.read(str(row["storage_key"]))
         extracted_text = await asyncio.to_thread(
             _extract_text,
             str(row["original_name"]),
@@ -478,9 +500,19 @@ async def upload_knowledge_file(
     storage_key = (
         f"{workspace_id}/{knowledge_base_id}/{file_id}-{original_name}"
     )
-    storage_path = _storage_path(settings, storage_key)
-    await asyncio.to_thread(storage_path.parent.mkdir, parents=True, exist_ok=True)
-    await asyncio.to_thread(storage_path.write_bytes, content)
+    try:
+        storage = get_knowledge_storage(settings)
+        await storage.put(storage_key, content)
+    except StorageConfigurationError as error:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"code": "storage:misconfigured", "cause": str(error)},
+        )
+    except StorageError as error:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"code": "storage:unavailable", "cause": str(error)},
+        )
 
     file_hash = hashlib.sha256(content).hexdigest()
     try:
@@ -496,6 +528,7 @@ async def upload_knowledge_file(
                         "mime_type": SUPPORTED_EXTENSIONS[extension],
                         "original_name": original_name,
                         "storage_key": storage_key,
+                        "storage_provider": storage.provider,
                         "uploaded_by": uploaded_by,
                         "workspace_id": workspace_id,
                     },
@@ -516,13 +549,13 @@ async def upload_knowledge_file(
                 )
                 row = file_result.mappings().one()
     except HTTPException:
-        await asyncio.to_thread(storage_path.unlink, missing_ok=True)
+        await _best_effort_delete(settings, storage_key)
         raise
     except RuntimeError as error:
-        await asyncio.to_thread(storage_path.unlink, missing_ok=True)
+        await _best_effort_delete(settings, storage_key)
         return _database_error(str(error))
     except SQLAlchemyError:
-        await asyncio.to_thread(storage_path.unlink, missing_ok=True)
+        await _best_effort_delete(settings, storage_key)
         return _database_error("FastAPI could not create the knowledge file record.")
 
     background_tasks.add_task(process_knowledge_file, file_id, workspace_id)
@@ -564,6 +597,7 @@ async def delete_knowledge_file(
                         detail="Knowledge file not found.",
                     )
                 storage_key = str(deleted["storageKey"])
+                storage_provider = str(deleted["storageProvider"])
     except HTTPException:
         raise
     except RuntimeError as error:
@@ -571,5 +605,17 @@ async def delete_knowledge_file(
     except SQLAlchemyError:
         return _database_error("FastAPI could not delete the knowledge file.")
 
-    await asyncio.to_thread(_storage_path(settings, storage_key).unlink, missing_ok=True)
+    try:
+        storage = get_knowledge_storage_for_provider(settings, storage_provider)
+        await storage.delete(storage_key)
+    except StorageConfigurationError as error:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"code": "storage:misconfigured", "cause": str(error)},
+        )
+    except StorageError as error:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"code": "storage:unavailable", "cause": str(error)},
+        )
     return {"deleted": True}

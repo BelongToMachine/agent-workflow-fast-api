@@ -120,6 +120,48 @@ class Settings(BaseSettings):
             "ASIANODE_KNOWLEDGE_STORAGE_DIR",
         ),
     )
+    knowledge_storage_provider: str = Field(
+        default="local",
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_STORAGE_PROVIDER",
+            "ASIANODE_KNOWLEDGE_STORAGE_PROVIDER",
+        ),
+    )
+    knowledge_s3_bucket: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_S3_BUCKET",
+            "ASIANODE_KNOWLEDGE_S3_BUCKET",
+        ),
+    )
+    knowledge_s3_endpoint_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_S3_ENDPOINT_URL",
+            "ASIANODE_KNOWLEDGE_S3_ENDPOINT_URL",
+        ),
+    )
+    knowledge_s3_region: str = Field(
+        default="us-east-1",
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_S3_REGION",
+            "ASIANODE_KNOWLEDGE_S3_REGION",
+        ),
+    )
+    knowledge_s3_access_key_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_S3_ACCESS_KEY_ID",
+            "ASIANODE_KNOWLEDGE_S3_ACCESS_KEY_ID",
+        ),
+    )
+    knowledge_s3_secret_access_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_S3_SECRET_ACCESS_KEY",
+            "ASIANODE_KNOWLEDGE_S3_SECRET_ACCESS_KEY",
+        ),
+    )
     knowledge_max_file_bytes: int = Field(
         default=25 * 1024 * 1024,
         ge=1,
