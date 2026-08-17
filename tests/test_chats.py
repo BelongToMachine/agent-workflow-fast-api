@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
 from uuid import UUID
@@ -12,6 +13,7 @@ from starlette.requests import Request
 from app.api.routes.chat import (
     CHAT_ANY_BY_ID_QUERY,
     ChatRequest,
+    UIMessage,
     _message_attachments,
     _message_payload,
     _prepare_chat_persistence,
@@ -31,6 +33,70 @@ from app.core.config import Settings, get_settings
 from app.main import app
 
 client = TestClient(app)
+
+
+class FakeChatResult:
+    def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
+        self.rows = rows or []
+
+    def mappings(self) -> "FakeChatResult":
+        return self
+
+    def first(self) -> dict[str, object] | None:
+        return self.rows[0] if self.rows else None
+
+    def all(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeChatTransaction:
+    async def __aenter__(self) -> "FakeChatTransaction":
+        return self
+
+    async def __aexit__(self, *_args) -> None:
+        return None
+
+
+class FakeChatConnection:
+    def __init__(
+        self,
+        *,
+        workspace_chat: dict[str, object] | None = None,
+        any_workspace_chat: dict[str, object] | None = None,
+    ) -> None:
+        self.workspace_chat = workspace_chat
+        self.any_workspace_chat = any_workspace_chat
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute(
+        self,
+        query: object,
+        params: dict[str, object],
+    ) -> FakeChatResult:
+        sql = str(query)
+        self.calls.append((sql, params))
+        if 'FROM "Chat"' in sql and '"workspaceId" = :workspace_id' in sql:
+            return FakeChatResult(
+                [self.workspace_chat] if self.workspace_chat is not None else []
+            )
+        if 'FROM "Chat"' in sql and '"workspaceId" = :workspace_id' not in sql:
+            return FakeChatResult(
+                [self.any_workspace_chat]
+                if self.any_workspace_chat is not None
+                else []
+            )
+        return FakeChatResult()
+
+    def begin(self) -> FakeChatTransaction:
+        return FakeChatTransaction()
+
+
+def chat_connection_context(connection: FakeChatConnection):
+    @asynccontextmanager
+    async def context():
+        yield connection
+
+    return context
 
 
 @pytest.fixture
@@ -266,6 +332,160 @@ def test_development_chat_does_not_attempt_database_persistence() -> None:
     )
 
     assert persistence is None
+
+
+def test_authenticated_chat_persistence_scopes_new_chat_and_assistant_message(
+    monkeypatch,
+) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    chat_id = UUID("00000000-0000-0000-0000-000000000010")
+    user_id = UUID("00000000-0000-0000-0000-000000000011")
+    message_id = UUID("00000000-0000-0000-0000-000000000012")
+    assistant_id = UUID("00000000-0000-0000-0000-000000000013")
+    connection = FakeChatConnection()
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        chat_connection_context(connection),
+    )
+
+    persistence = asyncio.run(
+        _prepare_chat_persistence(
+            ChatRequest(
+                id=str(chat_id),
+                message=UIMessage(
+                    id=str(message_id),
+                    parts=[{"text": "Prepare a summary", "type": "text"}],
+                    role="user",
+                ),
+                selectedVisibilityType="private",
+            ),
+            AuthenticatedUser(user_id=str(user_id), role="employee"),
+            workspace_id,
+        )
+    )
+
+    assert persistence is not None
+    awaitable = persistence(str(assistant_id), "Summary is ready.")
+    asyncio.run(awaitable)
+
+    insert_calls = [
+        (sql, params)
+        for sql, params in connection.calls
+        if 'INSERT INTO "Chat"' in sql or 'INSERT INTO "Message_v2"' in sql
+    ]
+    assert insert_calls[0][1] == {
+        "chat_id": chat_id,
+        "title": "New chat",
+        "user_id": user_id,
+        "visibility": "private",
+        "workspace_id": workspace_id,
+    }
+    assert insert_calls[1][1] == {
+        "attachments": "[]",
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "parts": '[{"type": "text", "text": "Prepare a summary"}]',
+        "role": "user",
+    }
+    assert insert_calls[2][1]["attachments"] == "[]"
+    assert insert_calls[2][1]["chat_id"] == chat_id
+    assert insert_calls[2][1]["message_id"] == assistant_id
+    assert insert_calls[2][1]["parts"] == (
+        '[{"type": "text", "text": "Summary is ready."}]'
+    )
+    assert insert_calls[2][1]["role"] == "assistant"
+    update_call = next(
+        (params for sql, params in connection.calls if 'UPDATE "Chat"' in sql),
+        None,
+    )
+    assert update_call == {
+        "chat_id": chat_id,
+        "title": "Prepare a summary",
+        "user_id": user_id,
+        "workspace_id": workspace_id,
+    }
+    assert all(
+        params.get("workspace_id") == workspace_id
+        for _sql, params in connection.calls
+        if "workspace_id" in params
+    )
+
+
+def test_authenticated_chat_rejects_same_id_from_another_workspace(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    other_workspace_id = UUID("00000000-0000-0000-0000-000000000002")
+    connection = FakeChatConnection(
+        any_workspace_chat={
+            "id": UUID("00000000-0000-0000-0000-000000000010"),
+            "user_id": UUID("00000000-0000-0000-0000-000000000011"),
+            "workspace_id": other_workspace_id,
+        }
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        chat_connection_context(connection),
+    )
+
+    with pytest.raises(Exception) as error:
+        asyncio.run(
+            _prepare_chat_persistence(
+                ChatRequest(
+                    id="00000000-0000-0000-0000-000000000010",
+                    message=UIMessage(
+                        parts=[{"text": "Do not cross workspace", "type": "text"}],
+                        role="user",
+                    ),
+                ),
+                AuthenticatedUser(
+                    user_id="00000000-0000-0000-0000-000000000011",
+                    role="employee",
+                ),
+                workspace_id,
+            )
+        )
+
+    assert getattr(error.value, "status_code", None) == 403
+    assert "workspace" in str(error.value.detail).lower()
+    assert not any('INSERT INTO "Chat"' in sql for sql, _params in connection.calls)
+    assert connection.calls[0][1]["workspace_id"] == workspace_id
+    assert connection.calls[1][1] == {"chat_id": UUID("00000000-0000-0000-0000-000000000010")}
+
+
+def test_authenticated_chat_rejects_chat_owned_by_another_user(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    connection = FakeChatConnection(
+        workspace_chat={
+            "id": UUID("00000000-0000-0000-0000-000000000010"),
+            "user_id": UUID("00000000-0000-0000-0000-000000000099"),
+            "workspace_id": workspace_id,
+        }
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        chat_connection_context(connection),
+    )
+
+    with pytest.raises(Exception) as error:
+        asyncio.run(
+            _prepare_chat_persistence(
+                ChatRequest(
+                    id="00000000-0000-0000-0000-000000000010",
+                    message=UIMessage(
+                        parts=[{"text": "Do not impersonate", "type": "text"}],
+                        role="user",
+                    ),
+                ),
+                AuthenticatedUser(
+                    user_id="00000000-0000-0000-0000-000000000011",
+                    role="employee",
+                ),
+                workspace_id,
+            )
+        )
+
+    assert getattr(error.value, "status_code", None) == 403
+    assert "does not belong" in str(error.value.detail)
+    assert len(connection.calls) == 1
 
 
 def test_chat_route_falls_back_when_client_submits_an_unlisted_model(monkeypatch) -> None:
