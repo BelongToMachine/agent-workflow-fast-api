@@ -33,6 +33,18 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("POSTGRES_URL", "ASIANODE_POSTGRES_URL"),
     )
+    redis_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("REDIS_URL", "ASIANODE_REDIS_URL"),
+    )
+    resumable_stream_ttl_seconds: int = Field(
+        default=24 * 60 * 60,
+        ge=60,
+        validation_alias=AliasChoices(
+            "RESUMABLE_STREAM_TTL_SECONDS",
+            "ASIANODE_RESUMABLE_STREAM_TTL_SECONDS",
+        ),
+    )
     cors_origins: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
         validation_alias=AliasChoices("CORS_ORIGINS", "ASIANODE_CORS_ORIGINS"),

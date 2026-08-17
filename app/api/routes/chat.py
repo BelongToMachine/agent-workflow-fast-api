@@ -5,14 +5,14 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes.chats import _database_error, _iso_timestamp
 from app.core.auth import AuthenticatedUser, get_current_user
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 from app.services.agent_tools import (
@@ -20,6 +20,7 @@ from app.services.agent_tools import (
     agent_tool_definitions,
     execute_agent_tool,
 )
+from app.services.resumable_streams import get_resumable_stream_store
 
 router = APIRouter(tags=["chat"])
 
@@ -387,18 +388,25 @@ async def chat(
         effective_workspace_id,
     )
 
+    stream_store = get_resumable_stream_store(
+        settings.redis_url,
+        settings.resumable_stream_ttl_seconds,
+    )
     return StreamingResponse(
-        stream_chat(
-            payload,
-            request_id,
-            settings.deepseek_api_key,
-            settings.deepseek_base_url,
-            settings.chat_model,
-            current_user,
-            effective_workspace_id,
-            "knowledge.read" in workspace_access.permissions,
-            settings.knowledge_embeddings_enabled,
-            on_complete=persistence,
+        stream_store.capture(
+            payload.id,
+            stream_chat(
+                payload,
+                request_id,
+                settings.deepseek_api_key,
+                settings.deepseek_base_url,
+                settings.chat_model,
+                current_user,
+                effective_workspace_id,
+                "knowledge.read" in workspace_access.permissions,
+                settings.knowledge_embeddings_enabled,
+                on_complete=persistence,
+            ),
         ),
         media_type="text/event-stream",
         headers={
@@ -407,6 +415,66 @@ async def chat(
             "x-accel-buffering": "no",
             "x-backend": "fastapi",
             "x-request-id": request_id,
+            "x-vercel-ai-ui-message-stream": "v1",
+        },
+    )
+
+
+@router.get("/chat/{chat_id}/stream", response_model=None)
+async def resume_chat_stream(
+    chat_id: UUID,
+    workspace_id: UUID = Query(..., alias="workspace_id"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse | Response | JSONResponse:
+    await require_workspace_permission(current_user, workspace_id, "chat.read")
+    if current_user.is_development:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    try:
+        user_id = UUID(current_user.user_id)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The authenticated user is not linked to a local workspace.",
+        ) from error
+
+    try:
+        async with get_db_connection() as connection:
+            result = await connection.execute(
+                CHAT_BY_ID_QUERY,
+                {"chat_id": chat_id, "workspace_id": workspace_id},
+            )
+            chat_row = result.mappings().first()
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except SQLAlchemyError:
+        return _database_error("FastAPI could not verify the chat stream owner.")
+
+    if chat_row is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if chat_row["user_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The chat does not belong to this user.",
+        )
+
+    stream_store = get_resumable_stream_store(
+        settings.redis_url,
+        settings.resumable_stream_ttl_seconds,
+    )
+    stream_id = await stream_store.active_stream_id(str(chat_id))
+    if stream_id is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    return StreamingResponse(
+        stream_store.resume(str(chat_id), stream_id),
+        media_type="text/event-stream",
+        headers={
+            "cache-control": "no-cache",
+            "connection": "keep-alive",
+            "x-accel-buffering": "no",
+            "x-backend": "fastapi",
             "x-vercel-ai-ui-message-stream": "v1",
         },
     )

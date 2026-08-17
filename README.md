@@ -47,6 +47,7 @@ make dev
 - 知识库授权删除：`DELETE http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants/{grant_id}?workspace_id={workspace_id}`
 - 本地 Mock OIDC consent：`POST http://127.0.0.1:8000/api/v1/dev/oidc/consent`
 - 聊天接口：`POST http://127.0.0.1:8000/api/v1/chat`
+- Chat Stream 恢复：`GET http://127.0.0.1:8000/api/v1/chat/{chat_id}/stream?workspace_id={workspace_id}`
 - 知识库文件列表：`GET http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件上传：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件删除：`DELETE http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}?workspace_id={workspace_id}`
@@ -70,6 +71,10 @@ NEXT_PUBLIC_FASTAPI_BASE_URL=http://127.0.0.1:8000
 聊天请求会先发送到 Next.js `/api/chat` BFF，再由 BFF 通过签名的 NextAuth bridge 转发到
 FastAPI `8000` 端口；FastAPI 负责 workspace 权限、消息持久化、模型调用和 SSE 返回。
 这样浏览器不会直接提交 userId、role 或 workspaceId 作为可信身份。
+
+设置 `REDIS_URL` 后，FastAPI 会按 chat 保存短期 SSE chunks，并提供
+`GET /api/v1/chat/{chat_id}/stream` 给 AI SDK 自动断线重连。恢复接口会再次校验当前用户、
+workspace 和 chat 归属；没有配置 Redis 时会退化为普通 SSE，不阻塞聊天请求。
 
 当当前用户具备 `knowledge.read` 时，FastAPI 会向模型注册只读的
 `searchProductsTool` 和 `searchContentTool`。模型产生 tool call 后由 FastAPI 服务端执行，
@@ -108,7 +113,7 @@ DEV_OIDC_INTERNAL_SECRET=your-local-development-secret
 FastAPI 会校验 bridge 的 HMAC 签名和 5 分钟有效期，不接受浏览器提交的 userId、role
 或 workspaceId 作为可信身份。
 
-聊天历史在 `USE_FASTAPI_BACKEND=1` 时也通过 Next.js BFF 转发到 FastAPI。FastAPI 会同时
+聊天历史和 AI SDK 的 chat stream 恢复在 `USE_FASTAPI_BACKEND=1` 时也通过 Next.js BFF 转发到 FastAPI。FastAPI 会同时
 校验 `chat.read`/`chat.delete`、当前用户和 workspace；分页 cursor 只能引用当前用户在
 当前 workspace 的聊天。
 
@@ -237,4 +242,4 @@ tests/
 
 商品和内容查询当前已经迁移到 FastAPI，并完成了与 Next.js 查询结果的真实数据对比。
 
-当前聊天接口由 FastAPI 负责 workspace 权限、模型调用、SSE、消息持久化和消息读取；工具调用、Redis 可恢复流和独立 stream 路由仍待迁移。
+当前聊天接口由 FastAPI 负责 workspace 权限、模型调用、SSE、消息持久化、消息读取、只读工具调用和 Redis 可恢复流；真实 Redis 部署和浏览器断线恢复验证仍待完成。
