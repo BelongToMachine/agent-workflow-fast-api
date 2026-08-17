@@ -1,5 +1,7 @@
 import asyncio
+from uuid import uuid4
 
+from fastapi.testclient import TestClient
 from redis.exceptions import RedisError
 
 from app.core.config import Settings
@@ -9,6 +11,9 @@ from app.core.rate_limit import (
     RedisRateLimiter,
     _path_limit,
 )
+from app.main import app, create_app
+
+client = TestClient(app)
 
 
 def test_in_memory_rate_limiter_returns_retry_after_when_exhausted() -> None:
@@ -92,3 +97,38 @@ def test_rate_limit_falls_back_to_process_local_storage_when_redis_fails() -> No
     assert first[0:2] == (True, 1)
     assert second[0:2] == (True, 0)
     assert blocked[0:2] == (False, 0)
+
+
+def test_rate_limit_middleware_returns_http_429_with_contract_headers(monkeypatch) -> None:
+    settings = Settings(
+        environment="development",
+        rate_limit_enabled=True,
+        rate_limit_redis_enabled=False,
+        rate_limit_requests=1,
+        rate_limit_window_seconds=60,
+    )
+    monkeypatch.setattr("app.core.rate_limit.get_settings", lambda: settings)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    test_client = TestClient(create_app())
+    authorization = f"Bearer rate-limit-test-{uuid4()}"
+
+    first = test_client.get(
+        "/api/v1/models",
+        headers={"authorization": authorization},
+    )
+    second = test_client.get(
+        "/api/v1/models",
+        headers={"authorization": authorization},
+    )
+
+    assert first.status_code == 200
+    assert first.headers["x-ratelimit-limit"] == "1"
+    assert first.headers["x-ratelimit-remaining"] == "0"
+    assert second.status_code == 429
+    assert second.json() == {
+        "code": "rate_limit:exceeded",
+        "message": "Too many requests. Please retry later.",
+    }
+    assert second.headers["x-ratelimit-limit"] == "1"
+    assert second.headers["x-ratelimit-remaining"] == "0"
+    assert int(second.headers["retry-after"]) >= 1
