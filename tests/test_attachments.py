@@ -1,4 +1,5 @@
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,6 +48,44 @@ def test_attachment_upload_returns_legacy_compatible_shape_and_signed_url(
     assert downloaded.status_code == 200
     assert downloaded.content == content
     assert downloaded.headers["content-type"] == "image/png"
+
+
+def test_attachment_upload_passes_workspace_to_permission_and_storage_boundary(
+    enabled_local_attachments: Settings,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_require_workspace_permission(current_user, workspace_id, permission):
+        captured.update(
+            {
+                "user_id": current_user.user_id,
+                "workspace_id": workspace_id,
+                "permission": permission,
+            }
+        )
+
+    monkeypatch.setattr(
+        "app.api.routes.attachments.require_workspace_permission",
+        fake_require_workspace_permission,
+    )
+
+    workspace_id = "00000000-0000-0000-0000-000000000001"
+    response = client.post(
+        "/api/v1/files/upload",
+        params={"workspace_id": workspace_id},
+        files={"file": ("brief.png", b"\x89PNG\r\n\x1a\ncontent", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "user_id": "development-user",
+        "workspace_id": UUID(workspace_id),
+        "permission": "document.write",
+    }
+    assert response.json()["pathname"].startswith(
+        f"{workspace_id}/development-user/"
+    )
 
 
 def test_attachment_content_signature_matches_declared_type() -> None:
