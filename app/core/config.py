@@ -94,6 +94,64 @@ class Settings(BaseSettings):
             "ASIANODE_KNOWLEDGE_GRANTS_ENABLED",
         ),
     )
+    knowledge_ingestion_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_INGESTION_ENABLED",
+            "ASIANODE_KNOWLEDGE_INGESTION_ENABLED",
+        ),
+    )
+    knowledge_storage_dir: str = Field(
+        default="storage/knowledge",
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_STORAGE_DIR",
+            "ASIANODE_KNOWLEDGE_STORAGE_DIR",
+        ),
+    )
+    knowledge_max_file_bytes: int = Field(
+        default=25 * 1024 * 1024,
+        ge=1,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_MAX_FILE_BYTES",
+            "ASIANODE_KNOWLEDGE_MAX_FILE_BYTES",
+        ),
+    )
+    knowledge_embeddings_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_EMBEDDINGS_ENABLED",
+            "ASIANODE_KNOWLEDGE_EMBEDDINGS_ENABLED",
+        ),
+    )
+    embedding_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("EMBEDDING_API_KEY", "ASIANODE_EMBEDDING_API_KEY"),
+    )
+    embedding_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        validation_alias=AliasChoices("EMBEDDING_BASE_URL", "ASIANODE_EMBEDDING_BASE_URL"),
+    )
+    embedding_model: str = Field(
+        default="text-embedding-3-small",
+        validation_alias=AliasChoices("EMBEDDING_MODEL", "ASIANODE_EMBEDDING_MODEL"),
+    )
+    rate_limit_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("RATE_LIMIT_ENABLED", "ASIANODE_RATE_LIMIT_ENABLED"),
+    )
+    rate_limit_requests: int = Field(
+        default=120,
+        ge=1,
+        validation_alias=AliasChoices("RATE_LIMIT_REQUESTS", "ASIANODE_RATE_LIMIT_REQUESTS"),
+    )
+    rate_limit_window_seconds: int = Field(
+        default=60,
+        ge=1,
+        validation_alias=AliasChoices(
+            "RATE_LIMIT_WINDOW_SECONDS",
+            "ASIANODE_RATE_LIMIT_WINDOW_SECONDS",
+        ),
+    )
 
     model_config = SettingsConfigDict(
         env_file=("../.env.local", ".env"),

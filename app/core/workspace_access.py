@@ -110,7 +110,11 @@ async def require_workspace_permission(
             detail="FastAPI could not query workspace permissions.",
         ) from error
 
-    is_guest = bool(membership["is_anonymous"]) or "guest" in current_user.roles
+    is_guest = (
+        bool(membership["is_anonymous"])
+        or current_user.is_guest
+        or "guest" in current_user.roles
+    )
     permissions = get_effective_permissions(str(membership["role"]), overrides, is_guest=is_guest)
     if permission not in permissions:
         raise HTTPException(

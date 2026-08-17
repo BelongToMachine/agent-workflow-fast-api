@@ -230,11 +230,13 @@ def _user_from_claims(claims: dict[str, Any]) -> AuthenticatedUser:
     workspace_id = (
         claims.get("workspace_id") or claims.get("workspaceId") or claims.get("organization_id")
     )
+    is_guest = bool(claims.get("isGuest") or claims.get("is_guest") or "guest" in roles)
     return AuthenticatedUser(
         user_id=user_id,
         email=claims.get("email") if isinstance(claims.get("email"), str) else None,
         roles=roles,
         workspace_id=workspace_id if isinstance(workspace_id, str) else None,
+        is_guest=is_guest,
         claims=claims,
     )
 

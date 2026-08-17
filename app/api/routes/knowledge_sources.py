@@ -91,8 +91,17 @@ async def list_knowledge_sources(
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> KnowledgeSourceListResponse | JSONResponse:
-    await require_workspace_permission(current_user, workspace_id, "knowledge.read")
-    authorized_source_ids = await get_authorized_source_ids(current_user, workspace_id)
+    workspace_access = await require_workspace_permission(
+        current_user,
+        workspace_id,
+        "knowledge.read",
+    )
+    authorized_source_ids = await get_authorized_source_ids(
+        current_user,
+        workspace_id,
+        is_guest=workspace_access.is_guest,
+        workspace_role=workspace_access.role,
+    )
     query, params = _build_knowledge_sources_query(workspace_id, authorized_source_ids)
 
     try:

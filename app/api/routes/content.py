@@ -261,10 +261,16 @@ async def search_content(
     payload: ContentSearchRequest,
     _current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> ContentSearchResponse | JSONResponse:
-    await require_workspace_permission(_current_user, payload.workspace_id, "knowledge.read")
+    workspace_access = await require_workspace_permission(
+        _current_user,
+        payload.workspace_id,
+        "knowledge.read",
+    )
     authorized_source_ids = await get_authorized_source_ids(
         _current_user,
         payload.workspace_id,
+        is_guest=workspace_access.is_guest,
+        workspace_role=workspace_access.role,
     )
     if authorized_source_ids == []:
         return _empty_response("No knowledge source is authorized for this account.")

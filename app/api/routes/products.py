@@ -277,8 +277,17 @@ async def search_products(
         default=None, alias="sourceFileNames", max_length=50
     ),
 ) -> ProductSearchResponse | JSONResponse:
-    await require_workspace_permission(_current_user, workspace_id, "knowledge.read")
-    authorized_source_ids = await get_authorized_source_ids(_current_user, workspace_id)
+    workspace_access = await require_workspace_permission(
+        _current_user,
+        workspace_id,
+        "knowledge.read",
+    )
+    authorized_source_ids = await get_authorized_source_ids(
+        _current_user,
+        workspace_id,
+        is_guest=workspace_access.is_guest,
+        workspace_role=workspace_access.role,
+    )
     if authorized_source_ids == []:
         return _empty_response("No knowledge source is authorized for this account.")
     normalized_source_file_names = _normalized_values(source_file_names)
