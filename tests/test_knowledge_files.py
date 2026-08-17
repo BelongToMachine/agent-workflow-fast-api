@@ -1,11 +1,16 @@
 import asyncio
 import io
+from contextlib import asynccontextmanager
+from datetime import datetime
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+from fastapi import UploadFile
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from pydantic import ValidationError
+from starlette.datastructures import Headers
 
 from app.api.routes.knowledge_files import (
     FILE_INSERT_QUERY,
@@ -17,7 +22,9 @@ from app.api.routes.knowledge_files import (
     _safe_filename,
     _storage_path,
     process_knowledge_file,
+    upload_knowledge_file,
 )
+from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
 from app.db.migrate_knowledge_ingestion import MIGRATION_PATH
 from app.main import app
@@ -74,6 +81,101 @@ class FakeConnectionContext:
 
     async def __aexit__(self, *_args) -> None:
         return None
+
+
+class FakeUploadResult:
+    def __init__(
+        self,
+        *,
+        row: dict[str, object] | None = None,
+        scalar_value: object | None = None,
+    ) -> None:
+        self.row = row
+        self.scalar_value = scalar_value
+
+    def mappings(self):
+        return self
+
+    def one(self) -> dict[str, object]:
+        assert self.row is not None
+        return self.row
+
+    def scalar_one_or_none(self) -> object | None:
+        return self.scalar_value
+
+
+class FakeUploadConnection:
+    def __init__(self, *, inserted: bool = True) -> None:
+        self.inserted = inserted
+        self.calls: list[tuple[str, dict[str, object]]] = []
+        self.file_row: dict[str, object] = {
+            "byte_size": 0,
+            "created_at": datetime(2026, 8, 17, 12, 30),
+            "error_message": None,
+            "file_hash": "",
+            "file_id": None,
+            "knowledge_base_id": UUID("00000000-0000-0000-0000-000000000002"),
+            "mime_type": "text/csv",
+            "original_name": "data.csv",
+            "status": "pending",
+            "storage_provider": "local",
+            "updated_at": datetime(2026, 8, 17, 12, 30),
+            "workspace_id": UUID("00000000-0000-0000-0000-000000000001"),
+        }
+
+    async def execute(self, query: object, params: dict[str, object]) -> FakeUploadResult:
+        sql = str(query)
+        self.calls.append((sql, params))
+        if "INSERT INTO \"KnowledgeFile\"" in sql:
+            if self.inserted:
+                self.file_row.update(
+                    {
+                        "byte_size": params["byte_size"],
+                        "file_hash": params["file_hash"],
+                        "file_id": params["file_id"],
+                        "original_name": params["original_name"],
+                        "storage_provider": params["storage_provider"],
+                        "workspace_id": params["workspace_id"],
+                    }
+                )
+                return FakeUploadResult(scalar_value=params["file_id"])
+            return FakeUploadResult(scalar_value=None)
+        if "SELECT" in sql:
+            return FakeUploadResult(row=self.file_row)
+        return FakeUploadResult()
+
+    def begin(self) -> FakeTransaction:
+        return FakeTransaction()
+
+
+def upload_connection_context(connection: FakeUploadConnection):
+    @asynccontextmanager
+    async def context():
+        yield connection
+
+    return context
+
+
+class FakeUploadStorage:
+    provider = "local"
+
+    def __init__(self) -> None:
+        self.uploads: list[tuple[str, bytes]] = []
+        self.deleted: list[str] = []
+
+    async def put(self, storage_key: str, content: bytes) -> None:
+        self.uploads.append((storage_key, content))
+
+    async def delete(self, storage_key: str) -> None:
+        self.deleted.append(storage_key)
+
+
+class FakeBackgroundTasks:
+    def __init__(self) -> None:
+        self.tasks: list[tuple[object, tuple[object, ...]]] = []
+
+    def add_task(self, function, *args, **_kwargs) -> None:
+        self.tasks.append((function, args))
 
 
 @pytest.fixture
@@ -208,3 +310,126 @@ def test_upload_is_gated_until_ingestion_migration_is_applied(
 
     assert response.status_code == 409
     assert response.json()["code"] == "knowledge_ingestion:disabled"
+
+
+def test_upload_route_persists_workspace_scoped_file_and_schedules_processing(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    user_id = UUID("00000000-0000-0000-0000-000000000010")
+    settings = Settings(
+        knowledge_ingestion_enabled=True,
+        knowledge_storage_dir="storage/knowledge",
+    )
+    connection = FakeUploadConnection()
+    storage = FakeUploadStorage()
+    background_tasks = FakeBackgroundTasks()
+    permission: dict[str, object] = {}
+
+    async def fake_require_permission(
+        _current_user,
+        requested_workspace_id,
+        requested_knowledge_base_id,
+        requested_permission,
+    ):
+        permission.update(
+            {
+                "workspace_id": requested_workspace_id,
+                "knowledge_base_id": requested_knowledge_base_id,
+                "permission": requested_permission,
+            }
+        )
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_knowledge_storage",
+        lambda _settings: storage,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(connection),
+    )
+
+    result = asyncio.run(
+        upload_knowledge_file(
+            knowledge_base_id=knowledge_base_id,
+            background_tasks=background_tasks,
+            file=UploadFile(
+                file=io.BytesIO(b"name,price\nchair,10"),
+                filename="../data.csv",
+                headers=Headers({"content-type": "text/csv"}),
+            ),
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(user_id=str(user_id)),
+            settings=settings,
+        )
+    )
+
+    assert result["file"].workspace_id == str(workspace_id)
+    assert result["file"].knowledge_base_id == str(knowledge_base_id)
+    assert permission == {
+        "workspace_id": workspace_id,
+        "knowledge_base_id": knowledge_base_id,
+        "permission": "manage",
+    }
+    assert len(storage.uploads) == 1
+    storage_key, stored_content = storage.uploads[0]
+    assert storage_key.startswith(f"{workspace_id}/{knowledge_base_id}/")
+    assert storage_key.endswith("-data.csv")
+    assert stored_content == b"name,price\nchair,10"
+    assert connection.calls[0][1]["workspace_id"] == workspace_id
+    assert connection.calls[1][1]["workspace_id"] == workspace_id
+    assert len(background_tasks.tasks) == 1
+    assert background_tasks.tasks[0][0] is process_knowledge_file
+    assert background_tasks.tasks[0][1] == (
+        connection.file_row["file_id"],
+        workspace_id,
+    )
+
+
+def test_duplicate_upload_removes_object_after_database_conflict(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    settings = Settings(knowledge_ingestion_enabled=True)
+    connection = FakeUploadConnection(inserted=False)
+    storage = FakeUploadStorage()
+
+    async def fake_require_permission(*_args, **_kwargs):
+        return SimpleNamespace(role="owner")
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_knowledge_storage",
+        lambda _settings: storage,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(connection),
+    )
+
+    with pytest.raises(Exception) as error:
+        asyncio.run(
+            upload_knowledge_file(
+                knowledge_base_id=knowledge_base_id,
+                background_tasks=FakeBackgroundTasks(),
+                file=UploadFile(
+                    file=io.BytesIO(b"name,price\nchair,10"),
+                    filename="data.csv",
+                    headers=Headers({"content-type": "text/csv"}),
+                ),
+                workspace_id=workspace_id,
+                current_user=AuthenticatedUser(
+                    user_id="00000000-0000-0000-0000-000000000010"
+                ),
+                settings=settings,
+            )
+        )
+
+    assert getattr(error.value, "status_code", None) == 409
+    assert len(storage.uploads) == 1
+    assert storage.deleted == [storage.uploads[0][0]]
