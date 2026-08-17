@@ -12,6 +12,7 @@ from app.core.config import Settings
 from app.db.migration_status import MIGRATION_STATUS_QUERY, build_migration_statuses
 from app.db.migration_utils import get_migration_target
 from app.db.session import normalize_postgres_url
+from app.services.embeddings import embed_texts
 from app.services.storage import S3KnowledgeStorage
 
 pytestmark = pytest.mark.integration
@@ -27,7 +28,7 @@ def _configured_url(environment_variable: str) -> str:
 def _configured_value(environment_variable: str) -> str:
     value = os.getenv(environment_variable)
     if not value:
-        pytest.skip(f"Set {environment_variable} to run storage integration tests.")
+        pytest.skip(f"Set {environment_variable} to run infrastructure integration tests.")
     return value
 
 
@@ -137,3 +138,21 @@ def test_s3_compatible_storage_supports_upload_read_and_presigned_download() -> 
             secret_access_key=_configured_value("FASTAPI_TEST_S3_SECRET_ACCESS_KEY"),
         )
     )
+
+
+def test_embedding_provider_returns_valid_vectors() -> None:
+    base_url = _configured_url("FASTAPI_TEST_EMBEDDING_BASE_URL")
+    _assert_safe_target(base_url, "FASTAPI_TEST_EMBEDDING_BASE_URL")
+
+    settings = Settings(
+        embedding_api_key=_configured_value("FASTAPI_TEST_EMBEDDING_API_KEY"),
+        embedding_base_url=base_url,
+        embedding_model=os.getenv("FASTAPI_TEST_EMBEDDING_MODEL", "text-embedding-3-small"),
+        embedding_provider_timeout_seconds=float(
+            os.getenv("FASTAPI_TEST_EMBEDDING_TIMEOUT_SECONDS", "60")
+        ),
+    )
+    vectors = asyncio.run(embed_texts(["Asianode embedding integration probe"], settings))
+
+    assert len(vectors) == 1
+    assert len(vectors[0]) == 1536
