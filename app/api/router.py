@@ -6,6 +6,7 @@ from app.api.routes.chat import router as chat_router
 from app.api.routes.chats import router as chats_router
 from app.api.routes.content import router as content_router
 from app.api.routes.dev_oidc import router as dev_oidc_router
+from app.api.routes.documents import router as documents_router
 from app.api.routes.health import router as health_router
 from app.api.routes.knowledge_bases import router as knowledge_bases_router
 from app.api.routes.knowledge_files import router as knowledge_files_router
@@ -22,6 +23,7 @@ api_router.include_router(chat_router)
 api_router.include_router(chats_router)
 api_router.include_router(content_router)
 api_router.include_router(dev_oidc_router)
+api_router.include_router(documents_router)
 api_router.include_router(knowledge_sources_router)
 api_router.include_router(knowledge_files_router)
 api_router.include_router(knowledge_bases_router)
