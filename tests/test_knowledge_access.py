@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from uuid import UUID
 
 from app.core.auth import AuthenticatedUser
@@ -10,6 +11,35 @@ from app.core.knowledge_access import (
     get_authorized_source_ids,
 )
 from app.db.migrate_knowledge_grants import MIGRATION_PATH
+
+
+class FakeAuthorizationResult:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeAuthorizationConnection:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.calls: list[dict[str, object]] = []
+
+    async def execute(self, _query: object, params: dict[str, object]):
+        self.calls.append(params)
+        return FakeAuthorizationResult(self.rows)
+
+
+def authorization_connection_context(connection: FakeAuthorizationConnection):
+    @asynccontextmanager
+    async def context():
+        yield connection
+
+    return context
 
 
 def test_knowledge_grant_query_matches_user_or_role_and_read_access() -> None:
@@ -47,6 +77,65 @@ def test_grant_rollout_is_backward_compatible_when_disabled() -> None:
         )
 
     assert asyncio.run(resolve()) is None
+
+
+def test_external_role_requires_an_explicit_knowledge_grant(monkeypatch) -> None:
+    source_id = UUID("00000000-0000-0000-0000-000000000020")
+    connection = FakeAuthorizationConnection([{"source_id": source_id}])
+    monkeypatch.setattr(
+        "app.core.knowledge_access.get_db_connection",
+        authorization_connection_context(connection),
+    )
+    monkeypatch.setattr(
+        "app.core.knowledge_access.get_settings",
+        lambda: Settings(knowledge_grants_enabled=True),
+    )
+
+    external_user = AuthenticatedUser(
+        user_id="00000000-0000-0000-0000-000000000010",
+        role="viewer",
+        roles=["external"],
+    )
+
+    result = asyncio.run(
+        get_authorized_source_ids(
+            external_user,
+            UUID("00000000-0000-0000-0000-000000000001"),
+            workspace_role="viewer",
+        )
+    )
+
+    assert result == [source_id]
+    assert connection.calls[0]["is_restricted"] is True
+
+
+def test_internal_employee_role_keeps_unrestricted_fallback_behavior(monkeypatch) -> None:
+    connection = FakeAuthorizationConnection([])
+    monkeypatch.setattr(
+        "app.core.knowledge_access.get_db_connection",
+        authorization_connection_context(connection),
+    )
+    monkeypatch.setattr(
+        "app.core.knowledge_access.get_settings",
+        lambda: Settings(knowledge_grants_enabled=True),
+    )
+
+    employee = AuthenticatedUser(
+        user_id="00000000-0000-0000-0000-000000000010",
+        role="editor",
+        roles=["employee"],
+    )
+
+    result = asyncio.run(
+        get_authorized_source_ids(
+            employee,
+            UUID("00000000-0000-0000-0000-000000000001"),
+            workspace_role="editor",
+        )
+    )
+
+    assert result == []
+    assert connection.calls[0]["is_restricted"] is False
 
 
 def test_grant_migration_file_is_present_and_idempotent() -> None:
