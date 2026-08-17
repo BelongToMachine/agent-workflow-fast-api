@@ -1,17 +1,19 @@
 import asyncio
 import os
 from urllib.parse import urlparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.core.auth import AuthenticatedUser
 from app.core.config import Settings
 from app.db.migration_status import MIGRATION_STATUS_QUERY, build_migration_statuses
 from app.db.migration_utils import get_migration_target
 from app.db.session import normalize_postgres_url
+from app.services.agent_workflow import run_agent_workflow
 from app.services.embeddings import embed_texts
 from app.services.resumable_streams import ResumableStreamStore
 from app.services.storage import S3KnowledgeStorage
@@ -190,3 +192,35 @@ def test_embedding_provider_returns_valid_vectors() -> None:
 
     assert len(vectors) == 1
     assert len(vectors[0]) == 1536
+
+
+def test_agent_provider_completes_a_bounded_direct_workflow() -> None:
+    base_url = _configured_url("FASTAPI_TEST_AGENT_BASE_URL")
+    _assert_safe_target(base_url, "FASTAPI_TEST_AGENT_BASE_URL")
+
+    result = asyncio.run(
+        run_agent_workflow(
+            prompt=(
+                "Reply with the exact single word READY. "
+                "Do not call any tools."
+            ),
+            api_key=_configured_value("FASTAPI_TEST_AGENT_API_KEY"),
+            base_url=base_url,
+            model=os.getenv("FASTAPI_TEST_AGENT_MODEL", "deepseek-chat"),
+            current_user=AuthenticatedUser(
+                user_id="integration-agent-user",
+                is_development=True,
+            ),
+            workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+            can_query_knowledge=False,
+            include_knowledge_base_search=False,
+            max_steps=1,
+            timeout_seconds=float(
+                os.getenv("FASTAPI_TEST_AGENT_TIMEOUT_SECONDS", "60")
+            ),
+        )
+    )
+
+    assert result.answer.strip()
+    assert result.steps == 1
+    assert result.tool_calls == []

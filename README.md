@@ -372,9 +372,24 @@ make test-integration
 该测试会产生 provider 请求和可能的费用，只应使用专用测试 key；远程 provider 还需要设置
 `FASTAPI_ALLOW_REMOTE_INTEGRATION=1`。
 
+如果要验证真实 Agent provider 的受控 workflow，再显式提供兼容 OpenAI Chat Completions
+接口的地址和专用 API Key：
+
+```bash
+FASTAPI_TEST_AGENT_BASE_URL=https://api.deepseek.com/v1 \
+FASTAPI_TEST_AGENT_API_KEY=your-test-key \
+FASTAPI_TEST_AGENT_MODEL=deepseek-chat \
+make test-integration
+```
+
+该 smoke test 只执行一次不带知识库工具的直接回答，并将最大步数限制为 1；它会产生 provider
+请求和可能的费用，只应使用专用测试 key。远程 provider 还需要设置
+`FASTAPI_ALLOW_REMOTE_INTEGRATION=1`。
+
 该命令只读检查四个知识库 migration 是否完整，对 Redis 执行带过期时间的临时 key 往返和
 真实 SSE capture/resume 测试，并在配置 S3 变量时上传、读取、生成 presigned URL 和下载一个临时对象后删除；
-配置 Embedding 变量时会实际生成一个 1536 维向量。
+配置 Embedding 变量时会实际生成一个 1536 维向量，配置 Agent 变量时会实际执行一次受控的
+`/chat/completions` 请求。
 未提供 `FASTAPI_TEST_*` 时，集成测试会明确跳过；远程地址默认拒绝，只有设置
 `FASTAPI_ALLOW_REMOTE_INTEGRATION=1` 后才允许执行。不要使用生产 bucket 运行该测试。
 
