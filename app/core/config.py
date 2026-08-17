@@ -29,6 +29,15 @@ class Settings(BaseSettings):
         default="deepseek-chat",
         validation_alias=AliasChoices("CHAT_MODEL", "ASIANODE_CHAT_MODEL"),
     )
+    chat_provider_timeout_seconds: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=300.0,
+        validation_alias=AliasChoices(
+            "CHAT_PROVIDER_TIMEOUT_SECONDS",
+            "ASIANODE_CHAT_PROVIDER_TIMEOUT_SECONDS",
+        ),
+    )
     postgres_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("POSTGRES_URL", "ASIANODE_POSTGRES_URL"),

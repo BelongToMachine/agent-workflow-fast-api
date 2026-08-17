@@ -207,6 +207,7 @@ async def stream_chat(
     workspace_id: UUID,
     can_query_knowledge: bool,
     include_knowledge_base_tool: bool,
+    provider_timeout_seconds: float = 60.0,
     on_complete: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> AsyncIterator[str]:
     assistant_message_id = str(uuid4())
@@ -217,7 +218,7 @@ async def stream_chat(
     yield sse_chunk({"type": "text-start", "id": assistant_message_id})
 
     try:
-        async with httpx.AsyncClient(timeout=None) as client:
+        async with httpx.AsyncClient(timeout=provider_timeout_seconds) as client:
             for _ in range(5):
                 request_body: dict[str, Any] = {
                     "model": resolve_chat_model(payload.selectedChatModel, model),
@@ -445,6 +446,7 @@ async def chat(
                 effective_workspace_id,
                 "knowledge.read" in workspace_access.permissions,
                 settings.knowledge_embeddings_enabled,
+                settings.chat_provider_timeout_seconds,
                 on_complete=persistence,
             ),
         ),

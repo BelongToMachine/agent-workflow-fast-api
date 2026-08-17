@@ -100,7 +100,8 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 - Swagger：http://127.0.0.1:8000/docs
 
 本地运行时，FastAPI 会读取仓库根目录的 `.env.local`，因此可以复用现有的
-`DEEPSEEK_API_KEY`。部署到其他环境时，请通过环境变量提供 API Key。
+`DEEPSEEK_API_KEY`。模型 provider 请求默认在 60 秒后超时，可通过
+`CHAT_PROVIDER_TIMEOUT_SECONDS` 调整（范围 1–300 秒）。部署到其他环境时，请通过环境变量提供 API Key。
 
 聊天请求中的 `selectedChatModel` 只能使用 `/api/v1/models` 返回的模型 ID。未知模型会在
 FastAPI 内部回退到 `deepseek-chat`，不会把客户端提交的任意 provider/model 字符串转发给模型服务。

@@ -123,6 +123,7 @@ async def run_agent(
             can_query_knowledge="knowledge.read" in workspace_access.permissions,
             include_knowledge_base_search=settings.knowledge_embeddings_enabled,
             max_steps=payload.max_steps,
+            timeout_seconds=settings.chat_provider_timeout_seconds,
         )
     except AgentWorkflowError as error:
         return JSONResponse(

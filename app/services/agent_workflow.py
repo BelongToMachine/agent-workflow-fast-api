@@ -83,6 +83,7 @@ async def _run_with_client(
     can_query_knowledge: bool,
     include_knowledge_base_search: bool,
     max_steps: int,
+    timeout_seconds: float,
 ) -> AgentWorkflowResult:
     conversation: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
     tool_executions: list[AgentToolExecution] = []
@@ -210,6 +211,7 @@ async def run_agent_workflow(
     can_query_knowledge: bool,
     include_knowledge_base_search: bool,
     max_steps: int = 5,
+    timeout_seconds: float = 60.0,
     client: Any | None = None,
 ) -> AgentWorkflowResult:
     if client is not None:
@@ -224,9 +226,10 @@ async def run_agent_workflow(
             can_query_knowledge=can_query_knowledge,
             include_knowledge_base_search=include_knowledge_base_search,
             max_steps=max_steps,
+            timeout_seconds=timeout_seconds,
         )
 
-    async with httpx.AsyncClient(timeout=60.0) as provider_client:
+    async with httpx.AsyncClient(timeout=timeout_seconds) as provider_client:
         return await _run_with_client(
             client=provider_client,
             prompt=prompt,
@@ -238,4 +241,5 @@ async def run_agent_workflow(
             can_query_knowledge=can_query_knowledge,
             include_knowledge_base_search=include_knowledge_base_search,
             max_steps=max_steps,
+            timeout_seconds=timeout_seconds,
         )

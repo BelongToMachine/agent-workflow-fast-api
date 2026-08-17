@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime
 from types import SimpleNamespace
 from uuid import UUID
@@ -16,6 +17,7 @@ from app.api.routes.chat import (
     _prepare_chat_persistence,
     _resolve_workspace_id,
     chat,
+    stream_chat,
     to_openai_messages,
 )
 from app.api.routes.chats import (
@@ -325,6 +327,157 @@ def test_chat_route_falls_back_when_client_submits_an_unlisted_model(monkeypatch
 
     assert response.status_code == 200
     assert captured["model"] == "deepseek-chat"
+
+
+class FakeSseResponse:
+    status_code = 200
+
+    def __init__(self, lines: list[str]) -> None:
+        self.lines = lines
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args) -> None:
+        return None
+
+    async def aiter_lines(self):
+        for line in self.lines:
+            yield line
+
+    async def aread(self) -> bytes:
+        return b""
+
+
+class FakeStreamingClient:
+    def __init__(self, responses: list[FakeSseResponse]) -> None:
+        self.responses = responses
+        self.requests: list[dict[str, object]] = []
+        self.timeout = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args) -> None:
+        return None
+
+    def stream(self, _method: str, _url: str, **kwargs):
+        self.requests.append(kwargs)
+        return self.responses.pop(0)
+
+
+def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(monkeypatch) -> None:
+    provider = FakeStreamingClient(
+        [
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "tool_calls": [
+                                            {
+                                                "index": 0,
+                                                "id": "call-1",
+                                                "function": {
+                                                    "name": "listKnowledgeBasesTool",
+                                                    "arguments": "",
+                                                },
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ),
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "tool_calls": [
+                                            {
+                                                "index": 0,
+                                                "function": {"arguments": "{}"},
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {"delta": {"content": "Knowledge base ready."}}
+                            ]
+                        }
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+        ]
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent_tool(name, arguments, **kwargs):
+        captured.update({"name": name, "arguments": arguments, **kwargs})
+        return {"knowledgeBases": []}
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.httpx.AsyncClient",
+        lambda **kwargs: (setattr(provider, "timeout", kwargs["timeout"]) or provider),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.execute_agent_tool",
+        fake_execute_agent_tool,
+    )
+
+    payload = ChatRequest(
+        id="00000000-0000-0000-0000-000000000010",
+        message={
+            "parts": [{"text": "What is ready?", "type": "text"}],
+            "role": "user",
+        },
+        selectedChatModel="untrusted-provider/model",
+    )
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in stream_chat(
+                payload,
+                "request-1",
+                "test-key",
+                "https://provider.example/v1",
+                "deepseek-chat",
+                AuthenticatedUser(user_id="development-user", is_development=True),
+                UUID("00000000-0000-0000-0000-000000000001"),
+                True,
+                False,
+                7.5,
+            )
+        ]
+
+    chunks = asyncio.run(collect())
+
+    assert provider.timeout == 7.5
+    assert captured["name"] == "listKnowledgeBasesTool"
+    assert any('"type": "tool-input-start"' in chunk for chunk in chunks)
+    assert any('"type": "tool-output-available"' in chunk for chunk in chunks)
+    assert any("Knowledge base ready." in chunk for chunk in chunks)
+    assert any('"type": "finish"' in chunk for chunk in chunks)
+    assert provider.requests[0]["json"]["model"] == "deepseek-chat"
+    assert provider.requests[1]["json"]["messages"][-1]["role"] == "tool"
 
 
 def test_messages_endpoint_has_workspace_scoped_development_fallback() -> None:
