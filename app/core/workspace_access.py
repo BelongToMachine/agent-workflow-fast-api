@@ -28,6 +28,29 @@ class WorkspaceAccess:
         self.is_development = is_development
 
 
+def validate_workspace_context(
+    current_user: AuthenticatedUser,
+    workspace_id: UUID,
+) -> None:
+    """Reject a request that crosses the workspace bound to its access token."""
+    if current_user.is_development or not current_user.workspace_id:
+        return
+
+    try:
+        token_workspace_id = UUID(current_user.workspace_id)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The authenticated user has an invalid workspace context.",
+        ) from error
+
+    if token_workspace_id != workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The requested workspace does not match the authenticated context.",
+        )
+
+
 MEMBERSHIP_QUERY = text(
     """
     SELECT
@@ -59,6 +82,7 @@ async def require_workspace_permission(
     workspace_id: UUID,
     permission: str,
 ) -> WorkspaceAccess:
+    validate_workspace_context(current_user, workspace_id)
     if current_user.is_development:
         return WorkspaceAccess(
             user_id=current_user.user_id,
