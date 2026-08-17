@@ -1,4 +1,4 @@
-.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status knowledge-integrity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings
+.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status knowledge-integrity migrate-knowledge migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= compose.yaml
@@ -35,6 +35,9 @@ migration-status:
 
 knowledge-integrity:
 	uv run python -m app.db.knowledge_integrity
+
+migrate-knowledge:
+	uv run python -m app.db.migrate_knowledge --apply
 
 migrate-knowledge-grants:
 	uv run python -m app.db.migrate_knowledge_grants --apply

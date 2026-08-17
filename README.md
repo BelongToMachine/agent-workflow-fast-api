@@ -52,6 +52,7 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode pnpm db:migr
 cd asianode-fastapi
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migration-status
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make knowledge-integrity
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-grants
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-ingestion
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-embeddings
@@ -66,6 +67,11 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 `make knowledge-integrity` 是只读安全检查，要求四个 migration 已完成，然后验证 grant、
 文件和切片没有孤儿记录，且 workspace、knowledge base、file 的归属一致。检查失败时返回
 非零退出码；它不会自动修复数据，也不会替代真实数据库和对象存储验证。
+
+`make migrate-knowledge` 会按 `0001` grants、`0002` ingestion、`0003` embeddings、`0004`
+独立 knowledge base 的依赖顺序执行所有待处理 migration，并在一个数据库事务中完成；重复执行
+会跳过已完成项。默认只允许本地开发数据库，staging/production 始终拒绝；远程开发数据库必须
+直接运行 runner 并显式传入 `--allow-remote`，且应先完成备份和人工审查。
 
 服务启动后访问：
 

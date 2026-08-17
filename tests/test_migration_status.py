@@ -1,6 +1,11 @@
 from app.core.config import Settings
 from app.db.knowledge_integrity import KNOWLEDGE_INTEGRITY_QUERY, build_integrity_checks
-from app.db.migration_status import build_migration_statuses
+from app.db.migrate_knowledge import (
+    MIGRATION_NAMES,
+    MIGRATION_PATHS,
+    pending_migration_paths,
+)
+from app.db.migration_status import MigrationStatus, build_migration_statuses
 from app.db.migration_utils import get_migration_target, migration_apply_error
 
 
@@ -90,3 +95,19 @@ def test_knowledge_integrity_checks_report_each_violation() -> None:
     assert checks[7].violations == 2
     assert checks[7].passed is False
     assert sum(not check.passed for check in checks) == 2
+
+
+def test_knowledge_migration_runner_uses_dependency_order() -> None:
+    assert [path.stem for path in MIGRATION_PATHS] == list(MIGRATION_NAMES)
+    assert all(path.is_file() for path in MIGRATION_PATHS)
+
+
+def test_knowledge_migration_runner_only_selects_pending_migrations() -> None:
+    statuses = [
+        MigrationStatus(name=name, applied=index < 2, details="test")
+        for index, name in enumerate(MIGRATION_NAMES)
+    ]
+
+    assert [path.stem for path in pending_migration_paths(statuses)] == list(
+        MIGRATION_NAMES[2:]
+    )
