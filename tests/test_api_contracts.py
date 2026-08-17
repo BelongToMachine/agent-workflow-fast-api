@@ -15,6 +15,8 @@ EXPECTED_API_PATHS = {
     "/api/v1/admin/knowledge-base-grants",
     "/api/v1/admin/knowledge-base-grants/{grant_id}",
     "/api/v1/agents/query",
+    "/api/v1/files/upload",
+    "/api/v1/files/attachments/{token}",
     "/api/v1/chat",
     "/api/v1/chat/{chat_id}/stream",
     "/api/v1/chats",
@@ -37,6 +39,7 @@ def test_openapi_declares_bearer_security_for_business_paths() -> None:
     for path in EXPECTED_API_PATHS - {
         "/api/v1/healthz",
         "/api/v1/dev/oidc/consent",
+        "/api/v1/files/attachments/{token}",
     }:
         operations = paths[path].values()
         assert all(operation.get("security") for operation in operations)

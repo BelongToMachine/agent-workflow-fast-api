@@ -91,6 +91,7 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 - 知识库文件上传：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件删除：`DELETE http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}?workspace_id={workspace_id}`
 - 知识库向量检索：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/search?workspace_id={workspace_id}`
+- Web Chat 图片上传：`POST http://127.0.0.1:8000/api/v1/files/upload?workspace_id={workspace_id}`
 - Swagger：http://127.0.0.1:8000/docs
 
 本地运行时，FastAPI 会读取仓库根目录的 `.env.local`，因此可以复用现有的
@@ -114,6 +115,25 @@ FastAPI `8000` 端口；FastAPI 负责 workspace 权限、消息持久化、模�
 FastAPI 会保留 Web 消息中的 JPEG/PNG 图片附件：文字部分继续使用普通字符串 content，图片
 会转换为 OpenAI-compatible `image_url` content。仅允许 `http://`、`https://` 和
 `data:image/...` URL；PDF、其他文件类型或本地文件路径不会被转发给模型。
+
+Web Chat 图片上传默认关闭。要切换到 FastAPI 上传管道，需要在 FastAPI 和根目录环境中分别
+设置：
+
+```env
+# FastAPI
+CHAT_ATTACHMENTS_ENABLED=true
+ATTACHMENT_STORAGE_PROVIDER=local
+ATTACHMENT_STORAGE_DIR=storage/attachments
+ATTACHMENT_URL_TTL_SECONDS=3600
+
+# Next.js BFF
+USE_FASTAPI_ATTACHMENT_UPLOAD=1
+```
+
+local provider 返回带 HMAC 签名和过期时间的 FastAPI URL；S3-compatible provider 返回短期
+预签名 URL，并复用 `KNOWLEDGE_S3_*` 配置。生产环境使用 local provider 时，必须设置
+`ATTACHMENT_PUBLIC_BASE_URL` 为浏览器可访问的 FastAPI 地址。关闭
+`USE_FASTAPI_ATTACHMENT_UPLOAD` 后，原有 Vercel Blob `/api/files/upload` 会继续作为回滚路径。
 
 设置 `REDIS_URL` 后，FastAPI 会按 chat 保存短期 SSE chunks，并提供
 `GET /api/v1/chat/{chat_id}/stream` 给 AI SDK 自动断线重连。恢复接口会再次校验当前用户、

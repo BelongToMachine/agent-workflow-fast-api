@@ -184,6 +184,50 @@ class Settings(BaseSettings):
             "ASIANODE_KNOWLEDGE_EMBEDDINGS_ENABLED",
         ),
     )
+    chat_attachments_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "CHAT_ATTACHMENTS_ENABLED",
+            "ASIANODE_CHAT_ATTACHMENTS_ENABLED",
+        ),
+    )
+    attachment_storage_provider: str = Field(
+        default="local",
+        validation_alias=AliasChoices(
+            "ATTACHMENT_STORAGE_PROVIDER",
+            "ASIANODE_ATTACHMENT_STORAGE_PROVIDER",
+        ),
+    )
+    attachment_storage_dir: str = Field(
+        default="storage/attachments",
+        validation_alias=AliasChoices(
+            "ATTACHMENT_STORAGE_DIR",
+            "ASIANODE_ATTACHMENT_STORAGE_DIR",
+        ),
+    )
+    attachment_max_file_bytes: int = Field(
+        default=5 * 1024 * 1024,
+        ge=1,
+        validation_alias=AliasChoices(
+            "ATTACHMENT_MAX_FILE_BYTES",
+            "ASIANODE_ATTACHMENT_MAX_FILE_BYTES",
+        ),
+    )
+    attachment_url_ttl_seconds: int = Field(
+        default=60 * 60,
+        ge=60,
+        validation_alias=AliasChoices(
+            "ATTACHMENT_URL_TTL_SECONDS",
+            "ASIANODE_ATTACHMENT_URL_TTL_SECONDS",
+        ),
+    )
+    attachment_public_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ATTACHMENT_PUBLIC_BASE_URL",
+            "ASIANODE_ATTACHMENT_PUBLIC_BASE_URL",
+        ),
+    )
     embedding_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("EMBEDDING_API_KEY", "ASIANODE_EMBEDDING_API_KEY"),

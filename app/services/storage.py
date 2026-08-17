@@ -115,6 +115,19 @@ class S3KnowledgeStorage:
         except (BotoCoreError, ClientError) as error:
             raise StorageError("The S3 knowledge storage could not delete the file.") from error
 
+    async def presigned_url(self, storage_key: str, expires_in: int) -> str:
+        try:
+            return await asyncio.to_thread(
+                self._client.generate_presigned_url,
+                "get_object",
+                Params={"Bucket": self.bucket, "Key": storage_key},
+                ExpiresIn=expires_in,
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise StorageError(
+                "The S3 knowledge storage could not create a download URL."
+            ) from error
+
 
 def build_knowledge_storage(settings: Settings) -> LocalKnowledgeStorage | S3KnowledgeStorage:
     if settings.knowledge_storage_provider == "local":
