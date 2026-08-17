@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from uuid import UUID
 
 import pytest
@@ -7,7 +8,12 @@ from fastapi.testclient import TestClient
 
 from app.api.routes.knowledge_bases import KnowledgeBaseListResponse
 from app.api.routes.knowledge_files import KnowledgeFileListResponse
-from app.api.routes.knowledge_search import SEARCH_QUERY, KnowledgeSearchRequest
+from app.api.routes.knowledge_search import (
+    SEARCH_QUERY,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
+    search_knowledge_base,
+)
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
 from app.main import app
@@ -22,6 +28,40 @@ from app.services.agent_tools import (
 )
 
 client = TestClient(app)
+
+WORKSPACE_A = UUID("00000000-0000-0000-0000-000000000001")
+KNOWLEDGE_BASE_A = UUID("00000000-0000-0000-0000-000000000002")
+FILE_A = UUID("00000000-0000-0000-0000-000000000003")
+CHUNK_A = UUID("00000000-0000-0000-0000-000000000004")
+
+
+class FakeSearchResult:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeSearchConnection:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute(self, query: object, params: dict[str, object]) -> FakeSearchResult:
+        self.calls.append((str(query), params))
+        return FakeSearchResult(self.rows)
+
+
+def search_connection_context(connection: FakeSearchConnection):
+    @asynccontextmanager
+    async def context():
+        yield connection
+
+    return context
 
 
 def test_knowledge_search_request_validates_limit() -> None:
@@ -65,6 +105,82 @@ def test_knowledge_search_query_filters_workspace_and_knowledge_base() -> None:
     assert 'chunk."workspaceId" = :workspace_id' in sql
     assert 'chunk."knowledgeBaseId" = :knowledge_base_id' in sql
     assert 'chunk."embedding" <=> CAST(:embedding AS vector)' in sql
+
+
+def test_knowledge_search_route_keeps_workspace_and_base_scope(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    connection = FakeSearchConnection(
+        [
+            {
+                "chunk_id": CHUNK_A,
+                "content": "pricing details",
+                "file_id": FILE_A,
+                "file_name": "pricing.csv",
+                "score": 0.91,
+            }
+        ]
+    )
+
+    async def fake_require_permission(
+        _current_user,
+        workspace_id,
+        knowledge_base_id,
+        permission,
+    ):
+        captured.update(
+            {
+                "workspace_id": workspace_id,
+                "knowledge_base_id": knowledge_base_id,
+                "permission": permission,
+            }
+        )
+
+    async def fake_embed_texts(_texts, _settings):
+        return [[0.25] * 1536]
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_search.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_search.embed_texts",
+        fake_embed_texts,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_search.get_db_connection",
+        search_connection_context(connection),
+    )
+
+    result = asyncio.run(
+        search_knowledge_base(
+            knowledge_base_id=KNOWLEDGE_BASE_A,
+            payload=KnowledgeSearchRequest(query="pricing", limit=3),
+            workspace_id=WORKSPACE_A,
+            current_user=AuthenticatedUser(
+                user_id="search-user",
+                is_development=True,
+            ),
+            settings=Settings(
+                environment="development",
+                knowledge_embeddings_enabled=True,
+            ),
+        )
+    )
+
+    assert isinstance(result, KnowledgeSearchResponse)
+    assert result.results[0].file_name == "pricing.csv"
+    assert captured == {
+        "workspace_id": WORKSPACE_A,
+        "knowledge_base_id": KNOWLEDGE_BASE_A,
+        "permission": "read",
+    }
+
+    query, params = connection.calls[0]
+    assert 'chunk."workspaceId" = :workspace_id' in query
+    assert 'chunk."knowledgeBaseId" = :knowledge_base_id' in query
+    assert params["workspace_id"] == WORKSPACE_A
+    assert params["knowledge_base_id"] == KNOWLEDGE_BASE_A
+    assert params["limit"] == 3
 
 
 def test_knowledge_search_is_disabled_by_default() -> None:
