@@ -13,6 +13,7 @@ from app.db.migration_status import MIGRATION_STATUS_QUERY, build_migration_stat
 from app.db.migration_utils import get_migration_target
 from app.db.session import normalize_postgres_url
 from app.services.embeddings import embed_texts
+from app.services.resumable_streams import ResumableStreamStore
 from app.services.storage import S3KnowledgeStorage
 
 pytestmark = pytest.mark.integration
@@ -86,6 +87,39 @@ def test_local_redis_supports_resumable_stream_storage() -> None:
     _assert_safe_target(redis_url, "FASTAPI_TEST_REDIS_URL")
 
     asyncio.run(_redis_round_trip(redis_url))
+
+
+async def _redis_stream_round_trip(redis_url: str) -> None:
+    client = Redis.from_url(redis_url, decode_responses=True)
+    store = ResumableStreamStore(redis_url, 30, client=client)
+    chat_id = f"integration-chat-{uuid4()}"
+    stream_id: str | None = None
+
+    async def source():
+        yield "data: first\n\n"
+        yield "data: second\n\n"
+
+    try:
+        captured = [chunk async for chunk in store.capture(chat_id, source())]
+        stream_id = await store.active_stream_id(chat_id)
+        assert stream_id is not None
+        resumed = [chunk async for chunk in store.resume(chat_id, stream_id)]
+        assert resumed == captured
+    finally:
+        if stream_id:
+            await client.delete(
+                store._active_key(chat_id),
+                store._chunks_key(stream_id),
+                store._done_key(stream_id),
+            )
+        await client.aclose()
+
+
+def test_local_redis_replays_a_completed_stream() -> None:
+    redis_url = _configured_url("FASTAPI_TEST_REDIS_URL")
+    _assert_safe_target(redis_url, "FASTAPI_TEST_REDIS_URL")
+
+    asyncio.run(_redis_stream_round_trip(redis_url))
 
 
 def test_postgres_target_parser_matches_the_explicit_integration_url() -> None:
