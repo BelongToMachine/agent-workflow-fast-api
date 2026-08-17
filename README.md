@@ -81,6 +81,7 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 - 聊天消息：`GET http://127.0.0.1:8000/api/v1/chats/{chat_id}/messages?workspace_id={workspace_id}`
 - 聊天评价查询：`GET http://127.0.0.1:8000/api/v1/votes?chatId={chat_id}&workspace_id={workspace_id}`
 - 聊天评价保存：`PATCH http://127.0.0.1:8000/api/v1/votes?workspace_id={workspace_id}`
+- 文档建议：`GET http://127.0.0.1:8000/api/v1/suggestions?documentId={document_id}&workspace_id={workspace_id}`
 - 知识库授权列表：`GET http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants?workspace_id={workspace_id}`
 - 知识库授权新增/更新：`PUT http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants?workspace_id={workspace_id}`
 - 知识库授权删除：`DELETE http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants/{grant_id}?workspace_id={workspace_id}`

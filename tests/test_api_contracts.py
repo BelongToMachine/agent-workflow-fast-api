@@ -25,6 +25,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/documents",
     "/api/v1/dev/oidc/consent",
     "/api/v1/votes",
+    "/api/v1/suggestions",
 }
 
 
