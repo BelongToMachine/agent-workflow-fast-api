@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import get_settings
+from app.core.rate_limit import RateLimitMiddleware
 
 
 def create_app() -> FastAPI:
@@ -23,6 +24,11 @@ def create_app() -> FastAPI:
             for origin in settings.cors_origins.split(",")
             if origin.strip()
         ],
+    )
+    application.add_middleware(
+        RateLimitMiddleware,
+        limit=settings.rate_limit_requests,
+        window_seconds=settings.rate_limit_window_seconds,
     )
     application.include_router(api_router)
 
