@@ -9,6 +9,7 @@ from app.core.knowledge_access import (
     KNOWLEDGE_BASE_ACCESS_QUERY,
     KNOWLEDGE_BASE_EXISTS_QUERY,
     get_authorized_source_ids,
+    require_knowledge_base_permission,
 )
 from app.db.migrate_knowledge_grants import MIGRATION_PATH
 
@@ -22,6 +23,9 @@ class FakeAuthorizationResult:
 
     def all(self) -> list[dict[str, object]]:
         return self.rows
+
+    def first(self) -> dict[str, object] | None:
+        return self.rows[0] if self.rows else None
 
 
 class FakeAuthorizationConnection:
@@ -47,8 +51,10 @@ def test_knowledge_grant_query_matches_user_or_role_and_read_access() -> None:
 
     assert 'grant_record."subjectType" = \'user\'' in sql
     assert 'grant_record."subjectType" = \'role\'' in sql
+    assert 'grant_record."subjectId" IN' in sql
     assert 'grant_record."accessLevel" IN (\'read\', \'manage\')' in sql
     assert ":is_restricted = false" in sql
+    assert AUTHORIZED_SOURCE_IDS_QUERY._bindparams["roles"].expanding is True
 
 
 def test_knowledge_base_queries_are_workspace_scoped() -> None:
@@ -107,6 +113,77 @@ def test_external_role_requires_an_explicit_knowledge_grant(monkeypatch) -> None
 
     assert result == [source_id]
     assert connection.calls[0]["is_restricted"] is True
+
+
+def test_contractor_role_requires_an_explicit_knowledge_grant(monkeypatch) -> None:
+    source_id = UUID("00000000-0000-0000-0000-000000000020")
+    connection = FakeAuthorizationConnection([{"source_id": source_id}])
+    monkeypatch.setattr(
+        "app.core.knowledge_access.get_db_connection",
+        authorization_connection_context(connection),
+    )
+    monkeypatch.setattr(
+        "app.core.knowledge_access.get_settings",
+        lambda: Settings(knowledge_grants_enabled=True),
+    )
+
+    contractor = AuthenticatedUser(
+        user_id="00000000-0000-0000-0000-000000000010",
+        role="viewer",
+        roles=["contractor"],
+    )
+
+    result = asyncio.run(
+        get_authorized_source_ids(
+            contractor,
+            UUID("00000000-0000-0000-0000-000000000001"),
+            workspace_role="viewer",
+        )
+    )
+
+    assert result == [source_id]
+    assert connection.calls[0]["is_restricted"] is True
+    assert connection.calls[0]["roles"] == ["viewer", "contractor"]
+
+
+def test_contractor_role_is_restricted_for_direct_knowledge_base_access(monkeypatch) -> None:
+    connection = FakeAuthorizationConnection([{"permitted": True}])
+    monkeypatch.setattr(
+        "app.core.knowledge_access.get_db_connection",
+        authorization_connection_context(connection),
+    )
+    monkeypatch.setattr(
+        "app.core.knowledge_access.get_settings",
+        lambda: Settings(knowledge_grants_enabled=True),
+    )
+
+    async def fake_require_workspace_permission(*_args, **_kwargs):
+        return type(
+            "Access",
+            (),
+            {"role": "viewer", "is_guest": False, "is_development": False},
+        )()
+
+    monkeypatch.setattr(
+        "app.core.workspace_access.require_workspace_permission",
+        fake_require_workspace_permission,
+    )
+
+    asyncio.run(
+        require_knowledge_base_permission(
+            AuthenticatedUser(
+                user_id="00000000-0000-0000-0000-000000000010",
+                role="viewer",
+                roles=["contractor"],
+            ),
+            UUID("00000000-0000-0000-0000-000000000001"),
+            UUID("00000000-0000-0000-0000-000000000020"),
+            "read",
+        )
+    )
+
+    assert connection.calls[0]["is_restricted"] is True
+    assert connection.calls[0]["roles"] == ["viewer", "contractor"]
 
 
 def test_internal_employee_role_keeps_unrestricted_fallback_behavior(monkeypatch) -> None:

@@ -2,13 +2,15 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
 from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.db.session import get_db_connection
+
+RESTRICTED_KNOWLEDGE_ROLES = frozenset({"contractor", "external", "guest"})
 
 AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE = """
     SELECT source."id" AS source_id
@@ -29,7 +31,7 @@ AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE = """
                     )
                     OR (
                         grant_record."subjectType" = 'role'
-                        AND grant_record."subjectId" = :role
+                        AND grant_record."subjectId" IN :roles
                     )
                 )
                 AND grant_record."accessLevel" IN ('read', 'manage')
@@ -64,7 +66,7 @@ KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE = """
                       )
                       OR (
                           grant_record."subjectType" = 'role'
-                          AND grant_record."subjectId" = :role
+                          AND grant_record."subjectId" IN :roles
                       )
                   )
                   AND (
@@ -98,17 +100,40 @@ KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE = """
 
 AUTHORIZED_SOURCE_IDS_QUERY = text(
     AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE.replace("{knowledge_base_table}", '"KnowledgeSource"')
-)
+).bindparams(bindparam("roles", expanding=True))
 
 KNOWLEDGE_BASE_ACCESS_QUERY = text(
     KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE
     .replace("{knowledge_base_table}", '"KnowledgeSource"')
-)
+).bindparams(bindparam("roles", expanding=True))
 
 KNOWLEDGE_BASE_EXISTS_QUERY = text(
     KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE
     .replace("{knowledge_base_table}", '"KnowledgeSource"')
 )
+
+
+def _knowledge_roles(current_user: AuthenticatedUser, workspace_role: str) -> list[str]:
+    candidates = [workspace_role, current_user.role or "", *current_user.roles]
+    return list(dict.fromkeys(role.strip() for role in candidates if role.strip())) or [""]
+
+
+def _is_restricted_knowledge_user(
+    current_user: AuthenticatedUser,
+    roles: list[str],
+    *,
+    is_guest: bool | None,
+) -> bool:
+    normalized_roles = {role.lower() for role in roles}
+    return bool(is_guest) or current_user.is_guest or bool(
+        normalized_roles & RESTRICTED_KNOWLEDGE_ROLES
+    )
+
+
+def _knowledge_authorization_query(template: str, settings: object) -> object:
+    return text(render_knowledge_base_query(template, settings)).bindparams(
+        bindparam("roles", expanding=True)
+    )
 
 
 async def get_authorized_source_ids(
@@ -133,21 +158,25 @@ async def get_authorized_source_ids(
     role = workspace_role or current_user.role or (
         current_user.roles[0] if current_user.roles else ""
     )
-    is_restricted = (
-        current_user.is_guest
-        or any(role in {"external", "guest"} for role in current_user.roles)
-        or role in {"external", "guest"}
-        or bool(is_guest)
+    roles = _knowledge_roles(current_user, role)
+    is_restricted = _is_restricted_knowledge_user(
+        current_user,
+        roles,
+        is_guest=is_guest,
     )
     try:
         async with get_db_connection() as connection:
             result = await connection.execute(
-                text(render_knowledge_base_query(AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE, settings)),
+                _knowledge_authorization_query(
+                    AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE,
+                    settings,
+                ),
                 {
                     "role": role,
                     "is_restricted": is_restricted,
                     "user_id": str(user_id),
                     "workspace_id": str(workspace_id),
+                    "roles": roles,
                 },
             )
             return [row["source_id"] for row in result.mappings().all()]
@@ -224,17 +253,20 @@ async def require_knowledge_base_permission(
         return access
 
     role = access.role
-    is_restricted = (
-        current_user.is_guest
-        or any(item in {"external", "guest"} for item in current_user.roles)
-        or role in {"external", "guest"}
-        or access.is_guest
+    roles = _knowledge_roles(current_user, role)
+    is_restricted = _is_restricted_knowledge_user(
+        current_user,
+        roles,
+        is_guest=access.is_guest,
     )
 
     try:
         async with get_db_connection() as connection:
             result = await connection.execute(
-                text(render_knowledge_base_query(KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE, settings)),
+                _knowledge_authorization_query(
+                    KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE,
+                    settings,
+                ),
                 {
                     "is_restricted": is_restricted,
                     "knowledge_base_id": knowledge_base_id,
@@ -242,6 +274,7 @@ async def require_knowledge_base_permission(
                     "role": role,
                     "user_id": str(user_id),
                     "workspace_id": str(workspace_id),
+                    "roles": roles,
                 },
             )
             row = result.mappings().first()
