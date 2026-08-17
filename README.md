@@ -26,6 +26,42 @@ make dev
 make dev
 ```
 
+### 本地 PostgreSQL、pgvector 和 Redis
+
+知识库 migration 和可恢复聊天流需要本地 PostgreSQL/pgvector 与 Redis。项目提供了不绑定
+业务代码的 Docker Compose 编排：
+
+```bash
+make infra-up
+make infra-status
+```
+
+默认服务地址为：
+
+```env
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode
+REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+首次初始化时，先让 Next.js 在同一个本地数据库建立现有业务表，再应用 FastAPI 新增的
+知识库表。不要把本地值写回当前远程 Supabase 配置，可以使用命令行环境变量覆盖：
+
+```bash
+cd ..
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode pnpm db:migrate
+cd asianode-fastapi
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migration-status
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-grants
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-ingestion
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-embeddings
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-bases
+```
+
+确认四个 migration 都成功后，才在本地开发环境开启对应的
+`KNOWLEDGE_GRANTS_ENABLED`、`KNOWLEDGE_INGESTION_ENABLED`、
+`KNOWLEDGE_EMBEDDINGS_ENABLED` 和 `KNOWLEDGE_BASE_ENTITY_ENABLED`。`make infra-down` 只停止并
+移除容器，不带 `-v`，因此不会删除本地数据库或 Redis volume。
+
 服务启动后访问：
 
 - API 根路径：http://127.0.0.1:8000/
