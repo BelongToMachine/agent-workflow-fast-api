@@ -111,6 +111,10 @@ NEXT_PUBLIC_FASTAPI_BASE_URL=http://127.0.0.1:8000
 FastAPI `8000` 端口；FastAPI 负责 workspace 权限、消息持久化、模型调用和 SSE 返回。
 这样浏览器不会直接提交 userId、role 或 workspaceId 作为可信身份。
 
+FastAPI 会保留 Web 消息中的 JPEG/PNG 图片附件：文字部分继续使用普通字符串 content，图片
+会转换为 OpenAI-compatible `image_url` content。仅允许 `http://`、`https://` 和
+`data:image/...` URL；PDF、其他文件类型或本地文件路径不会被转发给模型。
+
 设置 `REDIS_URL` 后，FastAPI 会按 chat 保存短期 SSE chunks，并提供
 `GET /api/v1/chat/{chat_id}/stream` 给 AI SDK 自动断线重连。恢复接口会再次校验当前用户、
 workspace 和 chat 归属；没有配置 Redis 时会退化为普通 SSE，不阻塞聊天请求。

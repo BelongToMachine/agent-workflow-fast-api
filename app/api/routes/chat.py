@@ -133,14 +133,51 @@ def get_text(message: UIMessage) -> str:
     )
 
 
-def to_openai_messages(payload: ChatRequest) -> list[dict[str, str]]:
-    messages = payload.messages or ([payload.message] if payload.message else [])
+def _image_content(part: MessagePart) -> dict[str, Any] | None:
+    raw_part = part.model_dump()
+    media_type = raw_part.get("mediaType")
+    url = raw_part.get("url")
+    if (
+        part.type != "file"
+        or media_type not in {"image/jpeg", "image/png"}
+        or not isinstance(url, str)
+        or not url.startswith(("http://", "https://", "data:image/"))
+    ):
+        return None
+    return {
+        "type": "image_url",
+        "image_url": {"url": url},
+    }
 
-    return [
-        {"role": message.role, "content": get_text(message)}
-        for message in messages
-        if message.role in {"user", "assistant", "system"} and get_text(message)
+
+def _model_content(message: UIMessage) -> str | list[dict[str, Any]]:
+    text = get_text(message)
+    image_parts = [
+        image
+        for image in (_image_content(part) for part in message.parts)
+        if image is not None
     ]
+    if not image_parts:
+        return text
+
+    content: list[dict[str, Any]] = []
+    if text:
+        content.append({"type": "text", "text": text})
+    content.extend(image_parts)
+    return content
+
+
+def to_openai_messages(payload: ChatRequest) -> list[dict[str, Any]]:
+    messages = payload.messages or ([payload.message] if payload.message else [])
+    openai_messages: list[dict[str, Any]] = []
+    for message in messages:
+        if message.role not in {"user", "assistant", "system"}:
+            continue
+        content = _model_content(message)
+        if not content:
+            continue
+        openai_messages.append({"role": message.role, "content": content})
+    return openai_messages
 
 
 def sse_chunk(chunk: dict[str, object]) -> str:

@@ -13,6 +13,7 @@ from app.api.routes.chat import (
     _message_payload,
     _prepare_chat_persistence,
     _resolve_workspace_id,
+    to_openai_messages,
 )
 from app.api.routes.chats import (
     CHAT_BASE_CONDITIONS,
@@ -135,6 +136,95 @@ def test_chat_request_keeps_tool_parts_for_model_and_persistence() -> None:
             "contentType": "image/png",
             "name": "brief.png",
             "url": "https://example.com/brief.png",
+        }
+    ]
+
+
+def test_chat_converts_supported_image_parts_to_openai_multimodal_content() -> None:
+    payload = ChatRequest.model_validate(
+        {
+            "id": "00000000-0000-0000-0000-000000000010",
+            "message": {
+                "parts": [
+                    {
+                        "mediaType": "image/png",
+                        "name": "brief.png",
+                        "type": "file",
+                        "url": "https://cdn.example.com/brief.png",
+                    },
+                    {"text": "Summarize this image", "type": "text"},
+                ],
+                "role": "user",
+            },
+        }
+    )
+
+    assert to_openai_messages(payload) == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Summarize this image"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "https://cdn.example.com/brief.png"},
+                },
+            ],
+        }
+    ]
+
+
+def test_chat_does_not_forward_unsupported_or_untrusted_file_parts() -> None:
+    payload = ChatRequest.model_validate(
+        {
+            "id": "00000000-0000-0000-0000-000000000010",
+            "message": {
+                "parts": [
+                    {
+                        "mediaType": "application/pdf",
+                        "name": "brief.pdf",
+                        "type": "file",
+                        "url": "https://cdn.example.com/brief.pdf",
+                    },
+                    {
+                        "mediaType": "image/png",
+                        "name": "private.png",
+                        "type": "file",
+                        "url": "file:///private/private.png",
+                    },
+                    {"text": "Only use supported images", "type": "text"},
+                ],
+                "role": "user",
+            },
+        }
+    )
+
+    assert to_openai_messages(payload) == [
+        {"role": "user", "content": "Only use supported images"}
+    ]
+
+
+def test_chat_accepts_an_image_only_message_for_vision_models() -> None:
+    payload = ChatRequest.model_validate(
+        {
+            "id": "00000000-0000-0000-0000-000000000010",
+            "message": {
+                "parts": [
+                    {
+                        "mediaType": "image/jpeg",
+                        "name": "photo.jpg",
+                        "type": "file",
+                        "url": "data:image/jpeg;base64,ZmFrZQ==",
+                    }
+                ],
+                "role": "user",
+            },
+        }
+    )
+
+    assert to_openai_messages(payload)[0]["content"] == [
+        {
+            "type": "image_url",
+            "image_url": {"url": "data:image/jpeg;base64,ZmFrZQ=="},
         }
     ]
 
