@@ -5,7 +5,11 @@ from app.db.migrate_knowledge import (
     MIGRATION_PATHS,
     pending_migration_paths,
 )
-from app.db.migration_status import MigrationStatus, build_migration_statuses
+from app.db.migration_status import (
+    MIGRATION_STATUS_QUERY,
+    MigrationStatus,
+    build_migration_statuses,
+)
 from app.db.migration_utils import get_migration_target, migration_apply_error
 
 
@@ -49,12 +53,30 @@ def test_staging_migration_is_always_rejected() -> None:
 def test_migration_status_requires_all_entity_dependencies() -> None:
     row = {
         "grants_table": True,
+        "grants_required_columns": True,
+        "grants_indexes": True,
+        "grants_workspace_fk": True,
+        "grants_knowledge_base_fk": True,
         "files_table": True,
+        "files_required_columns": True,
+        "files_indexes": True,
+        "files_knowledge_base_fk": True,
+        "files_uploaded_by_fk": True,
+        "files_workspace_fk": True,
         "chunks_table": True,
+        "chunks_required_columns": True,
+        "chunks_indexes": True,
+        "chunks_file_fk": True,
+        "chunks_knowledge_base_fk": True,
+        "chunks_workspace_fk": True,
         "vector_extension": True,
         "embedding_column": True,
         "embedding_index": True,
+        "embedding_index_valid": True,
         "knowledge_base_table": True,
+        "knowledge_base_required_columns": True,
+        "knowledge_base_indexes": True,
+        "knowledge_base_workspace_fk": True,
         "grants_repointed": True,
         "files_repointed": False,
         "chunks_repointed": True,
@@ -64,6 +86,31 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
 
     assert [status.applied for status in statuses] == [True, True, True, False]
     assert statuses[-1].name == "0004_knowledge_bases"
+
+
+def test_migration_status_rejects_a_partial_schema() -> None:
+    row = {
+        "grants_table": True,
+        "grants_required_columns": True,
+        "grants_indexes": False,
+        "grants_workspace_fk": True,
+        "grants_knowledge_base_fk": True,
+    }
+
+    statuses = build_migration_statuses(row)
+
+    assert statuses[0].applied is False
+
+
+def test_migration_status_query_covers_schema_capabilities() -> None:
+    sql = str(MIGRATION_STATUS_QUERY)
+
+    assert "grants_required_columns" in sql
+    assert "files_required_columns" in sql
+    assert "chunks_required_columns" in sql
+    assert "embedding_index_valid" in sql
+    assert "knowledge_base_required_columns" in sql
+    assert "conrelid = to_regclass" in sql
 
 
 def test_knowledge_integrity_query_checks_cross_scope_relationships() -> None:

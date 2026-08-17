@@ -268,7 +268,8 @@ KNOWLEDGE_BASE_ENTITY_ENABLED=1
 uv run python -m app.db.migrate_knowledge_bases
 ```
 
-`make migration-status` 会只读检查四个迁移、pgvector 和独立知识库外键是否完整。
+`make migration-status` 会只读检查四个迁移的必需表、列、索引、外键，以及 pgvector 和
+HNSW 索引有效性；独立知识库迁移还会检查 backfill 后的依赖外键是否完整。
 
 确认连接的是本地开发数据库、完成数据核对后，再显式应用：
 
