@@ -1,4 +1,4 @@
-.PHONY: setup dev test lint
+.PHONY: setup dev test lint migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-embeddings
 
 setup:
 	uv sync
@@ -12,3 +12,11 @@ test:
 lint:
 	uv run ruff check .
 
+migrate-knowledge-grants:
+	uv run python -m app.db.migrate_knowledge_grants --apply
+
+migrate-knowledge-ingestion:
+	uv run python -m app.db.migrate_knowledge_ingestion --apply
+
+migrate-knowledge-embeddings:
+	uv run python -m app.db.migrate_knowledge_embeddings --apply

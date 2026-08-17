@@ -34,10 +34,23 @@ make dev
 - 内容查询：`POST http://127.0.0.1:8000/api/v1/content/search`
 - 当前用户：`GET http://127.0.0.1:8000/api/v1/me`
 - 知识库数据源：`GET http://127.0.0.1:8000/api/v1/knowledge-sources?workspace_id={workspace_id}`
+- 知识库列表：`GET http://127.0.0.1:8000/api/v1/knowledge-bases?workspace_id={workspace_id}`
+- 知识库创建：`POST http://127.0.0.1:8000/api/v1/knowledge-bases?workspace_id={workspace_id}`
+- 知识库重命名：`PATCH http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}?workspace_id={workspace_id}`
 - 成员列表：`GET http://127.0.0.1:8000/api/v1/admin/members?workspace_id={workspace_id}`
 - 成员权限更新：`PATCH http://127.0.0.1:8000/api/v1/admin/members?workspace_id={workspace_id}`
+- 聊天历史：`GET http://127.0.0.1:8000/api/v1/chats?workspace_id={workspace_id}`
+- 删除当前 workspace 的聊天历史：`DELETE http://127.0.0.1:8000/api/v1/chats?workspace_id={workspace_id}`
+- 聊天消息：`GET http://127.0.0.1:8000/api/v1/chats/{chat_id}/messages?workspace_id={workspace_id}`
+- 知识库授权列表：`GET http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants?workspace_id={workspace_id}`
+- 知识库授权新增/更新：`PUT http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants?workspace_id={workspace_id}`
+- 知识库授权删除：`DELETE http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants/{grant_id}?workspace_id={workspace_id}`
 - 本地 Mock OIDC consent：`POST http://127.0.0.1:8000/api/v1/dev/oidc/consent`
 - 聊天接口：`POST http://127.0.0.1:8000/api/v1/chat`
+- 知识库文件列表：`GET http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
+- 知识库文件上传：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
+- 知识库文件删除：`DELETE http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}?workspace_id={workspace_id}`
+- 知识库向量检索：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/search?workspace_id={workspace_id}`
 - Swagger：http://127.0.0.1:8000/docs
 
 本地运行时，FastAPI 会读取仓库根目录的 `.env.local`，因此可以复用现有的
@@ -54,7 +67,19 @@ FASTAPI_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_FASTAPI_BASE_URL=http://127.0.0.1:8000
 ```
 
-聊天请求会由浏览器直接发送到 FastAPI `8000` 端口，FastAPI 负责模型调用和 SSE 返回。本地默认使用开发身份，生产环境需要配置 OIDC/Logto Token 后再开放跨域访问。
+聊天请求会先发送到 Next.js `/api/chat` BFF，再由 BFF 通过签名的 NextAuth bridge 转发到
+FastAPI `8000` 端口；FastAPI 负责 workspace 权限、消息持久化、模型调用和 SSE 返回。
+这样浏览器不会直接提交 userId、role 或 workspaceId 作为可信身份。
+
+当当前用户具备 `knowledge.read` 时，FastAPI 会向模型注册只读的
+`searchProductsTool` 和 `searchContentTool`。模型产生 tool call 后由 FastAPI 服务端执行，
+工具内部继续复用 workspace 和知识库授权过滤；客户端不能直接伪造工具结果。
+
+## 安全防护
+
+FastAPI 默认对 `/api/v1/*` 开启进程内滑动窗口限流：普通接口默认每分钟 120 次，聊天
+每分钟 20 次，文件接口每分钟 30 次。健康检查和 OpenAPI 文档不计入限流。当前实现适合
+单实例部署；部署多个实例前需要把限流状态迁移到 Redis，并在反向代理层配置可信客户端 IP。
 
 ## 当前认证行为
 
@@ -83,6 +108,10 @@ DEV_OIDC_INTERNAL_SECRET=your-local-development-secret
 FastAPI 会校验 bridge 的 HMAC 签名和 5 分钟有效期，不接受浏览器提交的 userId、role
 或 workspaceId 作为可信身份。
 
+聊天历史在 `USE_FASTAPI_BACKEND=1` 时也通过 Next.js BFF 转发到 FastAPI。FastAPI 会同时
+校验 `chat.read`/`chat.delete`、当前用户和 workspace；分页 cursor 只能引用当前用户在
+当前 workspace 的聊天。
+
 ## 知识库授权迁移
 
 `migrations/0001_knowledge_base_grants.sql` 新增了过渡版
@@ -96,8 +125,60 @@ FastAPI 会校验 bridge 的 HMAC 签名和 5 分钟有效期，不接受浏览�
 KNOWLEDGE_GRANTS_ENABLED=1
 ```
 
+可以先执行只读预检：
+
+```bash
+uv run python -m app.db.migrate_knowledge_grants
+```
+
+确认连接的是本地开发数据库后，再显式执行：
+
+```bash
+make migrate-knowledge-grants
+```
+
+runner 在 staging/production 环境会拒绝执行；共享环境应通过正式部署迁移流程应用
+`migrations/0001_knowledge_base_grants.sql`。
+
+## 知识库文件入库
+
+文件入库默认关闭。确认本地数据库已经应用 `migrations/0002_knowledge_ingestion.sql` 后，设置：
+
+```env
+KNOWLEDGE_INGESTION_ENABLED=1
+KNOWLEDGE_STORAGE_DIR=storage/knowledge
+KNOWLEDGE_MAX_FILE_BYTES=26214400
+KNOWLEDGE_EMBEDDINGS_ENABLED=1
+EMBEDDING_API_KEY=your-embedding-provider-key
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+可以先执行只读预检：
+
+```bash
+uv run python -m app.db.migrate_knowledge_ingestion
+```
+
+确认连接的是本地开发数据库后，再显式执行：
+
+```bash
+make migrate-knowledge-ingestion
+make migrate-knowledge-embeddings
+```
+
+上传接口目前支持 PDF、Excel (`.xlsx`)、CSV、JSON、Markdown 和纯文本。接口先保存
+文件元数据并返回 `pending`，再由 FastAPI background task 解析、按固定窗口切片并更新为
+`ready` 或 `failed`。打开 Embedding 开关后，切片会调用 OpenAI-compatible `/embeddings`
+接口并写入 pgvector；搜索接口会先验证 workspace/知识库权限，再执行 cosine search。
+当前存储是本地磁盘，对象存储和真实数据库验证仍待接入。
+
 在开关关闭时，产品、内容和知识库列表保持原有 workspace 级行为，避免数据库迁移尚未
 执行时导致现有接口不可用。
+
+管理员 grant 管理接口同样受该开关保护，并要求 `members.manage` 权限。Next.js 的
+`/api/admin/knowledge-base-grants` BFF 只负责 NextAuth actor 校验和签名 bridge，实际
+授权读写由 FastAPI 完成；更新和删除操作会写入 `AuditLog`。
 
 本地可以使用以下配置测试未登录请求是否被拒绝：
 
@@ -118,11 +199,16 @@ make lint
 app/
 ├── api/
 │   ├── routes/
+│   │   ├── chats.py
+│   │   ├── admin_knowledge_grants.py
 │   │   ├── admin_members.py
 │   │   ├── chat.py
 │   │   ├── content.py
 │   │   ├── dev_oidc.py
 │   │   ├── health.py
+│   │   ├── knowledge_bases.py
+│   │   ├── knowledge_files.py
+│   │   ├── knowledge_search.py
 │   │   ├── knowledge_sources.py
 │   │   ├── me.py
 │   │   └── products.py
@@ -145,9 +231,10 @@ tests/
 1. ✅ 迁移商品查询及高级过滤，并与 Next.js 查询结果做对比。
 2. ✅ 迁移内容查询接口。
 3. 🚧 完成认证配置，并接入 Logto Token 验证。
-4. 🚧 基于现有 Workspace/WorkspaceMember 完成企业、成员、角色和知识库权限模型，再增加单知识库 grant。
-5. 增加文件上传、解析、向量检索和 AI Agent 接口。
+4. 🚧 基于现有 Workspace/WorkspaceMember 完成企业、成员、角色和知识库权限模型，再完成独立 KnowledgeBase 实体。
+5. 🚧 增加文件上传、解析、切片、Embedding 和带权限过滤的向量检索；默认关闭，等待本地 migration 验证。
+6. 增加对象存储和带知识库检索工具的 AI Agent 接口。
 
 商品和内容查询当前已经迁移到 FastAPI，并完成了与 Next.js 查询结果的真实数据对比。
 
-当前聊天接口还未迁移消息持久化和工具调用；统一用户身份验证已经接入，但 workspace/role/knowledge-base 授权会在后续权限模型阶段补齐。当前多轮上下文由 Web 前端暂时随请求传给 FastAPI，因此刷新页面后仍依赖现有 Next.js 消息接口。
+当前聊天接口由 FastAPI 负责 workspace 权限、模型调用、SSE、消息持久化和消息读取；工具调用、Redis 可恢复流和独立 stream 路由仍待迁移。
