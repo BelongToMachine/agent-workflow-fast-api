@@ -19,6 +19,10 @@ from app.core.config import get_settings
 class AgentToolError(Exception):
     """Raised when a server-side agent tool cannot safely execute."""
 
+    def __init__(self, message: str, *, status_code: int = 400) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class ProductToolInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -121,8 +125,17 @@ def _response_payload(response: object) -> dict[str, Any]:
                 "The enterprise search service returned an invalid response."
             ) from error
         if response.status_code >= 500:
-            raise AgentToolError("Enterprise search is currently unavailable.")
-        raise AgentToolError(str(payload.get("cause", "Enterprise search failed.")))
+            raise AgentToolError(
+                "Enterprise search is currently unavailable.",
+                status_code=response.status_code,
+            )
+        message = (
+            payload.get("cause")
+            or payload.get("message")
+            or payload.get("detail")
+            or "Enterprise search failed."
+        )
+        raise AgentToolError(str(message), status_code=response.status_code)
     if isinstance(response, BaseModel):
         return response.model_dump(by_alias=True)
     raise AgentToolError("The enterprise search service returned an unsupported response.")
@@ -180,7 +193,7 @@ async def execute_agent_tool(
             )
             return _response_payload(response)
     except HTTPException as error:
-        raise AgentToolError(str(error.detail)) from error
+        raise AgentToolError(str(error.detail), status_code=error.status_code) from error
     except ValueError as error:
         raise AgentToolError("The tool arguments are invalid.") from error
 

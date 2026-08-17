@@ -48,6 +48,7 @@ make dev
 - 本地 Mock OIDC consent：`POST http://127.0.0.1:8000/api/v1/dev/oidc/consent`
 - 聊天接口：`POST http://127.0.0.1:8000/api/v1/chat`
 - Chat Stream 恢复：`GET http://127.0.0.1:8000/api/v1/chat/{chat_id}/stream?workspace_id={workspace_id}`
+- 独立 Agent 查询：`POST http://127.0.0.1:8000/api/v1/agents/query?workspace_id={workspace_id}`
 - 知识库文件列表：`GET http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件上传：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件删除：`DELETE http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}?workspace_id={workspace_id}`
@@ -75,6 +76,10 @@ FastAPI `8000` 端口；FastAPI 负责 workspace 权限、消息持久化、模�
 设置 `REDIS_URL` 后，FastAPI 会按 chat 保存短期 SSE chunks，并提供
 `GET /api/v1/chat/{chat_id}/stream` 给 AI SDK 自动断线重连。恢复接口会再次校验当前用户、
 workspace 和 chat 归属；没有配置 Redis 时会退化为普通 SSE，不阻塞聊天请求。
+
+独立 Agent 查询接口只接受预定义的只读工具名和工具参数，不接受调用方提交的 user、role、
+permission 或 workspace 身份字段。FastAPI 会从 Bearer Token/NextAuth bridge 取得身份，
+先检查 workspace 的 `knowledge.read` 权限，再执行产品、内容或指定知识库搜索。
 
 当当前用户具备 `knowledge.read` 时，FastAPI 会向模型注册只读的
 `searchProductsTool` 和 `searchContentTool`。模型产生 tool call 后由 FastAPI 服务端执行，
