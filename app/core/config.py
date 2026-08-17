@@ -4,6 +4,10 @@ from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class SettingsConfigurationError(RuntimeError):
+    """Raised when the service cannot start with a safe runtime configuration."""
+
+
 class Settings(BaseSettings):
     app_name: str = Field(
         default="Asianode FastAPI",
@@ -294,3 +298,38 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_runtime_settings(settings: Settings) -> None:
+    """Fail fast on unsafe settings outside the local development environment."""
+    environment = settings.environment.strip().lower()
+    if environment not in {"staging", "production"}:
+        return
+
+    errors: list[str] = []
+    if settings.debug:
+        errors.append("DEBUG must be false")
+    if not settings.auth_issuer:
+        errors.append("AUTH_ISSUER is required")
+    elif not settings.auth_issuer.lower().startswith("https://"):
+        errors.append("AUTH_ISSUER must use HTTPS")
+    if not settings.auth_audience or not settings.auth_audience.strip():
+        errors.append("AUTH_AUDIENCE is required")
+    bridge_secret = settings.nextauth_bridge_secret or settings.auth_secret
+    if not bridge_secret or len(bridge_secret) < 32:
+        errors.append(
+            "NEXTAUTH_BRIDGE_SECRET or AUTH_SECRET must be at least 32 characters"
+        )
+    if not settings.auth_algorithms.strip():
+        errors.append("AUTH_ALGORITHMS must not be empty")
+
+    origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    if not origins or "*" in origins:
+        errors.append("CORS_ORIGINS must contain explicit origins and cannot include '*'")
+    if not settings.rate_limit_enabled:
+        errors.append("RATE_LIMIT_ENABLED must be true")
+
+    if errors:
+        raise SettingsConfigurationError(
+            f"Unsafe {environment} configuration: " + "; ".join(errors) + "."
+        )
