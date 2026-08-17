@@ -1,10 +1,12 @@
 import asyncio
 from datetime import datetime
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from starlette.requests import Request
 
 from app.api.routes.chat import (
     CHAT_ANY_BY_ID_QUERY,
@@ -13,6 +15,7 @@ from app.api.routes.chat import (
     _message_payload,
     _prepare_chat_persistence,
     _resolve_workspace_id,
+    chat,
     to_openai_messages,
 )
 from app.api.routes.chats import (
@@ -261,6 +264,67 @@ def test_development_chat_does_not_attempt_database_persistence() -> None:
     )
 
     assert persistence is None
+
+
+def test_chat_route_falls_back_when_client_submits_an_unlisted_model(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_require_workspace_permission(*args, **kwargs):
+        return SimpleNamespace(permissions=["chat.write", "knowledge.read"])
+
+    async def fake_prepare_chat_persistence(*args, **kwargs):
+        return None
+
+    def fake_stream_chat(*args, **kwargs):
+        captured["model"] = args[4]
+
+        async def source():
+            yield "data: done\n\n"
+
+        return source()
+
+    class FakeStreamStore:
+        def capture(self, _chat_id, source):
+            return source
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_settings",
+        lambda: Settings(deepseek_api_key="test-key", chat_model="deepseek-chat"),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.require_workspace_permission",
+        fake_require_workspace_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat._prepare_chat_persistence",
+        fake_prepare_chat_persistence,
+    )
+    monkeypatch.setattr("app.api.routes.chat.stream_chat", fake_stream_chat)
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_resumable_stream_store",
+        lambda *_args: FakeStreamStore(),
+    )
+
+    response = asyncio.run(
+        chat(
+            ChatRequest(
+                id="00000000-0000-0000-0000-000000000010",
+                message={
+                    "parts": [{"text": "hello", "type": "text"}],
+                    "role": "user",
+                },
+                selectedChatModel="untrusted-provider/model",
+            ),
+            request=Request({"type": "http", "headers": []}),
+            workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+            current_user=AuthenticatedUser(
+                user_id="development-user", is_development=True
+            ),
+        )
+    )
+
+    assert response.status_code == 200
+    assert captured["model"] == "deepseek-chat"
 
 
 def test_messages_endpoint_has_workspace_scoped_development_fallback() -> None:

@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes.chats import _database_error, _iso_timestamp
+from app.api.routes.models import resolve_chat_model
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.workspace_access import require_workspace_permission
@@ -219,7 +220,7 @@ async def stream_chat(
         async with httpx.AsyncClient(timeout=None) as client:
             for _ in range(5):
                 request_body: dict[str, Any] = {
-                    "model": payload.selectedChatModel or model,
+                    "model": resolve_chat_model(payload.selectedChatModel, model),
                     "messages": conversation,
                     "stream": True,
                 }
@@ -420,6 +421,7 @@ async def chat(
         effective_workspace_id,
         "chat.write",
     )
+    selected_model = resolve_chat_model(payload.selectedChatModel, settings.chat_model)
     persistence = await _prepare_chat_persistence(
         payload,
         current_user,
@@ -438,7 +440,7 @@ async def chat(
                 request_id,
                 settings.deepseek_api_key,
                 settings.deepseek_base_url,
-                settings.chat_model,
+                selected_model,
                 current_user,
                 effective_workspace_id,
                 "knowledge.read" in workspace_access.permissions,
