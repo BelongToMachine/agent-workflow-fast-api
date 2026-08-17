@@ -1,4 +1,5 @@
 from app.core.config import Settings
+from app.db.knowledge_integrity import KNOWLEDGE_INTEGRITY_QUERY, build_integrity_checks
 from app.db.migration_status import build_migration_statuses
 from app.db.migration_utils import get_migration_target, migration_apply_error
 
@@ -58,3 +59,34 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
 
     assert [status.applied for status in statuses] == [True, True, True, False]
     assert statuses[-1].name == "0004_knowledge_bases"
+
+
+def test_knowledge_integrity_query_checks_cross_scope_relationships() -> None:
+    sql = str(KNOWLEDGE_INTEGRITY_QUERY)
+
+    assert 'grant_record."workspaceId" <> knowledge_base."workspaceId"' in sql
+    assert 'knowledge_file."workspaceId" <> knowledge_base."workspaceId"' in sql
+    assert 'chunk."knowledgeBaseId" <> knowledge_file."knowledgeBaseId"' in sql
+    assert 'source."workspaceId"' in sql
+
+
+def test_knowledge_integrity_checks_pass_for_zero_violations() -> None:
+    checks = build_integrity_checks({})
+
+    assert checks
+    assert all(check.passed for check in checks)
+
+
+def test_knowledge_integrity_checks_report_each_violation() -> None:
+    checks = build_integrity_checks(
+        {
+            "grants_without_knowledge_base": 1,
+            "chunk_file_scope_mismatches": 2,
+        }
+    )
+
+    assert checks[0].violations == 1
+    assert checks[0].passed is False
+    assert checks[7].violations == 2
+    assert checks[7].passed is False
+    assert sum(not check.passed for check in checks) == 2

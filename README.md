@@ -51,6 +51,7 @@ cd ..
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode pnpm db:migrate
 cd asianode-fastapi
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migration-status
+POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make knowledge-integrity
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-grants
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-ingestion
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge-embeddings
@@ -61,6 +62,10 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 `KNOWLEDGE_GRANTS_ENABLED`、`KNOWLEDGE_INGESTION_ENABLED`、
 `KNOWLEDGE_EMBEDDINGS_ENABLED` 和 `KNOWLEDGE_BASE_ENTITY_ENABLED`。`make infra-down` 只停止并
 移除容器，不带 `-v`，因此不会删除本地数据库或 Redis volume。
+
+`make knowledge-integrity` 是只读安全检查，要求四个 migration 已完成，然后验证 grant、
+文件和切片没有孤儿记录，且 workspace、knowledge base、file 的归属一致。检查失败时返回
+非零退出码；它不会自动修复数据，也不会替代真实数据库和对象存储验证。
 
 服务启动后访问：
 
@@ -92,6 +97,7 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 - 独立 Agent 查询：`POST http://127.0.0.1:8000/api/v1/agents/query?workspace_id={workspace_id}`
 - 独立 Agent workflow：`POST http://127.0.0.1:8000/api/v1/agents/run?workspace_id={workspace_id}`
 - 知识库迁移状态：`make migration-status`
+- 知识库数据完整性：`make knowledge-integrity`
 - 知识库文件列表：`GET http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件上传：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件删除：`DELETE http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}?workspace_id={workspace_id}`
