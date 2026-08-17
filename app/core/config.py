@@ -244,6 +244,13 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("RATE_LIMIT_ENABLED", "ASIANODE_RATE_LIMIT_ENABLED"),
     )
+    rate_limit_redis_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "RATE_LIMIT_REDIS_ENABLED",
+            "ASIANODE_RATE_LIMIT_REDIS_ENABLED",
+        ),
+    )
     rate_limit_requests: int = Field(
         default=120,
         ge=1,
