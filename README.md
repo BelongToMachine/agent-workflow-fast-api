@@ -37,6 +37,7 @@ make dev
 - 知识库列表：`GET http://127.0.0.1:8000/api/v1/knowledge-bases?workspace_id={workspace_id}`
 - 知识库创建：`POST http://127.0.0.1:8000/api/v1/knowledge-bases?workspace_id={workspace_id}`
 - 知识库重命名：`PATCH http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}?workspace_id={workspace_id}`
+- 知识库删除：`DELETE http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}?workspace_id={workspace_id}`
 - 成员列表：`GET http://127.0.0.1:8000/api/v1/admin/members?workspace_id={workspace_id}`
 - 成员权限更新：`PATCH http://127.0.0.1:8000/api/v1/admin/members?workspace_id={workspace_id}`
 - 聊天历史：`GET http://127.0.0.1:8000/api/v1/chats?workspace_id={workspace_id}`
@@ -175,6 +176,11 @@ make migrate-knowledge-bases
 迁移应用前不要打开 `KNOWLEDGE_BASE_ENTITY_ENABLED`；开关关闭时 FastAPI 继续使用
 `KnowledgeSource` 兼容路径。runner 在 staging/production 环境会拒绝本地执行，正式环境
 应通过部署系统审查并应用 SQL。
+
+知识库删除是数据库优先的幂等流程：FastAPI 先验证知识库级 `manage` 权限，再删除知识库
+记录，让数据库级联清理 grant、文件元数据和切片，最后按每个文件记录的 provider 清理本地
+或 S3 对象。对象存储清理失败不会重新暴露已删除的知识库，接口会返回 `202` 和待清理数量，
+并写入服务日志，便于后续接入持久化 cleanup worker。
 
 ## 知识库文件入库
 

@@ -5,6 +5,7 @@ from app.api.routes.admin_knowledge_grants import (
 from app.api.routes.content import _build_content_search_query
 from app.api.routes.content import source_names_query as content_source_names_query
 from app.api.routes.knowledge_bases import (
+    knowledge_base_delete_query,
     knowledge_base_insert_query,
     knowledge_base_select_query,
     knowledge_base_update_query,
@@ -34,6 +35,7 @@ def test_entity_flag_selects_the_independent_table() -> None:
     assert 'FROM "KnowledgeBase"' in str(knowledge_base_select_query(settings))
     assert 'INSERT INTO "KnowledgeBase"' in str(knowledge_base_insert_query(settings))
     assert 'UPDATE "KnowledgeBase"' in str(knowledge_base_update_query(settings))
+    assert 'DELETE FROM "KnowledgeBase"' in str(knowledge_base_delete_query(settings))
 
 
 def test_knowledge_queries_share_the_independent_entity() -> None:
