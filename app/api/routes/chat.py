@@ -167,6 +167,7 @@ async def stream_chat(
     current_user: AuthenticatedUser,
     workspace_id: UUID,
     can_query_knowledge: bool,
+    include_knowledge_base_tool: bool,
     on_complete: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> AsyncIterator[str]:
     assistant_message_id = str(uuid4())
@@ -185,7 +186,9 @@ async def stream_chat(
                     "stream": True,
                 }
                 if can_query_knowledge:
-                    request_body["tools"] = agent_tool_definitions()
+                    request_body["tools"] = agent_tool_definitions(
+                        include_knowledge_base=include_knowledge_base_tool
+                    )
                     request_body["tool_choice"] = "auto"
 
                 tool_calls: dict[int, dict[str, str]] = {}
@@ -394,6 +397,7 @@ async def chat(
             current_user,
             effective_workspace_id,
             "knowledge.read" in workspace_access.permissions,
+            settings.knowledge_embeddings_enabled,
             on_complete=persistence,
         ),
         media_type="text/event-stream",

@@ -2,12 +2,18 @@ import json
 from typing import Any, Literal
 from uuid import UUID
 
+from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.routes.content import search_content
+from app.api.routes.knowledge_search import (
+    KnowledgeSearchRequest,
+    search_knowledge_base,
+)
 from app.api.routes.products import search_products
 from app.core.auth import AuthenticatedUser
+from app.core.config import get_settings
 
 
 class AgentToolError(Exception):
@@ -56,8 +62,16 @@ class ContentToolInput(BaseModel):
     submitter: str | None = None
 
 
-def agent_tool_definitions() -> list[dict[str, Any]]:
-    return [
+class KnowledgeBaseToolInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    knowledge_base_id: UUID = Field(alias="knowledgeBaseId")
+    limit: int = Field(default=8, ge=1, le=20)
+    query: str = Field(min_length=1, max_length=2000)
+
+
+def agent_tool_definitions(*, include_knowledge_base: bool = True) -> list[dict[str, Any]]:
+    definitions = [
         {
             "type": "function",
             "function": {
@@ -81,6 +95,21 @@ def agent_tool_definitions() -> list[dict[str, Any]]:
             },
         },
     ]
+    if include_knowledge_base:
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "searchKnowledgeBaseTool",
+                    "description": (
+                        "Search one authorized knowledge base using semantic search. "
+                        "Only use a knowledgeBaseId that the current user is allowed to read."
+                    ),
+                    "parameters": KnowledgeBaseToolInput.model_json_schema(),
+                },
+            },
+        )
+    return definitions
 
 
 def _response_payload(response: object) -> dict[str, Any]:
@@ -139,6 +168,19 @@ async def execute_agent_tool(
             )
             response = await search_content(payload, current_user)
             return _response_payload(response)
+
+        if name == "searchKnowledgeBaseTool":
+            payload = KnowledgeBaseToolInput.model_validate(arguments)
+            response = await search_knowledge_base(
+                knowledge_base_id=payload.knowledge_base_id,
+                payload=KnowledgeSearchRequest(query=payload.query, limit=payload.limit),
+                workspace_id=workspace_id,
+                current_user=current_user,
+                settings=get_settings(),
+            )
+            return _response_payload(response)
+    except HTTPException as error:
+        raise AgentToolError(str(error.detail)) from error
     except ValueError as error:
         raise AgentToolError("The tool arguments are invalid.") from error
 
