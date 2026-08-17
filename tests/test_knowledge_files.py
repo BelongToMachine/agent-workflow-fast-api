@@ -1,3 +1,4 @@
+import asyncio
 import io
 from uuid import UUID
 
@@ -15,12 +16,64 @@ from app.api.routes.knowledge_files import (
     _extract_text,
     _safe_filename,
     _storage_path,
+    process_knowledge_file,
 )
 from app.core.config import Settings, get_settings
 from app.db.migrate_knowledge_ingestion import MIGRATION_PATH
 from app.main import app
+from app.services.storage import LocalKnowledgeStorage
 
 client = TestClient(app)
+
+
+class FakeResult:
+    def __init__(self, row: dict[str, object] | None = None) -> None:
+        self.row = row
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self.row
+
+
+class FakeTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args) -> None:
+        return None
+
+
+class FakeIngestionConnection:
+    def __init__(self, row: dict[str, object]) -> None:
+        self.row = row
+        self.status_updates: list[dict[str, object]] = []
+        self.inserted_chunks: list[dict[str, object]] = []
+
+    async def execute(self, statement, parameters=None):
+        sql = str(statement)
+        if sql.lstrip().startswith("SELECT"):
+            return FakeResult(self.row)
+        if 'UPDATE "KnowledgeFile"' in sql:
+            self.status_updates.append(parameters or {})
+        if 'INSERT INTO "KnowledgeChunk"' in sql:
+            self.inserted_chunks.extend(parameters or [])
+        return FakeResult()
+
+    def begin(self):
+        return FakeTransaction()
+
+
+class FakeConnectionContext:
+    def __init__(self, connection: FakeIngestionConnection) -> None:
+        self.connection = connection
+
+    async def __aenter__(self):
+        return self.connection
+
+    async def __aexit__(self, *_args) -> None:
+        return None
 
 
 @pytest.fixture
@@ -91,6 +144,48 @@ def test_chunking_adds_overlap_without_empty_chunks() -> None:
     assert len(chunks) == 3
     assert all(chunks)
     assert chunks[0][-120:] == chunks[1][:120]
+
+
+def test_process_knowledge_file_reads_chunks_and_marks_file_ready(monkeypatch, tmp_path) -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000010")
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    storage_key = "workspace/knowledge/data.csv"
+    row = {
+        "storage_provider": "local",
+        "storage_key": storage_key,
+        "original_name": "data.csv",
+        "knowledge_base_id": knowledge_base_id,
+    }
+    settings = Settings(
+        knowledge_ingestion_enabled=True,
+        knowledge_embeddings_enabled=False,
+        knowledge_storage_dir=str(tmp_path),
+    )
+    storage = LocalKnowledgeStorage(str(tmp_path))
+    connection = FakeIngestionConnection(row)
+
+    asyncio.run(storage.put(storage_key, b"name,price\nchair,10"))
+    monkeypatch.setattr("app.api.routes.knowledge_files.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_knowledge_storage_for_provider",
+        lambda _settings, _provider: storage,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        lambda: FakeConnectionContext(connection),
+    )
+
+    asyncio.run(process_knowledge_file(file_id, workspace_id))
+
+    assert [update["status"] for update in connection.status_updates] == [
+        "processing",
+        "ready",
+    ]
+    assert [chunk["content"] for chunk in connection.inserted_chunks] == [
+        "name\tprice\nchair\t10"
+    ]
+    assert connection.inserted_chunks[0]["knowledge_base_id"] == knowledge_base_id
 
 
 def test_ingestion_migration_is_idempotent_and_contains_chunk_table() -> None:
