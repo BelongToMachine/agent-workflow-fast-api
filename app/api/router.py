@@ -16,6 +16,7 @@ from app.api.routes.knowledge_search import router as knowledge_search_router
 from app.api.routes.knowledge_sources import router as knowledge_sources_router
 from app.api.routes.me import router as me_router
 from app.api.routes.products import router as products_router
+from app.api.routes.votes import router as votes_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health_router)
@@ -34,3 +35,4 @@ api_router.include_router(knowledge_bases_router)
 api_router.include_router(knowledge_search_router)
 api_router.include_router(me_router)
 api_router.include_router(products_router)
+api_router.include_router(votes_router)
