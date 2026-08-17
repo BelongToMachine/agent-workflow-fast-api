@@ -50,6 +50,7 @@ make dev
 - 聊天接口：`POST http://127.0.0.1:8000/api/v1/chat`
 - Chat Stream 恢复：`GET http://127.0.0.1:8000/api/v1/chat/{chat_id}/stream?workspace_id={workspace_id}`
 - 独立 Agent 查询：`POST http://127.0.0.1:8000/api/v1/agents/query?workspace_id={workspace_id}`
+- 知识库迁移状态：`make migration-status`
 - 知识库文件列表：`GET http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件上传：`POST http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files?workspace_id={workspace_id}`
 - 知识库文件删除：`DELETE http://127.0.0.1:8000/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}?workspace_id={workspace_id}`
@@ -144,6 +145,12 @@ KNOWLEDGE_GRANTS_ENABLED=1
 uv run python -m app.db.migrate_knowledge_grants
 ```
 
+也可以一次性查看四个知识库迁移及其依赖是否完整：
+
+```bash
+make migration-status
+```
+
 确认连接的是本地开发数据库后，再显式执行：
 
 ```bash
@@ -152,6 +159,10 @@ make migrate-knowledge-grants
 
 runner 在 staging/production 环境会拒绝执行；共享环境应通过正式部署迁移流程应用
 `migrations/0001_knowledge_base_grants.sql`。
+
+`--apply` 默认只允许 loopback 或 Unix-socket 数据库目标。即使 `ENVIRONMENT=development`，
+远程 Supabase、云 PostgreSQL 等目标也会被拒绝；只有经过备份和人工复核后，才可以显式
+增加 `--allow-remote`。
 
 ## 独立 KnowledgeBase 实体
 
@@ -168,6 +179,8 @@ KNOWLEDGE_BASE_ENTITY_ENABLED=1
 ```bash
 uv run python -m app.db.migrate_knowledge_bases
 ```
+
+`make migration-status` 会只读检查四个迁移、pgvector 和独立知识库外键是否完整。
 
 确认连接的是本地开发数据库、完成数据核对后，再显式应用：
 
@@ -279,8 +292,8 @@ tests/
 1. ✅ 迁移商品查询及高级过滤，并与 Next.js 查询结果做对比。
 2. ✅ 迁移内容查询接口。
 3. 🚧 完成认证配置，并接入 Logto Token 验证。
-4. 🚧 基于现有 Workspace/WorkspaceMember 完成企业、成员、角色和知识库权限模型；独立 KnowledgeBase 实体代码、回填 SQL 和 FastAPI feature flag 已完成，等待数据库迁移与真实数据验证。
-5. 🚧 增加文件上传、解析、切片、Embedding 和带权限过滤的向量检索；默认关闭，等待本地 migration 验证。
+4. 🚧 基于现有 Workspace/WorkspaceMember 完成企业、成员、角色和知识库权限模型；独立 KnowledgeBase 实体代码、回填 SQL、统一 migration status 和远程目标安全门已完成，等待本地数据库迁移与真实数据验证。
+5. 🚧 增加文件上传、解析、切片、Embedding 和带权限过滤的向量检索；默认关闭，等待本地 migration、真实对象存储和向量验证。
 6. ✅ 增加 S3-compatible 对象存储和带知识库检索工具的 AI Agent 接口。
 
 商品和内容查询当前已经迁移到 FastAPI，并完成了与 Next.js 查询结果的真实数据对比。

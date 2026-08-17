@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlalchemy import text
 
 from app.core.config import get_settings
+from app.db.migration_utils import migration_apply_error
 from app.db.session import get_db_connection
 
 MIGRATION_PATH = (
@@ -22,12 +23,16 @@ TABLE_EXISTS_QUERY = text(
 )
 
 
-async def _run(*, apply: bool) -> int:
+async def _run(*, apply: bool, allow_remote: bool = False) -> int:
     if not MIGRATION_PATH.is_file():
         print(f"Migration file not found: {MIGRATION_PATH}")
         return 1
 
     settings = get_settings()
+    if apply:
+        if error := migration_apply_error(settings, allow_remote=allow_remote):
+            print(error)
+            return 1
     async with get_db_connection() as connection:
         async with connection.begin():
             result = await connection.execute(TABLE_EXISTS_QUERY)
@@ -42,13 +47,6 @@ async def _run(*, apply: bool) -> int:
                 )
                 return 2
 
-            if settings.environment.lower() in {"production", "staging"}:
-                print(
-                    "Refusing to apply a local migration in staging/production. "
-                    "Run the reviewed SQL through the deployment migration process."
-                )
-                return 1
-
             await connection.exec_driver_sql(MIGRATION_PATH.read_text(encoding="utf-8"))
             print("KnowledgeBase entity migration applied successfully.")
             return 0
@@ -61,8 +59,13 @@ def main() -> None:
         action="store_true",
         help="Apply the migration. Without this flag, only a read-only preflight is run.",
     )
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="Allow apply against a non-local development database after review.",
+    )
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(_run(apply=args.apply)))
+    raise SystemExit(asyncio.run(_run(apply=args.apply, allow_remote=args.allow_remote)))
 
 
 if __name__ == "__main__":
