@@ -5,13 +5,16 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes.admin_knowledge_grants import _write_audit_log
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
-from app.core.knowledge_access import require_knowledge_base_permission
+from app.core.knowledge_access import (
+    get_authorized_source_ids,
+    require_knowledge_base_permission,
+)
 from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
@@ -71,6 +74,7 @@ KNOWLEDGE_BASE_SELECT_TEMPLATE = """
         "updatedAt" AS updated_at
     FROM {knowledge_base_table}
     WHERE "workspaceId" = :workspace_id
+    {authorization_condition}
     """
 KNOWLEDGE_BASE_INSERT_TEMPLATE = """
     INSERT INTO {knowledge_base_table}
@@ -110,8 +114,24 @@ KNOWLEDGE_BASE_DELETE_TEMPLATE = """
     """
 
 
-def knowledge_base_select_query(settings: Settings | None = None) -> object:
-    return text(render_knowledge_base_query(KNOWLEDGE_BASE_SELECT_TEMPLATE, settings))
+def knowledge_base_select_query(
+    settings: Settings | None = None,
+    authorized_source_ids: list[UUID] | None = None,
+) -> object:
+    authorization_condition = ""
+    if authorized_source_ids is not None:
+        authorization_condition = 'AND "id" IN :authorized_source_ids'
+    query = text(
+        render_knowledge_base_query(
+            KNOWLEDGE_BASE_SELECT_TEMPLATE.replace(
+                "{authorization_condition}", authorization_condition
+            ),
+            settings,
+        )
+    )
+    if authorized_source_ids is not None:
+        query = query.bindparams(bindparam("authorized_source_ids", expanding=True))
+    return query
 
 
 def knowledge_base_insert_query(settings: Settings | None = None) -> object:
@@ -204,12 +224,25 @@ async def list_knowledge_bases(
     current_user: AuthenticatedUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> KnowledgeBaseListResponse | JSONResponse:
-    await require_workspace_permission(current_user, workspace_id, "knowledge.read")
+    workspace_access = await require_workspace_permission(
+        current_user,
+        workspace_id,
+        "knowledge.read",
+    )
+    authorized_source_ids = await get_authorized_source_ids(
+        current_user,
+        workspace_id,
+        is_guest=workspace_access.is_guest,
+        workspace_role=workspace_access.role,
+    )
+    params: dict[str, object] = {"workspace_id": workspace_id}
+    if authorized_source_ids is not None:
+        params["authorized_source_ids"] = authorized_source_ids
     try:
         async with get_db_connection() as connection:
             result = await connection.execute(
-                knowledge_base_select_query(settings),
-                {"workspace_id": workspace_id},
+                knowledge_base_select_query(settings, authorized_source_ids),
+                params,
             )
             rows = result.mappings().all()
     except RuntimeError as error:

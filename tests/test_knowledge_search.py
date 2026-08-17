@@ -4,6 +4,7 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.routes.knowledge_bases import KnowledgeBaseListResponse
 from app.api.routes.knowledge_search import SEARCH_QUERY, KnowledgeSearchRequest
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
@@ -28,17 +29,22 @@ def test_agent_tools_expose_only_read_only_enterprise_search_tools() -> None:
     assert [item["function"]["name"] for item in definitions] == [
         "searchProductsTool",
         "searchContentTool",
+        "listKnowledgeBasesTool",
         "searchKnowledgeBaseTool",
     ]
     assert all(item["function"]["parameters"]["type"] == "object" for item in definitions)
 
 
 def test_disabled_knowledge_embeddings_do_not_expose_knowledge_base_tool() -> None:
-    definitions = agent_tool_definitions(include_knowledge_base=False)
+    definitions = agent_tool_definitions(
+        include_knowledge_base=True,
+        include_knowledge_base_search=False,
+    )
 
     assert [item["function"]["name"] for item in definitions] == [
         "searchProductsTool",
         "searchContentTool",
+        "listKnowledgeBasesTool",
     ]
 
 
@@ -104,6 +110,33 @@ def test_knowledge_base_tool_calls_permission_checked_search(monkeypatch) -> Non
         "00000000-0000-0000-0000-000000000002"
     )
     assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
+
+
+def test_list_knowledge_bases_tool_calls_permission_checked_discovery(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_list_knowledge_bases(**kwargs):
+        captured.update(kwargs)
+        return KnowledgeBaseListResponse(knowledgeBases=[])
+
+    monkeypatch.setattr(
+        "app.services.agent_tools.list_knowledge_bases",
+        fake_list_knowledge_bases,
+    )
+
+    result = asyncio.run(
+        execute_agent_tool(
+            "listKnowledgeBasesTool",
+            {},
+            current_user=AuthenticatedUser(user_id="development-user", is_development=True),
+            workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+            can_query_knowledge=True,
+        )
+    )
+
+    assert result == {"knowledgeBases": []}
+    assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
+    assert captured["current_user"].is_development is True
 
 
 def test_knowledge_base_tool_cannot_bypass_chat_knowledge_permission() -> None:

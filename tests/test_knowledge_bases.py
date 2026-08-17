@@ -1,4 +1,5 @@
 import asyncio
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 
@@ -7,6 +8,7 @@ from app.api.routes.knowledge_bases import (
     KNOWLEDGE_BASE_SELECT,
     KnowledgeBaseWriteRequest,
     _cleanup_knowledge_base_files,
+    knowledge_base_select_query,
 )
 from app.core.config import Settings
 from app.main import app
@@ -27,6 +29,15 @@ def test_knowledge_base_name_is_normalized() -> None:
 def test_knowledge_base_query_is_workspace_scoped() -> None:
     assert '"workspaceId" = :workspace_id' in str(KNOWLEDGE_BASE_SELECT)
     assert '"workspaceId" = :workspace_id' in str(KNOWLEDGE_BASE_DELETE)
+
+
+def test_knowledge_base_list_query_can_apply_authorized_source_ids() -> None:
+    source_id = UUID("00000000-0000-0000-0000-000000000002")
+    query = knowledge_base_select_query(authorized_source_ids=[source_id])
+
+    assert 'AND "id" IN' in str(query)
+    assert "authorized_source_ids" in str(query)
+    assert query._bindparams["authorized_source_ids"].expanding is True
 
 
 def test_knowledge_base_creation_requires_a_persisted_identity() -> None:

@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.routes.content import search_content
+from app.api.routes.knowledge_bases import list_knowledge_bases
 from app.api.routes.knowledge_search import (
     KnowledgeSearchRequest,
     search_knowledge_base,
@@ -74,7 +75,15 @@ class KnowledgeBaseToolInput(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
 
 
-def agent_tool_definitions(*, include_knowledge_base: bool = True) -> list[dict[str, Any]]:
+class ListKnowledgeBasesToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+def agent_tool_definitions(
+    *,
+    include_knowledge_base: bool = True,
+    include_knowledge_base_search: bool | None = None,
+) -> list[dict[str, Any]]:
     definitions = [
         {
             "type": "function",
@@ -100,6 +109,22 @@ def agent_tool_definitions(*, include_knowledge_base: bool = True) -> list[dict[
         },
     ]
     if include_knowledge_base:
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "listKnowledgeBasesTool",
+                    "description": (
+                        "List knowledge bases the current user can read in the current workspace. "
+                        "Use the returned knowledgeBaseId with searchKnowledgeBaseTool."
+                    ),
+                    "parameters": ListKnowledgeBasesToolInput.model_json_schema(),
+                },
+            },
+        )
+        if include_knowledge_base_search is None:
+            include_knowledge_base_search = True
+    if include_knowledge_base and include_knowledge_base_search:
         definitions.append(
             {
                 "type": "function",
@@ -187,6 +212,15 @@ async def execute_agent_tool(
             response = await search_knowledge_base(
                 knowledge_base_id=payload.knowledge_base_id,
                 payload=KnowledgeSearchRequest(query=payload.query, limit=payload.limit),
+                workspace_id=workspace_id,
+                current_user=current_user,
+                settings=get_settings(),
+            )
+            return _response_payload(response)
+
+        if name == "listKnowledgeBasesTool":
+            ListKnowledgeBasesToolInput.model_validate(arguments)
+            response = await list_knowledge_bases(
                 workspace_id=workspace_id,
                 current_user=current_user,
                 settings=get_settings(),

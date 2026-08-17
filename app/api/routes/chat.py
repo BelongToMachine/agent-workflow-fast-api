@@ -188,7 +188,8 @@ async def stream_chat(
                 }
                 if can_query_knowledge:
                     request_body["tools"] = agent_tool_definitions(
-                        include_knowledge_base=include_knowledge_base_tool
+                        include_knowledge_base=True,
+                        include_knowledge_base_search=include_knowledge_base_tool,
                     )
                     request_body["tool_choice"] = "auto"
 
