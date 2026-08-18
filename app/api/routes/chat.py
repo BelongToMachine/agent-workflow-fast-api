@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -24,6 +25,7 @@ from app.services.agent_tools import (
 from app.services.resumable_streams import get_resumable_stream_store
 
 router = APIRouter(tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 class MessagePart(BaseModel):
@@ -314,6 +316,7 @@ async def stream_chat(
                                             "type": "tool-input-start",
                                             "toolCallId": state["id"],
                                             "toolName": state["name"],
+                                            "dynamic": True,
                                         }
                                     )
                                 state["arguments"] += argument_delta
@@ -363,12 +366,22 @@ async def stream_chat(
                     except (AgentToolError, json.JSONDecodeError) as error:
                         parsed_arguments = {}
                         output = {"error": str(error)}
+                    except Exception:
+                        logger.exception(
+                            "Agent tool execution failed",
+                            extra={
+                                "tool_name": tool_call["name"],
+                                "tool_call_id": tool_call["id"],
+                            },
+                        )
+                        output = {"error": "The agent tool could not be completed."}
                     yield sse_chunk(
                         {
                             "type": "tool-input-available",
                             "toolCallId": tool_call["id"],
                             "toolName": tool_call["name"],
                             "input": parsed_arguments,
+                            "dynamic": True,
                         }
                     )
                     yield sse_chunk(
@@ -376,6 +389,7 @@ async def stream_chat(
                             "type": "tool-output-available",
                             "toolCallId": tool_call["id"],
                             "output": output,
+                            "dynamic": True,
                         }
                     )
                     conversation.append(

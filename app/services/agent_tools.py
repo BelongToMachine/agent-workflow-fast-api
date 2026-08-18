@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.routes.content import search_content
+from app.api.routes.content import ContentSearchRequest, search_content
 from app.api.routes.knowledge_bases import list_knowledge_bases
 from app.api.routes.knowledge_files import list_knowledge_files
 from app.api.routes.knowledge_search import (
@@ -262,14 +262,19 @@ async def execute_agent_tool(
                 missing_field=payload.missing_field,
                 limit=payload.limit,
                 source_file_names=payload.source_file_names,
+                settings=get_settings(),
             )
             return _response_payload(response)
 
         if name == "searchContentTool":
-            payload = ContentToolInput.model_validate(
+            payload = ContentSearchRequest.model_validate(
                 {**arguments, "workspaceId": str(workspace_id)}
             )
-            response = await search_content(payload, current_user)
+            response = await search_content(
+                payload,
+                _current_user=current_user,
+                settings=get_settings(),
+            )
             return _response_payload(response)
 
         if name == "searchKnowledgeBaseTool":
