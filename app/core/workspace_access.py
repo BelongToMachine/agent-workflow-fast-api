@@ -84,12 +84,22 @@ async def require_workspace_permission(
 ) -> WorkspaceAccess:
     validate_workspace_context(current_user, workspace_id)
     if current_user.is_development:
+        permissions = (
+            current_user.permissions
+            if "permissions" in current_user.claims
+            else get_effective_permissions("owner", [])
+        )
+        if permission not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="The development user does not have this permission.",
+            )
         return WorkspaceAccess(
             user_id=current_user.user_id,
             workspace_id=workspace_id,
-            role="owner",
-            permissions=get_effective_permissions("owner", []),
-            is_guest=False,
+            role=current_user.role or "owner",
+            permissions=permissions,
+            is_guest=current_user.is_guest,
             is_development=True,
         )
 

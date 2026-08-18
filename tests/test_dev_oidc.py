@@ -1,7 +1,11 @@
+import asyncio
 import time
 from urllib.parse import parse_qs, urlparse
+from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.testclient import TestClient
 
 from app.api.routes.dev_oidc import (
@@ -10,8 +14,10 @@ from app.api.routes.dev_oidc import (
     _sign,
     verify_dev_oidc_code,
 )
+from app.core.auth import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.permissions import PERMISSION_CATALOG
+from app.core.workspace_access import require_workspace_permission
 from app.main import app
 
 client = TestClient(app)
@@ -153,3 +159,56 @@ def test_consent_route_is_disabled_outside_development(dev_settings: Settings) -
 
     assert response.status_code == 404
     assert response.json() == {"message": "Not Found"}
+
+
+def test_development_token_endpoint_issues_a_custom_permission_profile(
+    dev_settings: Settings,
+) -> None:
+    response = client.post(
+        "/api/v1/dev/oidc/token",
+        json={
+            "email": "viewer@example.com",
+            "permissions": ["chat.read"],
+            "role": "viewer",
+            "subject": "dev-viewer",
+            "workspaceId": "00000000-0000-0000-0000-000000000001",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["permissions"] == ["chat.read"]
+    assert result["role"] == "viewer"
+    assert result["expiresAt"] > int(time.time() * 1000)
+
+    user = asyncio.run(
+        get_current_user(
+            HTTPAuthorizationCredentials(
+                scheme="Bearer",
+                credentials=result["accessToken"],
+            ),
+            dev_settings,
+        )
+    )
+    assert user.user_id == "dev-viewer"
+    assert user.permissions == ["chat.read"]
+    assert user.is_development is True
+
+    access = asyncio.run(
+        require_workspace_permission(
+            user,
+            UUID("00000000-0000-0000-0000-000000000001"),
+            "chat.read",
+        )
+    )
+    assert access.permissions == ["chat.read"]
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            require_workspace_permission(
+                user,
+                UUID("00000000-0000-0000-0000-000000000001"),
+                "knowledge.read",
+            )
+        )
+    assert error.value.status_code == 403

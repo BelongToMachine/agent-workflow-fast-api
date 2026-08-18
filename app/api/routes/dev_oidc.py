@@ -3,15 +3,16 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from app.core.auth import create_dev_direct_token
 from app.core.config import Settings, get_settings
-from app.core.permissions import PERMISSION_CATALOG
+from app.core.permissions import DEFAULT_PERMISSIONS_BY_ROLE, PERMISSION_CATALOG
 
 router = APIRouter(prefix="/dev/oidc", tags=["dev-oidc"])
 
@@ -66,6 +67,24 @@ class DevOidcBridgeContext(BaseModel):
     workspace_id: str = Field(alias="workspaceId", min_length=1)
     is_guest: bool = Field(alias="isGuest", default=False)
     issued_at: int = Field(alias="issuedAt")
+
+
+class DevDirectTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    email: str | None = Field(default=None, max_length=320)
+    is_guest: bool = Field(alias="isGuest", default=False)
+    permissions: list[str] = Field(default_factory=list, max_length=len(PERMISSION_CATALOG))
+    role: Literal["owner", "admin", "editor", "viewer"] = "viewer"
+    subject: str = Field(min_length=1, max_length=100)
+    workspace_id: str = Field(alias="workspaceId", min_length=1, max_length=100)
+
+    @field_validator("permissions")
+    @classmethod
+    def reject_duplicate_permissions(cls, values: list[str]) -> list[str]:
+        if len(set(values)) != len(values):
+            raise ValueError("Duplicate permission")
+        return values
 
 
 def _secret(settings: Settings, *, bridge: bool = False) -> str:
@@ -247,5 +266,40 @@ async def create_consent_code(
             "expiresIn": DEV_OIDC_CODE_TTL_MS // 1000,
             "redirectUrl": redirect_url,
             "scope": " ".join([*input_data.scopes, *input_data.permissions]),
+        }
+    )
+
+
+@router.post("/token")
+async def create_development_token(
+    payload: DevDirectTokenRequest,
+    settings: Settings = Depends(get_settings),
+) -> JSONResponse:
+    if settings.environment.lower() != "development":
+        return _error("Not Found", 404)
+
+    unknown_permissions = set(payload.permissions).difference(PERMISSION_CATALOG)
+    if unknown_permissions:
+        return _error("The request contains an unknown permission.", 400)
+
+    token = create_dev_direct_token(
+        {
+            "email": payload.email,
+            "isGuest": payload.is_guest,
+            "permissions": payload.permissions,
+            "role": payload.role,
+            "subject": payload.subject,
+            "workspaceId": payload.workspace_id,
+        },
+        settings,
+    )
+    return JSONResponse(
+        {
+            **token,
+            "workspaceId": payload.workspace_id,
+            "role": payload.role,
+            "permissions": payload.permissions,
+            "isGuest": payload.is_guest,
+            "defaults": list(DEFAULT_PERMISSIONS_BY_ROLE[payload.role]),
         }
     )

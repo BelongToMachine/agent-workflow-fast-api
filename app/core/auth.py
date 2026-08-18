@@ -69,6 +69,7 @@ class DevDirectTokenContext(BaseModel):
     role: str
     subject: str = Field(min_length=1)
     workspace_id: str = Field(alias="workspaceId", min_length=1)
+    is_development: bool = Field(alias="isDevelopment", default=False)
 
 
 def _nextauth_bridge_secret(settings: Settings) -> str:
@@ -193,7 +194,28 @@ def _verify_dev_direct_token(
         permissions=direct_token.permissions,
         is_guest=direct_token.is_guest,
         claims=payload,
+        is_development=direct_token.is_development,
     )
+
+
+def create_dev_direct_token(payload: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    issued_at = int(time.time() * 1000)
+    token_payload = {**payload, "issuedAt": issued_at, "isDevelopment": True}
+    encoded_payload = base64.urlsafe_b64encode(
+        json.dumps(token_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).rstrip(b"=").decode("ascii")
+    signature = base64.urlsafe_b64encode(
+        hmac.new(
+            _dev_direct_token_secret(settings).encode("utf-8"),
+            encoded_payload.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+    ).rstrip(b"=").decode("ascii")
+    expires_at = issued_at + DEV_DIRECT_TOKEN_TTL_MS
+    return {
+        "accessToken": f"dev.{encoded_payload}.{signature}",
+        "expiresAt": expires_at,
+    }
 
 
 def _auth_is_required(settings: Settings) -> bool:
