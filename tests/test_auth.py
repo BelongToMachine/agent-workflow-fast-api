@@ -1,9 +1,13 @@
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import time
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.security import HTTPAuthorizationCredentials
 
 import app.core.auth as auth
 from app.core.auth import AuthenticatedUser, AuthTokenError, get_current_user
@@ -101,3 +105,43 @@ def test_verify_access_token_rejects_a_tampered_token(monkeypatch) -> None:
         pass
     else:
         raise AssertionError("A tampered access token must be rejected.")
+
+
+def test_development_direct_token_is_accepted() -> None:
+    settings = Settings(
+        environment="development",
+        auth_required=True,
+        dev_direct_auth_secret="direct-secret",
+    )
+    payload = {
+        "email": "user@example.com",
+        "isGuest": False,
+        "issuedAt": int(time.time() * 1000),
+        "permissions": ["chat.read", "chat.write"],
+        "role": "editor",
+        "subject": "user-123",
+        "workspaceId": "workspace-123",
+    }
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    signature = base64.urlsafe_b64encode(
+        hmac.new(
+            settings.dev_direct_auth_secret.encode(),
+            encoded.encode(),
+            hashlib.sha256,
+        ).digest()
+    ).rstrip(b"=").decode()
+
+    user = asyncio.run(
+        get_current_user(
+            HTTPAuthorizationCredentials(
+                scheme="Bearer",
+                credentials=f"dev.{encoded}.{signature}",
+            ),
+            settings,
+        )
+    )
+
+    assert user.user_id == "user-123"
+    assert user.workspace_id == "workspace-123"
+    assert user.permissions == ["chat.read", "chat.write"]
+    assert user.is_development is False

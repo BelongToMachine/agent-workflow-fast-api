@@ -1,7 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SERVICE_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = SERVICE_ROOT.parent
 
 
 class SettingsConfigurationError(RuntimeError):
@@ -110,6 +114,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "NEXTAUTH_BRIDGE_SECRET",
             "ASIANODE_NEXTAUTH_BRIDGE_SECRET",
+        ),
+    )
+    dev_direct_auth_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "DEV_DIRECT_AUTH_SECRET",
+            "ASIANODE_DEV_DIRECT_AUTH_SECRET",
         ),
     )
     knowledge_grants_enabled: bool = Field(
@@ -288,7 +299,10 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=("../.env.local", ".env"),
+        # Resolve env files from the repository, not from the process cwd. This
+        # keeps `uvicorn` working when it is launched from either the repo root
+        # or the asianode-fastapi directory.
+        env_file=(REPOSITORY_ROOT / ".env.local", SERVICE_ROOT / ".env"),
         env_prefix="",
         case_sensitive=False,
         extra="ignore",

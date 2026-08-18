@@ -17,6 +17,9 @@ JWKS_CACHE_TTL_SECONDS = 300
 NEXTAUTH_BRIDGE_TTL_MS = 5 * 60 * 1000
 NEXTAUTH_BRIDGE_FUTURE_SKEW_MS = 30 * 1000
 NEXTAUTH_BRIDGE_FALLBACK_SECRET = "atlas-trade-copilot-nextauth-bridge"
+DEV_DIRECT_TOKEN_TTL_MS = 5 * 60 * 1000
+DEV_DIRECT_TOKEN_FUTURE_SKEW_MS = 30 * 1000
+DEV_DIRECT_TOKEN_FALLBACK_SECRET = "atlas-trade-copilot-dev-direct"
 bearer_scheme = HTTPBearer(auto_error=False)
 _jwks_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -56,11 +59,32 @@ class NextAuthBridgeContext(BaseModel):
     workspace_id: str = Field(alias="workspaceId", min_length=1)
 
 
+class DevDirectTokenContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    email: str | None = None
+    is_guest: bool = Field(alias="isGuest", default=False)
+    issued_at: int = Field(alias="issuedAt")
+    permissions: list[str] = Field(default_factory=list)
+    role: str
+    subject: str = Field(min_length=1)
+    workspace_id: str = Field(alias="workspaceId", min_length=1)
+
+
 def _nextauth_bridge_secret(settings: Settings) -> str:
     return (
         settings.nextauth_bridge_secret
         or settings.auth_secret
         or NEXTAUTH_BRIDGE_FALLBACK_SECRET
+    )
+
+
+def _dev_direct_token_secret(settings: Settings) -> str:
+    return (
+        settings.dev_direct_auth_secret
+        or settings.nextauth_bridge_secret
+        or settings.auth_secret
+        or DEV_DIRECT_TOKEN_FALLBACK_SECRET
     )
 
 
@@ -118,6 +142,56 @@ def _verify_nextauth_bridge(
         permissions=bridge.permissions,
         is_guest=bridge.is_guest,
         is_internal_bridge=True,
+        claims=payload,
+    )
+
+
+def _verify_dev_direct_token(
+    token: str,
+    settings: Settings,
+) -> AuthenticatedUser | None:
+    if settings.environment.strip().lower() != "development" or not token.startswith("dev."):
+        return None
+
+    parts = token.split(".")
+    if len(parts) != 3 or parts[0] != "dev":
+        return None
+
+    encoded_payload, received_signature = parts[1], parts[2]
+    expected_signature = base64.urlsafe_b64encode(
+        hmac.new(
+            _dev_direct_token_secret(settings).encode("utf-8"),
+            encoded_payload.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+    ).rstrip(b"=").decode("ascii")
+    if not hmac.compare_digest(expected_signature, received_signature):
+        return None
+
+    payload = _decode_base64_json(encoded_payload)
+    if payload is None:
+        return None
+
+    try:
+        direct_token = DevDirectTokenContext.model_validate(payload)
+    except ValidationError:
+        return None
+
+    now = int(time.time() * 1000)
+    if (
+        now - direct_token.issued_at > DEV_DIRECT_TOKEN_TTL_MS
+        or direct_token.issued_at > now + DEV_DIRECT_TOKEN_FUTURE_SKEW_MS
+    ):
+        return None
+
+    return AuthenticatedUser(
+        user_id=direct_token.subject,
+        email=direct_token.email,
+        roles=[direct_token.role],
+        workspace_id=direct_token.workspace_id,
+        role=direct_token.role,
+        permissions=direct_token.permissions,
+        is_guest=direct_token.is_guest,
         claims=payload,
     )
 
@@ -307,6 +381,9 @@ async def get_current_user(
         )
 
     try:
+        direct_user = _verify_dev_direct_token(credentials.credentials, settings)
+        if direct_user is not None:
+            return direct_user
         return await verify_access_token(credentials.credentials, settings)
     except AuthConfigurationError as error:
         raise HTTPException(

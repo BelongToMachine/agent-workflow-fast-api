@@ -127,11 +127,16 @@ USE_FASTAPI_BACKEND=1
 NEXT_PUBLIC_USE_FASTAPI_BACKEND=1
 FASTAPI_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_FASTAPI_BASE_URL=http://127.0.0.1:8000
+# Optional local browser direct mode:
+NEXT_PUBLIC_API_MODE=fastapi-direct
 ```
 
-聊天请求会先发送到 Next.js `/api/chat` BFF，再由 BFF 通过签名的 NextAuth bridge 转发到
+默认聊天请求会先发送到 Next.js `/api/chat` BFF，再由 BFF 通过签名的 NextAuth bridge 转发到
 FastAPI `8000` 端口；FastAPI 负责 workspace 权限、消息持久化、模型调用和 SSE 返回。
-这样浏览器不会直接提交 userId、role 或 workspaceId 作为可信身份。
+开发环境也支持 `NEXT_PUBLIC_API_MODE=fastapi-direct`：浏览器通过 NextAuth session 获取
+5 分钟有效的开发 direct token，然后直接请求 FastAPI `/api/v1/*`，便于在 DevTools Network
+中查看真实请求和 SSE。该 token 只在 `ENVIRONMENT=development` 时接受，生产环境仍必须使用
+Next.js BFF 或正式 OIDC Bearer Token。
 
 FastAPI 会保留 Web 消息中的 JPEG/PNG 图片附件：文字部分继续使用普通字符串 content，图片
 会转换为 OpenAI-compatible `image_url` content。仅允许 `http://`、`https://` 和
