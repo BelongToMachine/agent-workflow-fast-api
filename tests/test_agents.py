@@ -20,7 +20,6 @@ from app.main import app
 from app.services.agent_tools import AgentToolError
 from app.services.agent_workflow import (
     AgentToolExecution,
-    AgentWorkflowError,
     AgentWorkflowResult,
     run_agent_workflow,
 )
@@ -49,7 +48,11 @@ def test_agent_query_response_preserves_tool_and_result_shape() -> None:
 
 def test_agent_run_request_limits_the_provider_tool_loop() -> None:
     with pytest.raises(ValidationError):
-        AgentRunRequest.model_validate({"prompt": "search", "maxSteps": 6})
+        AgentRunRequest.model_validate({"prompt": "search", "maxSteps": 11})
+
+    assert AgentRunRequest.model_validate(
+        {"prompt": "search", "maxSteps": 10}
+    ).max_steps == 10
 
     response = AgentRunResponse(
         answer="The knowledge base is ready.",
@@ -123,6 +126,18 @@ def test_independent_agent_workflow_executes_authorized_tools_then_answers(monke
                     ]
                 }
             ),
+            FakeProviderResponse(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Final summary: Sales knowledge base is ready.",
+                                "tool_calls": [],
+                            }
+                        }
+                    ]
+                }
+            ),
         ]
     )
     captured: dict[str, object] = {}
@@ -152,8 +167,8 @@ def test_independent_agent_workflow_executes_authorized_tools_then_answers(monke
         )
     )
 
-    assert result.answer == "Sales knowledge base is ready."
-    assert result.steps == 2
+    assert result.answer == "Final summary: Sales knowledge base is ready."
+    assert result.steps == 3
     assert result.tool_calls[0].tool == "listKnowledgeBasesTool"
     assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
     assert provider.requests[0]["json"]["tools"]
@@ -177,7 +192,7 @@ def test_independent_agent_workflow_executes_authorized_tools_then_answers(monke
     ]
 
 
-def test_independent_agent_workflow_stops_at_the_configured_tool_limit() -> None:
+def test_independent_agent_workflow_finalizes_after_the_configured_tool_limit() -> None:
     provider = FakeProviderClient(
         [
             FakeProviderResponse(
@@ -199,27 +214,43 @@ def test_independent_agent_workflow_stops_at_the_configured_tool_limit() -> None
                         }
                     ]
                 }
-            )
+            ),
+            FakeProviderResponse(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Final answer.",
+                                "tool_calls": [],
+                            }
+                        }
+                    ]
+                }
+            ),
         ]
     )
 
-    with pytest.raises(AgentWorkflowError, match="maximum of 1"):
-        asyncio.run(
-            run_agent_workflow(
-                prompt="Search",
-                api_key="test-key",
-                base_url="https://provider.example/v1",
-                model="deepseek-chat",
-                current_user=AuthenticatedUser(
-                    user_id="00000000-0000-0000-0000-000000000010"
-                ),
-                workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
-                can_query_knowledge=True,
-                include_knowledge_base_search=False,
-                max_steps=1,
-                client=provider,
-            )
+    result = asyncio.run(
+        run_agent_workflow(
+            prompt="Search",
+            api_key="test-key",
+            base_url="https://provider.example/v1",
+            model="deepseek-chat",
+            current_user=AuthenticatedUser(
+                user_id="00000000-0000-0000-0000-000000000010"
+            ),
+            workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+            can_query_knowledge=True,
+            include_knowledge_base_search=False,
+            max_steps=1,
+            client=provider,
         )
+    )
+
+    assert result.answer == "Final answer."
+    assert result.steps == 1
+    assert "tools" not in provider.requests[-1]["json"]
+    assert provider.requests[-1]["json"]["messages"][0]["role"] == "system"
 
 
 def test_agent_run_route_keeps_workspace_and_permission_context(monkeypatch) -> None:

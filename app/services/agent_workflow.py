@@ -36,6 +36,16 @@ class AgentWorkflowResult:
     tool_calls: list[AgentToolExecution]
 
 
+MAX_AGENT_TOOL_STEPS = 10
+FINAL_SUMMARY_SYSTEM_PROMPT = (
+    "Tool execution is complete. Provide the final answer to the user now. "
+    "Synthesize the available tool results, state important limitations, and give "
+    "a clear recommendation or conclusion. Return only the user-facing answer in "
+    "normal Markdown or plain text. Do not call tools, emit DSML/XML/tool syntax, "
+    "describe internal reasoning, or say that you are about to search."
+)
+
+
 def _provider_error(response: httpx.Response) -> AgentWorkflowError:
     detail = response.text[:500]
     return AgentWorkflowError(
@@ -91,15 +101,28 @@ async def _run_with_client(
         include_knowledge_base=can_query_knowledge,
         include_knowledge_base_search=include_knowledge_base_search,
     )
+    force_final_summary = False
 
-    for step in range(1, max_steps + 1):
+    for step in range(1, max_steps + 2):
+        is_final_summary_step = (
+            force_final_summary
+            or len(tool_executions) >= max_steps
+            or step == max_steps + 1
+        )
         try:
             request_body: dict[str, Any] = {
                 "model": model,
-                "messages": conversation,
+                "messages": (
+                    [
+                        {"role": "system", "content": FINAL_SUMMARY_SYSTEM_PROMPT},
+                        *conversation,
+                    ]
+                    if is_final_summary_step
+                    else conversation
+                ),
                 "stream": False,
             }
-            if tools:
+            if tools and not is_final_summary_step:
                 request_body["tool_choice"] = "auto"
                 request_body["tools"] = tools
             response = await client.post(
@@ -122,13 +145,21 @@ async def _run_with_client(
 
         if not tool_calls:
             if isinstance(content, str) and content.strip():
+                if tool_executions and not is_final_summary_step:
+                    force_final_summary = True
+                    continue
                 return AgentWorkflowResult(
                     answer=content,
-                    steps=step,
+                    steps=min(step, max_steps),
                     tool_calls=tool_executions,
                 )
             raise AgentWorkflowError(
                 "The agent provider returned neither an answer nor a tool call."
+            )
+
+        if is_final_summary_step:
+            raise AgentWorkflowError(
+                "The agent provider attempted a tool call during final summarization."
             )
 
         assistant_message: dict[str, Any] = {
@@ -137,8 +168,11 @@ async def _run_with_client(
             "tool_calls": [],
         }
         normalized_tool_calls: list[dict[str, Any]] = []
+        remaining_tool_steps = max_steps - len(tool_executions)
 
         for index, raw_tool_call in enumerate(tool_calls):
+            if len(normalized_tool_calls) >= remaining_tool_steps:
+                break
             if not isinstance(raw_tool_call, dict):
                 continue
             function = raw_tool_call.get("function")
@@ -210,7 +244,7 @@ async def run_agent_workflow(
     workspace_id: UUID,
     can_query_knowledge: bool,
     include_knowledge_base_search: bool,
-    max_steps: int = 5,
+    max_steps: int = MAX_AGENT_TOOL_STEPS,
     timeout_seconds: float = 60.0,
     client: Any | None = None,
 ) -> AgentWorkflowResult:

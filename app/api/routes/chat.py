@@ -15,6 +15,11 @@ from app.api.routes.chats import _database_error, _iso_timestamp
 from app.api.routes.models import resolve_chat_model
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
+from app.core.dev_identity import (
+    DEV_WORKSPACE_ID,
+    ensure_development_identity,
+    get_persistence_user_id,
+)
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 from app.services.agent_tools import (
@@ -26,6 +31,15 @@ from app.services.resumable_streams import get_resumable_stream_store
 
 router = APIRouter(tags=["chat"])
 logger = logging.getLogger(__name__)
+
+MAX_CHAT_TOOL_STEPS = 10
+FINAL_SUMMARY_SYSTEM_PROMPT = (
+    "Tool execution is complete. Provide the final answer to the user now. "
+    "Synthesize the available tool results, state important limitations, and give "
+    "a clear recommendation or conclusion. Return only the user-facing answer in "
+    "normal Markdown or plain text. Do not call tools, emit DSML/XML/tool syntax, "
+    "describe internal reasoning, or say that you are about to search."
+)
 
 
 class MessagePart(BaseModel):
@@ -199,6 +213,19 @@ def error_response(message: str, request_id: str, status_code: int) -> JSONRespo
     )
 
 
+def _provider_error_message(error: httpx.HTTPError) -> str:
+    detail = str(error).strip()
+    if detail:
+        return f"{type(error).__name__}: {detail}"
+
+    cause = error.__cause__
+    cause_detail = str(cause).strip() if cause is not None else ""
+    if cause_detail:
+        return f"{type(error).__name__} ({type(cause).__name__}): {cause_detail}"
+
+    return f"{type(error).__name__}: the provider connection closed unexpectedly"
+
+
 async def stream_chat(
     payload: ChatRequest,
     request_id: str,
@@ -215,19 +242,35 @@ async def stream_chat(
     assistant_message_id = str(uuid4())
     assistant_text: list[str] = []
     conversation = to_openai_messages(payload)
+    tool_step_count = 0
 
     yield sse_chunk({"type": "start", "messageId": assistant_message_id})
     yield sse_chunk({"type": "text-start", "id": assistant_message_id})
 
     try:
-        async with httpx.AsyncClient(timeout=provider_timeout_seconds) as client:
-            for _ in range(5):
+        transport = httpx.AsyncHTTPTransport(retries=2)
+        async with httpx.AsyncClient(
+            timeout=provider_timeout_seconds,
+            transport=transport,
+        ) as client:
+            for step in range(MAX_CHAT_TOOL_STEPS + 1):
+                is_final_summary_step = (
+                    tool_step_count >= MAX_CHAT_TOOL_STEPS
+                    or step == MAX_CHAT_TOOL_STEPS
+                )
+                remaining_tool_steps = MAX_CHAT_TOOL_STEPS - tool_step_count
+                request_messages = conversation
+                if is_final_summary_step:
+                    request_messages = [
+                        {"role": "system", "content": FINAL_SUMMARY_SYSTEM_PROMPT},
+                        *conversation,
+                    ]
                 request_body: dict[str, Any] = {
                     "model": resolve_chat_model(payload.selectedChatModel, model),
-                    "messages": conversation,
+                    "messages": request_messages,
                     "stream": True,
                 }
-                if can_query_knowledge:
+                if can_query_knowledge and not is_final_summary_step:
                     request_body["tools"] = agent_tool_definitions(
                         include_knowledge_base=True,
                         include_knowledge_base_search=include_knowledge_base_tool,
@@ -235,6 +278,7 @@ async def stream_chat(
                     request_body["tool_choice"] = "auto"
 
                 tool_calls: dict[int, dict[str, str]] = {}
+                allowed_tool_call_indexes: set[int] = set()
                 step_text: list[str] = []
                 async with client.stream(
                     "POST",
@@ -295,6 +339,10 @@ async def stream_chat(
                             index = raw_tool_call.get("index", 0)
                             if not isinstance(index, int):
                                 continue
+                            if index not in allowed_tool_call_indexes:
+                                if len(allowed_tool_call_indexes) >= remaining_tool_steps:
+                                    continue
+                                allowed_tool_call_indexes.add(index)
                             function = raw_tool_call.get("function", {})
                             if not isinstance(function, dict):
                                 function = {}
@@ -329,9 +377,27 @@ async def stream_chat(
                                 )
 
                 if not tool_calls:
+                    if tool_step_count and not is_final_summary_step:
+                        # A provider may return a process update or malformed textual
+                        # tool syntax instead of a structured tool call. It is not a
+                        # final answer once tools have been used, so force the final
+                        # tool-free synthesis step below.
+                        tool_step_count = MAX_CHAT_TOOL_STEPS
+                        continue
+                    break
+
+                if is_final_summary_step:
+                    logger.warning(
+                        "Model attempted a tool call during final summary step",
+                        extra={"request_id": request_id},
+                    )
                     break
 
                 ordered_tool_calls = [tool_calls[index] for index in sorted(tool_calls)]
+                ordered_tool_calls = ordered_tool_calls[:remaining_tool_steps]
+                if not ordered_tool_calls:
+                    break
+                tool_step_count += len(ordered_tool_calls)
                 conversation.append(
                     {
                         "role": "assistant",
@@ -405,10 +471,15 @@ async def stream_chat(
         if on_complete and assistant_text:
             await on_complete(assistant_message_id, "".join(assistant_text))
     except httpx.HTTPError as error:
+        provider_error = _provider_error_message(error)
+        logger.warning(
+            "Model provider request failed",
+            extra={"error_type": type(error).__name__, "provider_error": provider_error},
+        )
         yield sse_chunk(
             {
                 "type": "error",
-                "errorText": f"FastAPI could not reach the model provider: {error}",
+                "errorText": f"FastAPI could not reach the model provider: {provider_error}",
             }
         )
 
@@ -484,11 +555,8 @@ async def resume_chat_stream(
     settings: Settings = Depends(get_settings),
 ) -> StreamingResponse | Response | JSONResponse:
     await require_workspace_permission(current_user, workspace_id, "chat.read")
-    if current_user.is_development:
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-
     try:
-        user_id = UUID(current_user.user_id)
+        user_id = get_persistence_user_id(current_user)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -497,11 +565,24 @@ async def resume_chat_stream(
 
     try:
         async with get_db_connection() as connection:
-            result = await connection.execute(
-                CHAT_BY_ID_QUERY,
-                {"chat_id": chat_id, "workspace_id": workspace_id},
-            )
-            chat_row = result.mappings().first()
+            if current_user.is_development:
+                async with connection.begin():
+                    await ensure_development_identity(
+                        connection,
+                        current_user,
+                        workspace_id,
+                    )
+                    result = await connection.execute(
+                        CHAT_BY_ID_QUERY,
+                        {"chat_id": chat_id, "workspace_id": workspace_id},
+                    )
+                    chat_row = result.mappings().first()
+            else:
+                result = await connection.execute(
+                    CHAT_BY_ID_QUERY,
+                    {"chat_id": chat_id, "workspace_id": workspace_id},
+                )
+                chat_row = result.mappings().first()
     except RuntimeError as error:
         return _database_error(str(error))
     except SQLAlchemyError:
@@ -541,7 +622,7 @@ def _resolve_workspace_id(
     workspace_id: UUID | None,
 ) -> UUID:
     if current_user.is_development:
-        return workspace_id or UUID("00000000-0000-0000-0000-000000000001")
+        return workspace_id or DEV_WORKSPACE_ID
 
     token_workspace_id: UUID | None = None
     if current_user.workspace_id:
@@ -589,11 +670,8 @@ async def _prepare_chat_persistence(
     current_user: AuthenticatedUser,
     workspace_id: UUID,
 ) -> Callable[[str, str], Awaitable[None]] | None:
-    if current_user.is_development:
-        return None
-
     try:
-        user_id = UUID(current_user.user_id)
+        user_id = get_persistence_user_id(current_user)
         chat_id = UUID(payload.id)
     except ValueError as error:
         raise HTTPException(
@@ -610,6 +688,12 @@ async def _prepare_chat_persistence(
     try:
         async with get_db_connection() as connection:
             async with connection.begin():
+                if current_user.is_development:
+                    await ensure_development_identity(
+                        connection,
+                        current_user,
+                        workspace_id,
+                    )
                 chat_result = await connection.execute(
                     CHAT_BY_ID_QUERY,
                     {"chat_id": chat_id, "workspace_id": workspace_id},
@@ -727,16 +811,8 @@ async def get_chat_messages(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> ChatMessagesResponse | JSONResponse:
     await require_workspace_permission(current_user, workspace_id, "chat.read")
-    if current_user.is_development:
-        return ChatMessagesResponse(
-            isReadonly=False,
-            messages=[],
-            userId=None,
-            visibility="private",
-        )
-
     try:
-        user_id = UUID(current_user.user_id)
+        user_id = get_persistence_user_id(current_user)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -745,37 +821,77 @@ async def get_chat_messages(
 
     try:
         async with get_db_connection() as connection:
-            chat_result = await connection.execute(
-                CHAT_BY_ID_QUERY,
-                {"chat_id": chat_id, "workspace_id": workspace_id},
-            )
-            chat_row = chat_result.mappings().first()
-            if chat_row is None:
-                return ChatMessagesResponse(
-                    isReadonly=False,
-                    messages=[],
-                    userId=None,
-                    visibility="private",
+            transaction = connection.begin() if current_user.is_development else None
+            if transaction is None:
+                chat_result = await connection.execute(
+                    CHAT_BY_ID_QUERY,
+                    {"chat_id": chat_id, "workspace_id": workspace_id},
                 )
-            if chat_row["user_id"] != user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="The chat does not belong to this user.",
-                )
+                chat_row = chat_result.mappings().first()
+                if chat_row is None:
+                    return ChatMessagesResponse(
+                        isReadonly=False,
+                        messages=[],
+                        userId=None,
+                        visibility="private",
+                    )
+                if chat_row["user_id"] != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="The chat does not belong to this user.",
+                    )
 
-            message_result = await connection.execute(
-                MESSAGES_QUERY,
-                {"chat_id": chat_id},
-            )
-            messages = [
-                StoredMessage(
-                    id=str(row["id"]),
-                    role=str(row["role"]),
-                    parts=row["parts"] if isinstance(row["parts"], list) else [],
-                    metadata={"createdAt": _iso_timestamp(row["created_at"])},
+                message_result = await connection.execute(
+                    MESSAGES_QUERY,
+                    {"chat_id": chat_id},
                 )
-                for row in message_result.mappings().all()
-            ]
+                messages = [
+                    StoredMessage(
+                        id=str(row["id"]),
+                        role=str(row["role"]),
+                        parts=row["parts"] if isinstance(row["parts"], list) else [],
+                        metadata={"createdAt": _iso_timestamp(row["created_at"])},
+                    )
+                    for row in message_result.mappings().all()
+                ]
+            else:
+                async with transaction:
+                    await ensure_development_identity(
+                        connection,
+                        current_user,
+                        workspace_id,
+                    )
+                    chat_result = await connection.execute(
+                        CHAT_BY_ID_QUERY,
+                        {"chat_id": chat_id, "workspace_id": workspace_id},
+                    )
+                    chat_row = chat_result.mappings().first()
+                    if chat_row is None:
+                        return ChatMessagesResponse(
+                            isReadonly=False,
+                            messages=[],
+                            userId=None,
+                            visibility="private",
+                        )
+                    if chat_row["user_id"] != user_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="The chat does not belong to this user.",
+                        )
+
+                    message_result = await connection.execute(
+                        MESSAGES_QUERY,
+                        {"chat_id": chat_id},
+                    )
+                    messages = [
+                        StoredMessage(
+                            id=str(row["id"]),
+                            role=str(row["role"]),
+                            parts=row["parts"] if isinstance(row["parts"], list) else [],
+                            metadata={"createdAt": _iso_timestamp(row["created_at"])},
+                        )
+                        for row in message_result.mappings().all()
+                    ]
     except HTTPException:
         raise
     except RuntimeError as error:

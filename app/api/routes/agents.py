@@ -9,7 +9,11 @@ from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.workspace_access import require_workspace_permission
 from app.services.agent_tools import AgentToolError, execute_agent_tool
-from app.services.agent_workflow import AgentWorkflowError, run_agent_workflow
+from app.services.agent_workflow import (
+    MAX_AGENT_TOOL_STEPS,
+    AgentWorkflowError,
+    run_agent_workflow,
+)
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -41,7 +45,12 @@ class AgentQueryResponse(BaseModel):
 class AgentRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    max_steps: int = Field(default=5, alias="maxSteps", ge=1, le=5)
+    max_steps: int = Field(
+        default=MAX_AGENT_TOOL_STEPS,
+        alias="maxSteps",
+        ge=1,
+        le=MAX_AGENT_TOOL_STEPS,
+    )
     prompt: str = Field(min_length=1, max_length=10_000)
 
 

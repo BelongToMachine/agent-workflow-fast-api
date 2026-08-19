@@ -28,9 +28,11 @@ from app.api.routes.chats import (
     CHAT_COLUMNS,
     ChatSummary,
     _chat_summary,
+    list_chats,
 )
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
+from app.core.dev_identity import DEV_USER_ID
 from app.main import app
 
 client = TestClient(app)
@@ -490,7 +492,7 @@ def test_authenticated_chat_requires_workspace_context() -> None:
     assert getattr(error.value, "status_code", None) == 403
 
 
-def test_development_chat_does_not_attempt_database_persistence() -> None:
+def test_development_chat_persists_with_a_stable_database_identity(monkeypatch) -> None:
     payload = ChatRequest(
         id="00000000-0000-0000-0000-000000000010",
         message={
@@ -500,6 +502,11 @@ def test_development_chat_does_not_attempt_database_persistence() -> None:
         },
     )
     user = AuthenticatedUser(user_id="development-user", is_development=True)
+    connection = FakeChatConnection()
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        chat_connection_context(connection),
+    )
 
     persistence = asyncio.run(
         _prepare_chat_persistence(
@@ -509,7 +516,59 @@ def test_development_chat_does_not_attempt_database_persistence() -> None:
         )
     )
 
-    assert persistence is None
+    assert persistence is not None
+    asyncio.run(persistence(str(UUID("00000000-0000-0000-0000-000000000012")), "done"))
+
+    user_insert = next(
+        params for sql, params in connection.calls if 'INSERT INTO "User"' in sql
+    )
+    assert user_insert["user_id"] == DEV_USER_ID
+    chat_insert = next(
+        params for sql, params in connection.calls if 'INSERT INTO "Chat"' in sql
+    )
+    assert chat_insert["user_id"] == DEV_USER_ID
+    assert any('INSERT INTO "WorkspaceMember"' in sql for sql, _params in connection.calls)
+
+
+def test_development_history_queries_the_persisted_identity(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    chat_id = UUID("00000000-0000-0000-0000-000000000010")
+    connection = FakeChatConnection(
+        workspace_chat={
+            "id": chat_id,
+            "created_at": datetime(2026, 8, 19, 12, 0),
+            "title": "Saved history",
+            "user_id": DEV_USER_ID,
+            "visibility": "private",
+            "workspace_id": workspace_id,
+        }
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chats.get_db_connection",
+        chat_connection_context(connection),
+    )
+
+    response = asyncio.run(
+        list_chats(
+            workspace_id=workspace_id,
+            limit=10,
+            starting_after=None,
+            ending_before=None,
+            current_user=AuthenticatedUser(
+                user_id="development-user",
+                is_development=True,
+            ),
+        )
+    )
+
+    assert response.chats[0].id == str(chat_id)
+    assert response.chats[0].user_id == str(DEV_USER_ID)
+    history_query = next(
+        params
+        for sql, params in connection.calls
+        if 'FROM "Chat" AS chat' in sql
+    )
+    assert history_query["user_id"] == DEV_USER_ID
 
 
 def test_authenticated_chat_persistence_scopes_new_chat_and_assistant_message(
@@ -823,6 +882,15 @@ def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(mo
                     "data: [DONE]",
                 ]
             ),
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {"choices": [{"delta": {"content": "Final summary."}}]}
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
         ]
     )
     captured: dict[str, object] = {}
@@ -878,7 +946,117 @@ def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(mo
     assert provider.requests[1]["json"]["messages"][-1]["role"] == "tool"
 
 
-def test_messages_endpoint_has_workspace_scoped_development_fallback() -> None:
+def test_stream_chat_forces_final_summary_after_ten_tool_steps(monkeypatch) -> None:
+    def tool_response(index: int) -> FakeSseResponse:
+        return FakeSseResponse(
+            [
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": f"call-{index}",
+                                            "function": {
+                                                "name": "listKnowledgeBasesTool",
+                                                "arguments": "",
+                                            },
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ),
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "function": {"arguments": "{}"},
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ),
+                "data: [DONE]",
+            ]
+        )
+
+    provider = FakeStreamingClient(
+        [
+            *(tool_response(index) for index in range(10)),
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {"choices": [{"delta": {"content": "Final summary."}}]}
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+        ]
+    )
+
+    async def fake_execute_agent_tool(name, arguments, **kwargs):
+        return {"knowledgeBases": []}
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.httpx.AsyncClient",
+        lambda **kwargs: (setattr(provider, "timeout", kwargs["timeout"]) or provider),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.execute_agent_tool",
+        fake_execute_agent_tool,
+    )
+
+    payload = ChatRequest(
+        id="00000000-0000-0000-0000-000000000010",
+        message={
+            "parts": [{"text": "Search", "type": "text"}],
+            "role": "user",
+        },
+        selectedChatModel="untrusted-provider/model",
+    )
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in stream_chat(
+                payload,
+                "request-1",
+                "test-key",
+                "https://provider.example/v1",
+                "deepseek-chat",
+                AuthenticatedUser(user_id="development-user", is_development=True),
+                UUID("00000000-0000-0000-0000-000000000001"),
+                True,
+                False,
+            )
+        ]
+
+    chunks = asyncio.run(collect())
+
+    assert len(provider.requests) == 11
+    assert "tools" not in provider.requests[-1]["json"]
+    assert provider.requests[-1]["json"]["messages"][0]["role"] == "system"
+    assert any("Final summary." in chunk for chunk in chunks)
+
+
+def test_messages_endpoint_has_workspace_scoped_development_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        chat_connection_context(FakeChatConnection()),
+    )
     response = client.get(
         "/api/v1/chats/00000000-0000-0000-0000-000000000010/messages",
         params={"workspace_id": "00000000-0000-0000-0000-000000000001"},

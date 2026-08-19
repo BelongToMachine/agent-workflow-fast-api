@@ -8,6 +8,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser, get_current_user
+from app.core.dev_identity import ensure_development_identity, get_persistence_user_id
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -146,13 +147,9 @@ async def list_chats(
             },
         )
 
-    access = await require_workspace_permission(current_user, workspace_id, "chat.read")
-    if access.is_development:
-        # The local development identity has no persisted user row or chat history.
-        return ChatHistoryResponse(chats=[], hasMore=False)
-
+    await require_workspace_permission(current_user, workspace_id, "chat.read")
     try:
-        user_id = UUID(current_user.user_id)
+        user_id = get_persistence_user_id(current_user)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -161,44 +158,52 @@ async def list_chats(
 
     try:
         async with get_db_connection() as connection:
-            conditions = list(CHAT_BASE_CONDITIONS)
-            params: dict[str, object] = {
-                "user_id": user_id,
-                "workspace_id": workspace_id,
-                "limit": limit + 1,
-            }
+            async with connection.begin():
+                if current_user.is_development:
+                    await ensure_development_identity(
+                        connection,
+                        current_user,
+                        workspace_id,
+                    )
 
-            if starting_after or ending_before:
-                cursor_id = starting_after or ending_before
-                cursor = await _find_cursor(
-                    connection,
-                    cursor_id=cursor_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
+                conditions = list(CHAT_BASE_CONDITIONS)
+                params: dict[str, object] = {
+                    "user_id": user_id,
+                    "workspace_id": workspace_id,
+                    "limit": limit + 1,
+                }
+
+                if starting_after or ending_before:
+                    cursor_id = starting_after or ending_before
+                    cursor = await _find_cursor(
+                        connection,
+                        cursor_id=cursor_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                    )
+                    params["cursor_created_at"] = cursor["created_at"]
+                    params["cursor_id"] = cursor["id"]
+                    if starting_after:
+                        conditions.append(
+                            '(chat."createdAt" > :cursor_created_at OR '
+                            '(chat."createdAt" = :cursor_created_at '
+                            'AND chat."id" > :cursor_id))'
+                        )
+                    else:
+                        conditions.append(
+                            '(chat."createdAt" < :cursor_created_at OR '
+                            '(chat."createdAt" = :cursor_created_at '
+                            'AND chat."id" < :cursor_id))'
+                        )
+
+                query = text(
+                    CHAT_COLUMNS
+                    + " WHERE "
+                    + " AND ".join(conditions)
+                    + ' ORDER BY chat."createdAt" DESC, chat."id" DESC LIMIT :limit'
                 )
-                params["cursor_created_at"] = cursor["created_at"]
-                params["cursor_id"] = cursor["id"]
-                if starting_after:
-                    conditions.append(
-                        '(chat."createdAt" > :cursor_created_at OR '
-                        '(chat."createdAt" = :cursor_created_at '
-                        'AND chat."id" > :cursor_id))'
-                    )
-                else:
-                    conditions.append(
-                        '(chat."createdAt" < :cursor_created_at OR '
-                        '(chat."createdAt" = :cursor_created_at '
-                        'AND chat."id" < :cursor_id))'
-                    )
-
-            query = text(
-                CHAT_COLUMNS
-                + " WHERE "
-                + " AND ".join(conditions)
-                + ' ORDER BY chat."createdAt" DESC, chat."id" DESC LIMIT :limit'
-            )
-            result = await connection.execute(query, params)
-            rows = result.mappings().all()
+                result = await connection.execute(query, params)
+                rows = result.mappings().all()
     except HTTPException:
         raise
     except RuntimeError as error:
@@ -218,12 +223,9 @@ async def delete_chats(
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, int] | JSONResponse:
-    access = await require_workspace_permission(current_user, workspace_id, "chat.delete")
-    if access.is_development:
-        return {"deletedCount": 0}
-
+    await require_workspace_permission(current_user, workspace_id, "chat.delete")
     try:
-        user_id = UUID(current_user.user_id)
+        user_id = get_persistence_user_id(current_user)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -233,6 +235,12 @@ async def delete_chats(
     try:
         async with get_db_connection() as connection:
             async with connection.begin():
+                if current_user.is_development:
+                    await ensure_development_identity(
+                        connection,
+                        current_user,
+                        workspace_id,
+                    )
                 chat_result = await connection.execute(
                     text(
                         'SELECT "id" FROM "Chat" '
@@ -271,11 +279,8 @@ async def delete_chat(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, str] | JSONResponse:
     await require_workspace_permission(current_user, workspace_id, "chat.delete")
-    if current_user.is_development:
-        return {"id": str(chat_id)}
-
     try:
-        user_id = UUID(current_user.user_id)
+        user_id = get_persistence_user_id(current_user)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -285,6 +290,12 @@ async def delete_chat(
     try:
         async with get_db_connection() as connection:
             async with connection.begin():
+                if current_user.is_development:
+                    await ensure_development_identity(
+                        connection,
+                        current_user,
+                        workspace_id,
+                    )
                 chat_result = await connection.execute(
                     CHAT_BY_ID_QUERY,
                     {"chat_id": chat_id, "workspace_id": workspace_id},
