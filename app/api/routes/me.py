@@ -36,6 +36,12 @@ class CurrentUserResponse(BaseModel):
     user_id: str = Field(alias="userId")
     email: str | None = None
     name: str | None = None
+    image: str | None = None
+    status: Literal["active", "suspended"] = "active"
+    access_state: Literal["ready", "pending_workspace"] = Field(
+        default="ready",
+        alias="accessState",
+    )
     is_guest: bool = Field(default=False, alias="isGuest")
     is_development: bool = Field(default=False, alias="isDevelopment")
     memberships: list[WorkspaceMembership]
@@ -47,7 +53,9 @@ USER_QUERY = text(
         "id" AS user_id,
         "email" AS email,
         "name" AS name,
-        "isAnonymous" AS is_anonymous
+        "image" AS image,
+        "isAnonymous" AS is_anonymous,
+        "status" AS status
     FROM "User"
     WHERE "id" = :user_id
     """
@@ -130,40 +138,79 @@ def _build_memberships(
     return memberships
 
 
-@router.get("/me", response_model=CurrentUserResponse)
-async def get_me(
-    current_user: AuthenticatedUser = Depends(get_current_user),
+async def build_current_user_response(
+    connection: object,
+    current_user: AuthenticatedUser,
 ) -> CurrentUserResponse:
+    """Build the shared business identity response from one DB connection."""
     if current_user.is_development:
         return CurrentUserResponse(
             userId=current_user.user_id,
             email=current_user.email,
             name=None,
+            image=None,
+            status="active",
+            accessState="ready",
             isGuest=False,
             isDevelopment=True,
             memberships=[],
         )
 
     user_id = _uuid_value(current_user.user_id)
+    user_result = await connection.execute(USER_QUERY, {"user_id": user_id})
+    user_row = user_result.mappings().first()
+    if user_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="auth_identity:not_initialized",
+        )
+    if user_row["status"] != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="user:suspended",
+        )
+
+    membership_result = await connection.execute(
+        MEMBERSHIPS_QUERY,
+        {"user_id": user_id},
+    )
+    membership_rows = membership_result.mappings().all()
+    override_rows = []
+    if membership_rows:
+        override_result = await connection.execute(
+            OVERRIDES_QUERY,
+            {"membership_ids": [row["membership_id"] for row in membership_rows]},
+        )
+        override_rows = override_result.mappings().all()
+
+    is_guest = bool(user_row["is_anonymous"]) or "guest" in current_user.roles
+    return CurrentUserResponse(
+        userId=str(user_row["user_id"]),
+        email=user_row["email"],
+        name=user_row["name"],
+        image=user_row["image"],
+        status=user_row["status"],
+        accessState="ready" if membership_rows else "pending_workspace",
+        isGuest=is_guest,
+        isDevelopment=False,
+        memberships=_build_memberships(
+            membership_rows,
+            override_rows,
+            is_guest=is_guest,
+        ),
+    )
+
+
+@router.get("/me", response_model=CurrentUserResponse)
+async def get_me(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> CurrentUserResponse:
+    if current_user.is_development:
+        return await build_current_user_response(None, current_user)
+
     try:
         async with get_db_connection() as connection:
-            user_result = await connection.execute(USER_QUERY, {"user_id": user_id})
-            user_row = user_result.mappings().first()
-            if user_row is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="The authenticated user is not registered in this workspace.",
-                )
-
-            membership_result = await connection.execute(MEMBERSHIPS_QUERY, {"user_id": user_id})
-            membership_rows = membership_result.mappings().all()
-            override_rows = []
-            if membership_rows:
-                override_result = await connection.execute(
-                    OVERRIDES_QUERY,
-                    {"membership_ids": [row["membership_id"] for row in membership_rows]},
-                )
-                override_rows = override_result.mappings().all()
+            return await build_current_user_response(connection, current_user)
     except HTTPException:
         raise
     except RuntimeError as error:
@@ -176,17 +223,3 @@ async def get_me(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="FastAPI could not query workspace membership.",
         ) from error
-
-    is_guest = bool(user_row["is_anonymous"]) or "guest" in current_user.roles
-    return CurrentUserResponse(
-        userId=str(user_row["user_id"]),
-        email=user_row["email"],
-        name=user_row["name"],
-        isGuest=is_guest,
-        isDevelopment=False,
-        memberships=_build_memberships(
-            membership_rows,
-            override_rows,
-            is_guest=is_guest,
-        ),
-    )

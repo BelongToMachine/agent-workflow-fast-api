@@ -64,7 +64,7 @@ def build_attachment_storage_key(
 
 
 def _signing_secret(settings: Settings) -> str | None:
-    return settings.nextauth_bridge_secret or settings.auth_secret
+    return settings.auth_secret
 
 
 def create_local_attachment_token(
@@ -77,7 +77,7 @@ def create_local_attachment_token(
     secret = _signing_secret(settings)
     if not secret:
         raise StorageConfigurationError(
-            "AUTH_SECRET or NEXTAUTH_BRIDGE_SECRET is required for local attachment URLs."
+            "AUTH_SECRET is required for local attachment URLs."
         )
     payload = {
         "contentType": content_type,

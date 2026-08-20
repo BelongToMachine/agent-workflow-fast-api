@@ -10,7 +10,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.security import HTTPAuthorizationCredentials
 
 import app.core.auth as auth
-from app.core.auth import AuthenticatedUser, AuthTokenError, get_current_user
+from app.core.auth import (
+    AuthenticatedUser,
+    AuthTokenError,
+    ExternalPrincipal,
+    get_current_user,
+)
 from app.core.config import Settings
 
 
@@ -66,10 +71,12 @@ def test_verify_access_token_checks_oidc_claims_and_jwks(monkeypatch) -> None:
     monkeypatch.setattr(auth, "_fetch_jwks", fake_fetch_jwks)
     user = asyncio.run(auth.verify_access_token(token, settings))
 
-    assert user.user_id == "user-123"
+    assert isinstance(user, ExternalPrincipal)
+    assert user.subject == "user-123"
+    assert user.issuer == settings.auth_issuer
+    assert user.email == "user@example.com"
     assert user.roles == ["employee"]
-    assert user.workspace_id == "workspace-123"
-    assert user.is_development is False
+    assert user.claims["workspaceId"] == "workspace-123"
 
 
 def test_verify_access_token_rejects_a_tampered_token(monkeypatch) -> None:

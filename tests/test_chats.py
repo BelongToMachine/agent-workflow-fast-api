@@ -181,7 +181,7 @@ def test_new_chat_creation_checks_for_an_existing_id_across_workspaces() -> None
     assert 'workspaceId' in str(CHAT_ANY_BY_ID_QUERY)
 
 
-def test_history_requires_bearer_or_nextauth_bridge(auth_required_settings: Settings) -> None:
+def test_history_requires_bearer_access_token(auth_required_settings: Settings) -> None:
     response = client.get(
         "/api/v1/chats",
         params={"workspace_id": "00000000-0000-0000-0000-000000000001"},

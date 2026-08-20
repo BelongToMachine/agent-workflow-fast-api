@@ -108,13 +108,6 @@ class Settings(BaseSettings):
             "ASIANODE_DEV_OIDC_INTERNAL_SECRET",
         ),
     )
-    nextauth_bridge_secret: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "NEXTAUTH_BRIDGE_SECRET",
-            "ASIANODE_NEXTAUTH_BRIDGE_SECRET",
-        ),
-    )
     dev_direct_auth_secret: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
@@ -344,11 +337,8 @@ def validate_runtime_settings(settings: Settings) -> None:
         errors.append("AUTH_ISSUER must use HTTPS")
     if not settings.auth_audience or not settings.auth_audience.strip():
         errors.append("AUTH_AUDIENCE is required")
-    bridge_secret = settings.nextauth_bridge_secret or settings.auth_secret
-    if not bridge_secret or len(bridge_secret) < 32:
-        errors.append(
-            "NEXTAUTH_BRIDGE_SECRET or AUTH_SECRET must be at least 32 characters"
-        )
+    if not settings.auth_secret or len(settings.auth_secret) < 32:
+        errors.append("AUTH_SECRET must be at least 32 characters")
     if not settings.auth_algorithms.strip():
         errors.append("AUTH_ALGORITHMS must not be empty")
 

@@ -194,12 +194,11 @@ def _database_error(message: str) -> JSONResponse:
 def _require_non_anonymous_development_identity(current_user: AuthenticatedUser) -> None:
     if (
         current_user.is_development
-        and not current_user.is_internal_bridge
         and "permissions" not in current_user.claims
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Bearer access token or NextAuth bridge context is required.",
+            detail="Bearer access token is required.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

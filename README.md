@@ -145,12 +145,11 @@ NEXT_PUBLIC_FASTAPI_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_API_MODE=fastapi-direct
 ```
 
-默认聊天请求会先发送到 Next.js `/api/chat` BFF，再由 BFF 通过签名的 NextAuth bridge 转发到
-FastAPI `8000` 端口；FastAPI 负责 workspace 权限、消息持久化、模型调用和 SSE 返回。
-开发环境也支持 `NEXT_PUBLIC_API_MODE=fastapi-direct`：浏览器通过 NextAuth session 获取
-5 分钟有效的开发 direct token，然后直接请求 FastAPI `/api/v1/*`，便于在 DevTools Network
-中查看真实请求和 SSE。该 token 只在 `ENVIRONMENT=development` 时接受，生产环境仍必须使用
-Next.js BFF 或正式 OIDC Bearer Token。
+独立 Vite 前端通过 Bearer access token 直接请求 FastAPI `8000` 端口；FastAPI 负责 workspace
+权限、消息持久化、模型调用和 SSE 返回。开发环境也支持
+`NEXT_PUBLIC_API_MODE=fastapi-direct`：浏览器使用 5 分钟有效的开发 direct token 直接请求
+FastAPI `/api/v1/*`，便于在 DevTools Network 中查看真实请求和 SSE。该 token 只在
+`ENVIRONMENT=development` 时接受，生产环境必须使用正式 OIDC Bearer Token。
 
 FastAPI 会保留 Web 消息中的 JPEG/PNG 图片附件：文字部分继续使用普通字符串 content，图片
 会转换为 OpenAI-compatible `image_url` content。仅允许 `http://`、`https://` 和
@@ -182,7 +181,7 @@ FastAPI 不只信任 multipart 的 `Content-Type`，还会校验 PNG/JPEG magic 
 workspace 和 chat 归属；没有配置 Redis 时会退化为普通 SSE，不阻塞聊天请求。
 
 独立 Agent 查询接口只接受预定义的只读工具名和工具参数，不接受调用方提交的 user、role、
-permission 或 workspace 身份字段。FastAPI 会从 Bearer Token/NextAuth bridge 取得身份，
+permission 或 workspace 身份字段。FastAPI 会从 Bearer Token 取得身份，
 先检查 workspace 的 `knowledge.read` 权限，再执行产品、内容或指定知识库搜索。独立 Agent
 workflow 使用同一组工具执行有限轮次的模型调用和工具调用，并在工具上限后追加一次最终总结，
 但不会创建 Chat/Message，适合知识库问答或后台任务入口；调用方只能提交 prompt 和最多 10 轮的
@@ -211,14 +210,12 @@ Redis fixed-window counter，可在多个 FastAPI 实例之间共享；Redis 暂
 - 开发 direct token 的 subject 会在 FastAPI 内部映射为稳定的本地 UUID，并按 workspace 创建开发用户/member 记录；前端不需要传可信的 user id。
 - `staging` 和 `production` 环境默认要求 Token；即使没有显式设置 `AUTH_REQUIRED` 也不会允许匿名访问。
 - 配置 `AUTH_ISSUER`、`AUTH_AUDIENCE` 和 `AUTH_JWKS_URL` 后，FastAPI 会校验 JWT 签名、`kid`、issuer、audience、过期时间和 `sub`。
-- 当前 NextAuth 的服务端 cookie 不是 OIDC access token，不能直接交给 FastAPI 当作普通 JWT 解码。过渡阶段应由 Next.js BFF 或 Logto 登录流程提供 Bearer access token。
+- FastAPI 不接受浏览器提交的 user、role 或 workspace 身份字段；生产环境只接受经 Logto OIDC 验证的 Bearer access token。
 
-本地 Mock OIDC 目前也已经迁移了 consent/code 签发逻辑：`/dev/oidc` 页面仍通过
-Next.js BFF 发起请求，Next.js 只验证当前 NextAuth session 并发送签名的临时 actor
-context，FastAPI 负责校验 consent 参数、权限和 loopback redirect，并生成与原实现
-兼容的 5 分钟 HMAC code。FastAPI 生成的 code 可以由现有 Next.js result 页面继续验证。
+本地开发认证使用 FastAPI `/api/v1/dev/oidc/token` 签发 5 分钟 direct token；该接口仅在
+`ENVIRONMENT=development` 时启用，生产环境会关闭。
 
-如果要使用单独的桥接密钥，在 `asianodeagent-front/.env.local` 和 `asianode-fastapi/.env.local` 中同时设置：
+如果要使用单独的开发 OIDC 内部密钥，在 `asianodeagent-front/.env.local` 和 `asianode-fastapi/.env.local` 中同时设置：
 
 ```env
 DEV_OIDC_INTERNAL_SECRET=your-local-development-secret
@@ -226,10 +223,9 @@ DEV_OIDC_INTERNAL_SECRET=your-local-development-secret
 
 未设置时，本地会回退到 `AUTH_SECRET`；生产/staging 环境会直接关闭该 dev endpoint。
 
-成员管理迁移期间，Next.js BFF 使用签名的 NextAuth bridge 调用 FastAPI。可以通过
-`NEXTAUTH_BRIDGE_SECRET` 配置独立的 bridge secret；未设置时使用 `AUTH_SECRET`。
-FastAPI 会校验 bridge 的 HMAC 签名和 5 分钟有效期，不接受浏览器提交的 userId、role
-或 workspaceId 作为可信身份。
+FastAPI 不再接受 NextAuth bridge 或 `x-asianode-auth-*` header。成员管理和知识库授权接口
+统一要求 Bearer access token，并由 FastAPI 根据本地 User、WorkspaceMember 和 permission
+override 完成最终授权。
 
 聊天历史和 AI SDK 的 chat stream 恢复在 `USE_FASTAPI_BACKEND=1` 时也通过 Next.js BFF 转发到 FastAPI。FastAPI 会同时
 校验 `chat.read`/`chat.delete`、当前用户和 workspace；分页 cursor 只能引用当前用户在
@@ -352,9 +348,8 @@ FastAPI 会让上传、后台解析读取和删除统一经过 S3-compatible sto
 在知识库 grant 或独立实体开关关闭时，产品、内容和知识库列表保持原有 workspace 级行为，
 避免数据库迁移尚未执行时导致现有接口不可用。
 
-管理员 grant 管理接口同样受该开关保护，并要求 `members.manage` 权限。Next.js 的
-`/api/admin/knowledge-base-grants` BFF 只负责 NextAuth actor 校验和签名 bridge，实际
-授权读写由 FastAPI 完成；更新和删除操作会写入 `AuditLog`。
+管理员 grant 管理接口同样受该开关保护，并要求 `members.manage` 权限；实际授权读写由
+FastAPI 完成，更新和删除操作会写入 `AuditLog`。
 
 本地可以使用以下配置测试未登录请求是否被拒绝：
 

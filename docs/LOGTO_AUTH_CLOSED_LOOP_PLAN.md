@@ -8,6 +8,7 @@
 
 - Phase 0：进行中。Logto Cloud Dev tenant、SPA 和 API Resource 已在控制台创建；第一个 owner subject、Google 发布方式、微信开放平台审核负责人仍待确认。
 - Phase 1（数据库身份模型）：已完成。`0005_auth_identity` migration、status、只读 preflight、Makefile 命令和测试已加入；migration 已在当前开发数据库提交并完成 schema 验证。
+- Phase 2（FastAPI 身份解析）：进行中。已完成 `ExternalPrincipal`、JWT 验证结果拆分、`ExternalIdentity` 解析、幂等 bootstrap 和 `/me` 状态扩展；真实 Logto Bearer Token 现在可以初始化并映射到本地 User UUID，未加入 workspace 的用户返回 `pending_workspace`。成员授权、完整结构化错误模型和最终业务路由审计仍待实现；旧 NextAuth bridge 已从 FastAPI 认证入口删除，仅保留开发 direct token。
 - 现存迁移状态：`0001–0004` 知识库迁移仍为 pending；本次只执行并验证了 `0005_auth_identity`，未修改既有知识库迁移状态。
 
 ## 1. 目标
@@ -187,7 +188,7 @@ FastAPI
   └─ 校验业务资源 workspace/owner/grant
 ```
 
-旧 Next.js/NextAuth bridge 只作为迁移兼容路径，不允许成为独立 Vite 前端的新依赖。生产切换完成后应单独安排删除。
+旧 Next.js/NextAuth bridge 已从 FastAPI 和独立 Vite 前端认证入口删除。旧 Next.js Auth/BFF 文件仍属于外层项目清理范围，不得重新作为新前端依赖。
 
 ## 5. 本地身份模型
 
@@ -758,19 +759,21 @@ CORS_ORIGINS=https://<frontend-domain>
 
 ### Phase 2：FastAPI 身份解析
 
-- [ ] 增加 `ExternalPrincipal`；
-- [ ] 保留并整理 JWT 验证；
-- [ ] 增加 external identity resolver；
-- [ ] 增加幂等 bootstrap service；
-- [ ] 新增 `POST /api/v1/auth/bootstrap`；
+- [x] 增加 `ExternalPrincipal`；
+- [x] 保留并整理 JWT 验证；
+- [x] 增加 external identity resolver；
+- [x] 增加幂等 bootstrap service；
+- [x] 新增 `POST /api/v1/auth/bootstrap`；
 - [ ] 调整 `AuthenticatedUser.user_id` 为本地 UUID；
-- [ ] 调整 `/api/v1/me` 响应和状态码；
-- [ ] 增加 User suspended 检查；
+- [x] 调整 `/api/v1/me` 响应和状态码；
+- [x] 增加 User suspended 检查；
 - [ ] 保证业务路由无需认识 Logto `sub`；
 - [ ] 增加结构化 401/403 错误码；
-- [ ] 给 bootstrap 加限流和安全日志。
+- [x] 给 bootstrap 加限流和安全日志。
 
 完成条件：非 UUID Logto `sub` 能稳定访问 `/me`，所有业务路由收到本地 UUID。
+
+当前阶段说明：真实 Logto token 已先经过 JWT 签名、issuer、audience 和有效期验证。首次调用 bootstrap 时，服务会按 `(provider=logto, subject=sub)` 幂等创建或复用本地 `User + ExternalIdentity`，同步非敏感 profile 字段但不创建 workspace membership；响应通过 `/me` 同一套模型返回 `accessState=ready|pending_workspace`。已映射的 active User 会以本地 UUID 进入业务依赖；未完成 bootstrap 的用户返回 `auth_identity:not_initialized`，suspended User 返回 `user:suspended`。开发 direct token 仅用于本地开发，NextAuth bridge 已删除。
 
 ### Phase 3：成员初始化闭环
 
@@ -787,16 +790,16 @@ CORS_ORIGINS=https://<frontend-domain>
 
 - [ ] 扩展 AuthContext 状态模型；
 - [ ] callback 后调用 bootstrap；
-- [ ] 增加 `/me` 查询；
+- [x] 增加 `/me` 查询；
 - [ ] 增加 `/access-pending`；
 - [ ] 增加 `/account-suspended`；
 - [ ] 增加 `/forbidden`；
 - [ ] 实现 active workspace 选择和持久化；
 - [ ] 将 workspace 注入从固定 env 改为 active workspace；
-- [ ] 让 Sidebar/Settings 路由使用后端 permissions；
+- [x] 让 Sidebar/Settings 路由使用后端 permissions；
 - [ ] 401 时回到登录，403 时保留登录并显示业务状态；
 - [ ] 退出、切换用户和 workspace 时清理缓存；
-- [ ] 删除新前端对 server-only/NextAuth 遗留模块的引用。
+- [x] 删除新前端对 server-only/NextAuth 遗留模块的引用。
 
 完成条件：前端可以明确区分未登录、初始化中、待授权、已登录无权限和正常可用。
 
@@ -849,7 +852,7 @@ CORS_ORIGINS=https://<frontend-domain>
 - [ ] 小范围用户灰度；
 - [ ] 观察 401/403/bootstrap/JWKS 指标；
 - [ ] 确认回滚方案；
-- [ ] 停止 Vite 前端对 NextAuth bridge 的依赖；
+- [x] 停止 Vite 前端对 NextAuth bridge 的依赖；
 - [ ] 单独安排删除旧 Next.js Auth/BFF 路径。
 
 完成条件：生产只通过 Logto Bearer Token 进入 FastAPI 业务链路。
@@ -974,7 +977,7 @@ bun run build
 - [ ] Token 过期、退出、suspended、401、403、503 都有明确行为；
 - [ ] 自动化测试和真实 E2E 通过；
 - [ ] 生产环境关闭开发认证和 SQLAdmin；
-- [ ] 独立 Vite 前端不再依赖 NextAuth 运行时。
+- [x] 独立 Vite 前端不再依赖 NextAuth 运行时。
 
 ## 19. 官方参考
 

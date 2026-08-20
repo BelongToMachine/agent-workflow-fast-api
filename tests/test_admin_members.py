@@ -1,8 +1,3 @@
-import base64
-import hashlib
-import hmac
-import json
-import time
 from uuid import UUID
 
 import pytest
@@ -27,7 +22,6 @@ def development_settings():
     settings = Settings(
         environment="development",
         auth_secret="code-secret",
-        nextauth_bridge_secret="bridge-secret",
     )
     app.dependency_overrides[get_settings] = lambda: settings
     yield settings
@@ -120,38 +114,3 @@ def test_admin_guard_rejects_anonymous_development_identity() -> None:
         )
 
     assert error.value.status_code == 401
-
-
-def test_nextauth_bridge_context_is_accepted_for_authenticated_requests(
-    development_settings: Settings,
-) -> None:
-    context = {
-        "email": "admin@example.com",
-        "isGuest": False,
-        "issuedAt": int(time.time() * 1000),
-        "permissions": ["members.read", "members.manage"],
-        "role": "admin",
-        "subject": "00000000-0000-0000-0000-000000000010",
-        "workspaceId": "00000000-0000-0000-0000-000000000001",
-    }
-    encoded = base64.urlsafe_b64encode(
-        json.dumps(context, separators=(",", ":")).encode("utf-8")
-    ).rstrip(b"=").decode("ascii")
-    signature = base64.urlsafe_b64encode(
-        hmac.new(
-            development_settings.nextauth_bridge_secret.encode("utf-8"),
-            encoded.encode("ascii"),
-            hashlib.sha256,
-        ).digest()
-    ).rstrip(b"=").decode("ascii")
-
-    response = client.get(
-        "/api/v1/admin/members",
-        params={"workspace_id": context["workspaceId"]},
-        headers={
-            "x-asianode-auth-context": encoded,
-            "x-asianode-auth-signature": signature,
-        },
-    )
-
-    assert response.status_code != 401

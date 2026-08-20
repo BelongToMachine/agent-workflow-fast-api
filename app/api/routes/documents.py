@@ -178,7 +178,7 @@ def _require_persisted_identity(current_user: AuthenticatedUser) -> UUID:
     if current_user.is_development:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Bearer access token or NextAuth bridge context is required.",
+            detail="Bearer access token is required.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:

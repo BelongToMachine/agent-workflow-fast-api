@@ -7,16 +7,15 @@ from typing import Any
 
 import httpx
 import jwt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import Settings, get_settings
+from app.db.session import get_db_connection
 
 JWKS_CACHE_TTL_SECONDS = 300
-NEXTAUTH_BRIDGE_TTL_MS = 5 * 60 * 1000
-NEXTAUTH_BRIDGE_FUTURE_SKEW_MS = 30 * 1000
-NEXTAUTH_BRIDGE_FALLBACK_SECRET = "atlas-trade-copilot-nextauth-bridge"
 DEV_DIRECT_TOKEN_TTL_MS = 5 * 60 * 1000
 DEV_DIRECT_TOKEN_FUTURE_SKEW_MS = 30 * 1000
 DEV_DIRECT_TOKEN_FALLBACK_SECRET = "atlas-trade-copilot-dev-direct"
@@ -28,15 +27,29 @@ class AuthenticatedUser(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     user_id: str
+    external_subject: str | None = None
+    auth_provider: str | None = None
     email: str | None = None
     roles: list[str] = Field(default_factory=list)
     workspace_id: str | None = None
     role: str | None = None
     permissions: list[str] = Field(default_factory=list)
     is_guest: bool = False
-    is_internal_bridge: bool = False
     claims: dict[str, Any] = Field(default_factory=dict)
     is_development: bool = False
+
+
+class ExternalPrincipal(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    subject: str = Field(min_length=1, max_length=255)
+    issuer: str = Field(min_length=1)
+    email: str | None = None
+    email_verified: bool | None = None
+    name: str | None = None
+    picture: str | None = None
+    roles: list[str] = Field(default_factory=list)
+    claims: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuthConfigurationError(Exception):
@@ -45,18 +58,6 @@ class AuthConfigurationError(Exception):
 
 class AuthTokenError(Exception):
     """Raised when an access token is malformed, expired, or unverifiable."""
-
-
-class NextAuthBridgeContext(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    email: str | None = None
-    is_guest: bool = Field(alias="isGuest", default=False)
-    issued_at: int = Field(alias="issuedAt")
-    permissions: list[str] = Field(default_factory=list)
-    role: str
-    subject: str = Field(min_length=1)
-    workspace_id: str = Field(alias="workspaceId", min_length=1)
 
 
 class DevDirectTokenContext(BaseModel):
@@ -72,18 +73,9 @@ class DevDirectTokenContext(BaseModel):
     is_development: bool = Field(alias="isDevelopment", default=False)
 
 
-def _nextauth_bridge_secret(settings: Settings) -> str:
-    return (
-        settings.nextauth_bridge_secret
-        or settings.auth_secret
-        or NEXTAUTH_BRIDGE_FALLBACK_SECRET
-    )
-
-
 def _dev_direct_token_secret(settings: Settings) -> str:
     return (
         settings.dev_direct_auth_secret
-        or settings.nextauth_bridge_secret
         or settings.auth_secret
         or DEV_DIRECT_TOKEN_FALLBACK_SECRET
     )
@@ -98,53 +90,6 @@ def _decode_base64_json(encoded: str) -> dict[str, Any] | None:
     except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
-
-
-def _verify_nextauth_bridge(
-    context: str | None,
-    signature: str | None,
-    settings: Settings,
-) -> AuthenticatedUser | None:
-    if not context or not signature:
-        return None
-
-    expected_signature = base64.urlsafe_b64encode(
-        hmac.new(
-            _nextauth_bridge_secret(settings).encode("utf-8"),
-            context.encode("ascii"),
-            hashlib.sha256,
-        ).digest()
-    ).rstrip(b"=").decode("ascii")
-    if not hmac.compare_digest(expected_signature, signature):
-        return None
-
-    payload = _decode_base64_json(context)
-    if payload is None:
-        return None
-
-    try:
-        bridge = NextAuthBridgeContext.model_validate(payload)
-    except ValidationError:
-        return None
-
-    now = int(time.time() * 1000)
-    if (
-        now - bridge.issued_at > NEXTAUTH_BRIDGE_TTL_MS
-        or bridge.issued_at > now + NEXTAUTH_BRIDGE_FUTURE_SKEW_MS
-    ):
-        return None
-
-    return AuthenticatedUser(
-        user_id=bridge.subject,
-        email=bridge.email,
-        roles=[bridge.role],
-        workspace_id=bridge.workspace_id,
-        role=bridge.role,
-        permissions=bridge.permissions,
-        is_guest=bridge.is_guest,
-        is_internal_bridge=True,
-        claims=payload,
-    )
 
 
 def _verify_dev_direct_token(
@@ -310,10 +255,13 @@ async def _signing_key(token: str, settings: Settings) -> Any:
         raise AuthTokenError("The access token signing key is invalid.") from error
 
 
-def _user_from_claims(claims: dict[str, Any]) -> AuthenticatedUser:
-    user_id = claims.get("sub")
-    if not isinstance(user_id, str) or not user_id:
+def _principal_from_claims(claims: dict[str, Any]) -> ExternalPrincipal:
+    subject = claims.get("sub")
+    issuer = claims.get("iss")
+    if not isinstance(subject, str) or not subject:
         raise AuthTokenError("The access token is missing a subject.")
+    if not isinstance(issuer, str) or not issuer:
+        raise AuthTokenError("The access token is missing an issuer.")
 
     raw_roles = claims.get("roles", [])
     if isinstance(raw_roles, str):
@@ -323,21 +271,23 @@ def _user_from_claims(claims: dict[str, Any]) -> AuthenticatedUser:
     else:
         roles = []
 
-    workspace_id = (
-        claims.get("workspace_id") or claims.get("workspaceId") or claims.get("organization_id")
-    )
-    is_guest = bool(claims.get("isGuest") or claims.get("is_guest") or "guest" in roles)
-    return AuthenticatedUser(
-        user_id=user_id,
+    return ExternalPrincipal(
+        subject=subject,
+        issuer=issuer,
         email=claims.get("email") if isinstance(claims.get("email"), str) else None,
+        email_verified=(
+            claims["email_verified"]
+            if isinstance(claims.get("email_verified"), bool)
+            else None
+        ),
+        name=claims.get("name") if isinstance(claims.get("name"), str) else None,
+        picture=claims.get("picture") if isinstance(claims.get("picture"), str) else None,
         roles=roles,
-        workspace_id=workspace_id if isinstance(workspace_id, str) else None,
-        is_guest=is_guest,
         claims=claims,
     )
 
 
-async def verify_access_token(token: str, settings: Settings) -> AuthenticatedUser:
+async def verify_access_token(token: str, settings: Settings) -> ExternalPrincipal:
     if not settings.auth_issuer:
         raise AuthConfigurationError("AUTH_ISSUER is required for access-token validation.")
 
@@ -357,36 +307,46 @@ async def verify_access_token(token: str, settings: Settings) -> AuthenticatedUs
 
     if not isinstance(claims, dict):
         raise AuthTokenError("The access token claims are invalid.")
-    return _user_from_claims(claims)
+    return _principal_from_claims(claims)
+
+
+async def get_external_principal(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    settings: Settings = Depends(get_settings),
+) -> ExternalPrincipal:
+    """Validate a Logto access token before local identity bootstrap.
+
+    This dependency deliberately does not resolve ``ExternalIdentity``. A valid
+    first-time Logto user has no local mapping yet and must be able to reach the
+    bootstrap endpoint.
+    """
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer access token is required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        return await verify_access_token(credentials.credentials, settings)
+    except AuthConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is not configured correctly.",
+        ) from error
+    except AuthTokenError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer access token is invalid or expired.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from error
 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     settings: Settings = Depends(get_settings),
-    x_asianode_auth_context: str | None = Header(default=None),
-    x_asianode_auth_signature: str | None = Header(default=None),
 ) -> AuthenticatedUser:
     if credentials is None:
-        bridge_context = (
-            x_asianode_auth_context if isinstance(x_asianode_auth_context, str) else None
-        )
-        bridge_signature = (
-            x_asianode_auth_signature if isinstance(x_asianode_auth_signature, str) else None
-        )
-        if bridge_context or bridge_signature:
-            bridge_user = _verify_nextauth_bridge(
-                bridge_context,
-                bridge_signature,
-                settings,
-            )
-            if bridge_user is None:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Internal authentication context is invalid or expired.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-            return bridge_user
-
         if _auth_is_required(settings):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -406,7 +366,31 @@ async def get_current_user(
         direct_user = _verify_dev_direct_token(credentials.credentials, settings)
         if direct_user is not None:
             return direct_user
-        return await verify_access_token(credentials.credentials, settings)
+        principal = await verify_access_token(credentials.credentials, settings)
+        from app.core.identity import (
+            ExternalIdentityNotInitialized,
+            UserSuspended,
+            resolve_external_identity,
+        )
+
+        try:
+            async with get_db_connection() as connection:
+                return await resolve_external_identity(connection, principal)
+        except ExternalIdentityNotInitialized as error:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="auth_identity:not_initialized",
+            ) from error
+        except UserSuspended as error:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="user:suspended",
+            ) from error
+        except (RuntimeError, SQLAlchemyError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication identity storage is unavailable.",
+            ) from error
     except AuthConfigurationError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -13,7 +13,7 @@ def _production_settings(**overrides: object) -> Settings:
         "environment": "production",
         "auth_issuer": "https://issuer.example.com/oidc",
         "auth_audience": "api://asianode",
-        "nextauth_bridge_secret": "x" * 32,
+        "auth_secret": "x" * 32,
         "cors_origins": "https://app.example.com",
         "rate_limit_enabled": True,
     }
@@ -30,7 +30,6 @@ def test_production_runtime_settings_reject_missing_identity_configuration() -> 
         auth_issuer=None,
         auth_audience=None,
         auth_secret=None,
-        nextauth_bridge_secret=None,
     )
 
     with pytest.raises(SettingsConfigurationError) as error:
@@ -39,7 +38,7 @@ def test_production_runtime_settings_reject_missing_identity_configuration() -> 
     message = str(error.value)
     assert "AUTH_ISSUER is required" in message
     assert "AUTH_AUDIENCE is required" in message
-    assert "NEXTAUTH_BRIDGE_SECRET or AUTH_SECRET" in message
+    assert "AUTH_SECRET must be at least 32 characters" in message
 
 
 def test_production_runtime_settings_reject_insecure_cors_and_disabled_rate_limit() -> None:
