@@ -2,11 +2,19 @@
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= compose.yaml
+SQLADMIN_ENABLED ?= false
+SQLADMIN_USERNAME ?= admin
+SQLADMIN_PASSWORD ?=
+SQLADMIN_SECRET_KEY ?=
 
 setup:
 	uv sync
 
 dev:
+	SQLADMIN_ENABLED=$(SQLADMIN_ENABLED) \
+	SQLADMIN_USERNAME=$(SQLADMIN_USERNAME) \
+	SQLADMIN_PASSWORD=$(SQLADMIN_PASSWORD) \
+	SQLADMIN_SECRET_KEY=$(SQLADMIN_SECRET_KEY) \
 	uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 infra-up:

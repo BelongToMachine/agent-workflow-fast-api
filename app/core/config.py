@@ -297,6 +297,23 @@ class Settings(BaseSettings):
             "ASIANODE_RATE_LIMIT_WINDOW_SECONDS",
         ),
     )
+    sqladmin_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SQLADMIN_ENABLED", "ASIANODE_SQLADMIN_ENABLED"),
+    )
+    sqladmin_username: str = Field(
+        default="admin",
+        min_length=1,
+        validation_alias=AliasChoices("SQLADMIN_USERNAME", "ASIANODE_SQLADMIN_USERNAME"),
+    )
+    sqladmin_password: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SQLADMIN_PASSWORD", "ASIANODE_SQLADMIN_PASSWORD"),
+    )
+    sqladmin_secret_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SQLADMIN_SECRET_KEY", "ASIANODE_SQLADMIN_SECRET_KEY"),
+    )
 
     model_config = SettingsConfigDict(
         # Resolve env files from the repository, not from the process cwd. This
@@ -342,6 +359,8 @@ def validate_runtime_settings(settings: Settings) -> None:
         errors.append("CORS_ORIGINS must contain explicit origins and cannot include '*'")
     if not settings.rate_limit_enabled:
         errors.append("RATE_LIMIT_ENABLED must be true")
+    if settings.sqladmin_enabled:
+        errors.append("SQLADMIN_ENABLED must be false outside local development")
 
     if errors:
         raise SettingsConfigurationError(

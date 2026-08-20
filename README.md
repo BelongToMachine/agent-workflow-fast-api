@@ -111,6 +111,23 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 - Web Chat 图片上传：`POST http://127.0.0.1:8000/api/v1/files/upload?workspace_id={workspace_id}`
 - Swagger：http://127.0.0.1:8000/docs
 
+### SQLAdmin 本地预览
+
+FastAPI 本身不带 Django Admin。项目已加入 SQLAdmin，当前提供一个只读的本地预览，默认关闭，
+不会修改现有业务表。要打开它，在 FastAPI 进程启动时设置：
+
+```bash
+make dev \
+  SQLADMIN_ENABLED=true \
+  SQLADMIN_USERNAME=admin \
+  SQLADMIN_PASSWORD=change-me-locally \
+  SQLADMIN_SECRET_KEY=use-a-long-random-local-secret
+```
+
+然后访问 http://127.0.0.1:8000/admin，可以查看 User、Workspace 和 WorkspaceMember。
+这是用于检查数据库和 SQLAdmin 界面的独立本地登录，不替代正式 OIDC/Bearer 认证；生产环境会
+拒绝启用该预览。
+
 本地运行时，FastAPI 会读取仓库根目录的 `.env.local`，因此可以复用现有的
 `DEEPSEEK_API_KEY`。模型 provider 请求默认在 60 秒后超时，可通过
 `CHAT_PROVIDER_TIMEOUT_SECONDS` 调整（范围 1–300 秒）。部署到其他环境时，请通过环境变量提供 API Key。
@@ -170,8 +187,9 @@ workspace 和 chat 归属；没有配置 Redis 时会退化为普通 SSE，不�
 独立 Agent 查询接口只接受预定义的只读工具名和工具参数，不接受调用方提交的 user、role、
 permission 或 workspace 身份字段。FastAPI 会从 Bearer Token/NextAuth bridge 取得身份，
 先检查 workspace 的 `knowledge.read` 权限，再执行产品、内容或指定知识库搜索。独立 Agent
-workflow 使用同一组工具执行有限轮次的模型调用和工具调用，但不会创建 Chat/Message，适合
-知识库问答或后台任务入口；调用方只能提交 prompt 和最多 5 轮的 `maxSteps`。
+workflow 使用同一组工具执行有限轮次的模型调用和工具调用，并在工具上限后追加一次最终总结，
+但不会创建 Chat/Message，适合知识库问答或后台任务入口；调用方只能提交 prompt 和最多 10 轮的
+`maxSteps`。
 
 当当前用户具备 `knowledge.read` 时，FastAPI 会向模型注册只读的
 `searchProductsTool`、`searchContentTool`、`listKnowledgeBasesTool`、`listKnowledgeFilesTool`、
@@ -192,7 +210,8 @@ Redis fixed-window counter，可在多个 FastAPI 实例之间共享；Redis 暂
 
 商品、内容和聊天接口都经过统一的 Bearer Token 依赖：
 
-- `development` 环境且 `AUTH_REQUIRED=false` 时，未携带 Token 会使用明确标记的 `development-user`，方便本地开发。
+- `development` 环境且 `AUTH_REQUIRED=false` 时，未携带 Token 会使用明确标记的 `development-user`，方便本地开发；聊天和 history 会落到本地数据库中的开发用户与默认 workspace。
+- 开发 direct token 的 subject 会在 FastAPI 内部映射为稳定的本地 UUID，并按 workspace 创建开发用户/member 记录；前端不需要传可信的 user id。
 - `staging` 和 `production` 环境默认要求 Token；即使没有显式设置 `AUTH_REQUIRED` 也不会允许匿名访问。
 - 配置 `AUTH_ISSUER`、`AUTH_AUDIENCE` 和 `AUTH_JWKS_URL` 后，FastAPI 会校验 JWT 签名、`kid`、issuer、audience、过期时间和 `sub`。
 - 当前 NextAuth 的服务端 cookie 不是 OIDC access token，不能直接交给 FastAPI 当作普通 JWT 解码。过渡阶段应由 Next.js BFF 或 Logto 登录流程提供 Bearer access token。
