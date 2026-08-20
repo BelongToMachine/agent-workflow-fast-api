@@ -4,6 +4,12 @@
 > 文档状态：实施计划
 > 最后更新：2026-08-20
 
+## 实施进度
+
+- Phase 0：进行中。Logto Cloud Dev tenant、SPA 和 API Resource 已在控制台创建；第一个 owner subject、Google 发布方式、微信开放平台审核负责人仍待确认。
+- Phase 1（数据库身份模型）：已完成。`0005_auth_identity` migration、status、只读 preflight、Makefile 命令和测试已加入；migration 已在当前开发数据库提交并完成 schema 验证。
+- 现存迁移状态：`0001–0004` 知识库迁移仍为 pending；本次只执行并验证了 `0005_auth_identity`，未修改既有知识库迁移状态。
+
 ## 1. 目标
 
 建立一条可用于生产环境的完整认证授权链路：
@@ -737,16 +743,18 @@ CORS_ORIGINS=https://<frontend-domain>
 
 ### Phase 1：数据库身份模型
 
-- [ ] 新增 `ExternalIdentity` migration；
-- [ ] 将 `User.email` 调整为 nullable/320；
-- [ ] 增加 `User.status`；
-- [ ] 增加唯一约束和索引；
-- [ ] 增加 migration status 检查；
-- [ ] 增加只读 migration preflight；
-- [ ] 增加回滚说明；
-- [ ] 更新 schema 文档和测试 fixture。
+- [x] 新增 `ExternalIdentity` migration；
+- [x] 将 `User.email` 调整为 nullable/320；
+- [x] 增加 `User.status`；
+- [x] 增加唯一约束和索引；
+- [x] 增加 migration status 检查；
+- [x] 增加只读 migration preflight；
+- [x] 增加回滚说明；
+- [x] 更新 schema 文档和测试 fixture。
 
 完成条件：migration 可重复执行，旧 User 数据不丢失，现有业务外键保持有效。
+
+当前代码已通过静态检查和身份迁移专项测试；`0005_auth_identity` 已在当前开发数据库成功提交，旧 `User.id` 保留，外键、唯一约束、索引和字段约束已通过迁移后的只读 status 验证。此次执行未做备份，因为用户明确要求直接执行。
 
 ### Phase 2：FastAPI 身份解析
 

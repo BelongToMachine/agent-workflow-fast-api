@@ -5,7 +5,6 @@ from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY_ROOT = SERVICE_ROOT.parent
 
 
 class SettingsConfigurationError(RuntimeError):
@@ -316,10 +315,9 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        # Resolve env files from the repository, not from the process cwd. This
-        # keeps `uvicorn` working when it is launched from either the repo root
-        # or the asianode-fastapi directory.
-        env_file=(REPOSITORY_ROOT / ".env.local", SERVICE_ROOT / ".env"),
+        # Resolve env files from this service repository, not from the process
+        # cwd, so the service stays independent of the former outer project.
+        env_file=(SERVICE_ROOT / ".env.local", SERVICE_ROOT / ".env"),
         env_prefix="",
         case_sensitive=False,
         extra="ignore",

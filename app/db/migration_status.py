@@ -4,6 +4,10 @@ from dataclasses import dataclass
 
 from sqlalchemy import text
 
+from app.db.auth_identity_status import (
+    AUTH_IDENTITY_STATUS_QUERY,
+    build_auth_identity_status,
+)
 from app.db.session import get_db_connection
 
 MIGRATION_STATUS_QUERY = text(
@@ -261,8 +265,18 @@ async def _run() -> int:
     async with get_db_connection() as connection:
         result = await connection.execute(MIGRATION_STATUS_QUERY)
         row = result.mappings().one()
+        auth_result = await connection.execute(AUTH_IDENTITY_STATUS_QUERY)
+        auth_row = auth_result.mappings().one()
 
     statuses = build_migration_statuses(dict(row))
+    auth_status = build_auth_identity_status(dict(auth_row))
+    statuses.append(
+        MigrationStatus(
+            auth_status.name,
+            auth_status.applied,
+            auth_status.details,
+        )
+    )
     for status in statuses:
         state = "applied" if status.applied else "pending"
         print(f"{status.name}: {state} ({status.details})")

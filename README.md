@@ -43,13 +43,10 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode
 REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
-首次初始化时，先让 Next.js 在同一个本地数据库建立现有业务表，再应用 FastAPI 新增的
+首次初始化时，请先确认业务数据库中的基础表已经存在，再在本仓库应用 FastAPI 新增的
 知识库表。不要把本地值写回当前远程 Supabase 配置，可以使用命令行环境变量覆盖：
 
 ```bash
-cd ..
-POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode pnpm db:migrate
-cd asianode-fastapi
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migration-status
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make knowledge-integrity
 POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate-knowledge
@@ -128,7 +125,7 @@ make dev \
 这是用于检查数据库和 SQLAdmin 界面的独立本地登录，不替代正式 OIDC/Bearer 认证；生产环境会
 拒绝启用该预览。
 
-本地运行时，FastAPI 会读取仓库根目录的 `.env.local`，因此可以复用现有的
+本地运行时，FastAPI 会读取 `asianode-fastapi` 仓库根目录的 `.env.local`，因此可以复用
 `DEEPSEEK_API_KEY`。模型 provider 请求默认在 60 秒后超时，可通过
 `CHAT_PROVIDER_TIMEOUT_SECONDS` 调整（范围 1–300 秒）。部署到其他环境时，请通过环境变量提供 API Key。
 
@@ -137,7 +134,7 @@ FastAPI 内部回退到 `deepseek-chat`，不会把客户端提交的任意 prov
 
 ## 当前前端切换状态
 
-当根目录 `.env.local` 中设置以下变量时，Web 端聊天请求会进入 FastAPI：
+当 `asianodeagent-front/.env.local` 中设置以下变量时，Web 端聊天请求会进入 FastAPI：
 
 ```env
 USE_FASTAPI_BACKEND=1
@@ -159,7 +156,7 @@ FastAPI 会保留 Web 消息中的 JPEG/PNG 图片附件：文字部分继续使
 会转换为 OpenAI-compatible `image_url` content。仅允许 `http://`、`https://` 和
 `data:image/...` URL；PDF、其他文件类型或本地文件路径不会被转发给模型。
 
-Web Chat 图片上传默认关闭。要切换到 FastAPI 上传管道，需要在 FastAPI 和根目录环境中分别
+Web Chat 图片上传默认关闭。要切换到 FastAPI 上传管道，需要在 FastAPI 和前端仓库的 `.env.local` 中分别
 设置：
 
 ```env
@@ -221,7 +218,7 @@ Next.js BFF 发起请求，Next.js 只验证当前 NextAuth session 并发送签
 context，FastAPI 负责校验 consent 参数、权限和 loopback redirect，并生成与原实现
 兼容的 5 分钟 HMAC code。FastAPI 生成的 code 可以由现有 Next.js result 页面继续验证。
 
-如果要使用单独的桥接密钥，在根目录 `.env.local` 和 FastAPI 运行环境中同时设置：
+如果要使用单独的桥接密钥，在 `asianodeagent-front/.env.local` 和 `asianode-fastapi/.env.local` 中同时设置：
 
 ```env
 DEV_OIDC_INTERNAL_SECRET=your-local-development-secret

@@ -4,4 +4,5 @@ __pycache__/
 .ruff_cache/
 storage/
 .env
+.env.local
 *.py[cod]
