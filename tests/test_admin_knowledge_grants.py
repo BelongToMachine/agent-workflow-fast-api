@@ -9,7 +9,9 @@ from app.api.routes.admin_knowledge_grants import (
     UpsertKnowledgeBaseGrantRequest,
     _build_grant_view,
     _grants_disabled,
+    _require_non_anonymous_development_identity,
 )
+from app.core.auth import AuthenticatedUser
 from app.main import app
 
 client = TestClient(app)
@@ -72,6 +74,16 @@ def test_grant_admin_rejects_anonymous_development_identity() -> None:
     )
 
     assert response.status_code == 401
+
+
+def test_grant_admin_accepts_a_development_oidc_identity() -> None:
+    _require_non_anonymous_development_identity(
+        AuthenticatedUser(
+            user_id="dev-admin",
+            is_development=True,
+            claims={"permissions": ["members.manage"]},
+        )
+    )
 
 
 def test_disabled_response_explains_migration_prerequisite() -> None:

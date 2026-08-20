@@ -6,10 +6,16 @@ import time
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.api.routes.admin_members import UpdateMemberRequest, _build_member_views
+from app.api.routes.admin_members import (
+    UpdateMemberRequest,
+    _build_member_views,
+    _require_non_anonymous_development_identity,
+)
+from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
 from app.main import app
 
@@ -95,6 +101,25 @@ def test_admin_endpoint_does_not_accept_anonymous_development_identity(
     )
 
     assert response.status_code == 401
+
+
+def test_admin_guard_accepts_a_development_oidc_identity() -> None:
+    _require_non_anonymous_development_identity(
+        AuthenticatedUser(
+            user_id="dev-admin",
+            is_development=True,
+            claims={"permissions": ["members.manage"]},
+        )
+    )
+
+
+def test_admin_guard_rejects_anonymous_development_identity() -> None:
+    with pytest.raises(HTTPException) as error:
+        _require_non_anonymous_development_identity(
+            AuthenticatedUser(user_id="development-user", is_development=True)
+        )
+
+    assert error.value.status_code == 401
 
 
 def test_nextauth_bridge_context_is_accepted_for_authenticated_requests(
