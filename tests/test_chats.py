@@ -16,6 +16,7 @@ from app.api.routes.chat import (
     UIMessage,
     _message_attachments,
     _message_payload,
+    _parse_dsml_tool_calls,
     _prepare_chat_persistence,
     _resolve_workspace_id,
     chat,
@@ -944,6 +945,210 @@ def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(mo
     assert any('"type": "finish"' in chunk for chunk in chunks)
     assert provider.requests[0]["json"]["model"] == "deepseek-chat"
     assert provider.requests[1]["json"]["messages"][-1]["role"] == "tool"
+
+
+def test_parse_dsml_tool_calls_accepts_provider_compatibility_format() -> None:
+    text = (
+        '<｜｜DSML｜｜tool_calls> '
+        '<｜｜DSML｜｜invoke name="searchProductsTool"> '
+        '<｜｜DSML｜｜parameter name="limit" string="false">50'
+        '\\</｜｜DSML｜｜parameter> '
+        '\\</｜｜DSML｜｜invoke> '
+        '\\</｜｜DSML｜｜tool_calls>'
+    )
+
+    calls = _parse_dsml_tool_calls(text, {"searchProductsTool"})
+
+    assert calls is not None
+    assert len(calls) == 1
+    assert calls[0]["name"] == "searchProductsTool"
+    assert json.loads(calls[0]["arguments"]) == {"limit": 50}
+
+
+def test_stream_chat_parses_dsml_without_leaking_control_text(monkeypatch) -> None:
+    provider = FakeStreamingClient(
+        [
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "content": (
+                                            '<｜｜DSML｜｜tool_calls>'
+                                            '<｜｜DSML｜｜invoke name="searchProductsTool">'
+                                            '<｜｜DSML｜｜parameter name="limit" '
+                                            'string="false">50'
+                                        )
+                                    }
+                                }
+                            ]
+                        }
+                    ),
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "content": (
+                                            '\\</｜｜DSML｜｜parameter>'
+                                            '\\</｜｜DSML｜｜invoke>'
+                                            '\\</｜｜DSML｜｜tool_calls>'
+                                        )
+                                    }
+                                }
+                            ]
+                        }
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {"choices": [{"delta": {"content": "Intermediate."}}]}
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {"choices": [{"delta": {"content": "Final answer."}}]}
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+        ]
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent_tool(name, arguments, **kwargs):
+        captured.update({"name": name, "arguments": arguments, **kwargs})
+        return {"products": [], "message": "No matching products."}
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.httpx.AsyncClient",
+        lambda **kwargs: (setattr(provider, "timeout", kwargs["timeout"]) or provider),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.execute_agent_tool",
+        fake_execute_agent_tool,
+    )
+
+    payload = ChatRequest(
+        id="00000000-0000-0000-0000-000000000010",
+        message={
+            "parts": [{"text": "Search products", "type": "text"}],
+            "role": "user",
+        },
+    )
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in stream_chat(
+                payload,
+                "request-dsml",
+                "test-key",
+                "https://provider.example/v1",
+                "deepseek-chat",
+                AuthenticatedUser(user_id="development-user", is_development=True),
+                UUID("00000000-0000-0000-0000-000000000001"),
+                True,
+                False,
+            )
+        ]
+
+    chunks = asyncio.run(collect())
+    joined = "".join(chunks)
+
+    assert captured["name"] == "searchProductsTool"
+    assert captured["arguments"] == {"limit": 50}
+    assert "DSML" not in joined
+    assert "tool-input-start" in joined
+    assert "Final answer." in joined
+
+
+def test_stream_chat_retries_invalid_dsml_without_leaking_control_text(monkeypatch) -> None:
+    provider = FakeStreamingClient(
+        [
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "content": (
+                                            '<｜｜DSML｜｜tool_calls>'
+                                            '<｜｜DSML｜｜invoke name="unknownTool">'
+                                            '\\</｜｜DSML｜｜invoke>'
+                                            '\\</｜｜DSML｜｜tool_calls>'
+                                        )
+                                    }
+                                }
+                            ]
+                        }
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {"choices": [{"delta": {"content": "Recovered answer."}}]}
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.httpx.AsyncClient",
+        lambda **kwargs: (setattr(provider, "timeout", kwargs["timeout"]) or provider),
+    )
+
+    payload = ChatRequest(
+        id="00000000-0000-0000-0000-000000000010",
+        message={
+            "parts": [{"text": "Search products", "type": "text"}],
+            "role": "user",
+        },
+    )
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in stream_chat(
+                payload,
+                "request-invalid-dsml",
+                "test-key",
+                "https://provider.example/v1",
+                "deepseek-chat",
+                AuthenticatedUser(user_id="development-user", is_development=True),
+                UUID("00000000-0000-0000-0000-000000000001"),
+                True,
+                False,
+            )
+        ]
+
+    chunks = asyncio.run(collect())
+    joined = "".join(chunks)
+
+    assert "DSML" not in joined
+    assert "Recovered answer." in joined
+    assert len(provider.requests) == 2
+    assert "tools" not in provider.requests[-1]["json"]
+    assert "invalid tool syntax" in provider.requests[-1]["json"]["messages"][0]["content"]
 
 
 def test_stream_chat_forces_final_summary_after_ten_tool_steps(monkeypatch) -> None:

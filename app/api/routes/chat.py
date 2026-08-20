@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -226,6 +227,80 @@ def _provider_error_message(error: httpx.HTTPError) -> str:
     return f"{type(error).__name__}: the provider connection closed unexpectedly"
 
 
+_DSML_OPEN = "<｜｜DSML｜｜"
+_DSML_CLOSE = "</｜｜DSML｜｜"
+_DSML_INVOKE_RE = re.compile(
+    rf"{re.escape(_DSML_OPEN)}invoke\s+name=\"(?P<name>[^\"<>]+)\"\s*>"
+    rf"(?P<body>.*?)(?:\\)?{re.escape(_DSML_CLOSE)}invoke\s*>",
+    re.DOTALL,
+)
+_DSML_PARAMETER_RE = re.compile(
+    rf"{re.escape(_DSML_OPEN)}parameter\s+name=\"(?P<name>[^\"<>]+)\""
+    rf"(?:\s+string=\"(?P<string>true|false)\")?\s*>"
+    rf"(?P<value>.*?)(?:\\)?{re.escape(_DSML_CLOSE)}parameter\s*>",
+    re.DOTALL,
+)
+
+
+def _parse_dsml_scalar(value: str, *, is_string: bool) -> object:
+    value = value.strip()
+    if is_string:
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _parse_dsml_tool_calls(
+    text: str,
+    allowed_tool_names: set[str],
+) -> list[dict[str, str]] | None:
+    """Parse the provider's legacy DSML tool-call representation.
+
+    Some OpenAI-compatible providers serialize tool calls in ``content`` rather
+    than ``delta.tool_calls``. This parser is deliberately narrow: only the
+    exact DSML invoke/parameter tags and tools advertised for this request are
+    accepted. Returning ``None`` means the text was not a valid fallback call.
+    """
+    if _DSML_OPEN not in text:
+        return None
+
+    calls: list[dict[str, str]] = []
+    for invoke_match in _DSML_INVOKE_RE.finditer(text):
+        name = invoke_match.group("name")
+        if name not in allowed_tool_names:
+            return None
+
+        arguments: dict[str, object] = {}
+        body = invoke_match.group("body")
+        parameters = list(_DSML_PARAMETER_RE.finditer(body))
+        if not parameters and body.strip():
+            return None
+        for parameter in parameters:
+            parameter_name = parameter.group("name")
+            if parameter_name in arguments:
+                return None
+            arguments[parameter_name] = _parse_dsml_scalar(
+                parameter.group("value"),
+                is_string=parameter.group("string") == "true",
+            )
+
+        calls.append(
+            {
+                "id": f"dsml-call-{uuid4()}",
+                "name": name,
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            }
+        )
+
+    return calls or None
+
+
+def _has_dsml_control_text(text: str) -> bool:
+    return _DSML_OPEN in text or _DSML_CLOSE in text
+
+
 async def stream_chat(
     payload: ChatRequest,
     request_id: str,
@@ -243,6 +318,7 @@ async def stream_chat(
     assistant_text: list[str] = []
     conversation = to_openai_messages(payload)
     tool_step_count = 0
+    summary_retry_count = 0
 
     yield sse_chunk({"type": "start", "messageId": assistant_message_id})
     yield sse_chunk({"type": "text-start", "id": assistant_message_id})
@@ -270,16 +346,38 @@ async def stream_chat(
                     "messages": request_messages,
                     "stream": True,
                 }
+                allowed_tool_names: set[str] = set()
                 if can_query_knowledge and not is_final_summary_step:
-                    request_body["tools"] = agent_tool_definitions(
+                    tool_definitions = agent_tool_definitions(
                         include_knowledge_base=True,
                         include_knowledge_base_search=include_knowledge_base_tool,
                     )
+                    request_body["tools"] = tool_definitions
                     request_body["tool_choice"] = "auto"
+                    allowed_tool_names = {
+                        str(definition.get("function", {}).get("name"))
+                        for definition in tool_definitions
+                        if isinstance(definition, dict)
+                        and isinstance(definition.get("function"), dict)
+                    }
+                if is_final_summary_step and summary_retry_count:
+                    request_body["messages"] = [
+                        {
+                            "role": "system",
+                            "content": (
+                                FINAL_SUMMARY_SYSTEM_PROMPT
+                                + " The previous response contained invalid tool syntax. "
+                                "Return only the final user-facing answer and do not emit "
+                                "any tool call markup."
+                            ),
+                        },
+                        *conversation,
+                    ]
 
                 tool_calls: dict[int, dict[str, str]] = {}
                 allowed_tool_call_indexes: set[int] = set()
                 step_text: list[str] = []
+                provider_finish_reason: str | None = None
                 async with client.stream(
                     "POST",
                     f"{base_url.rstrip('/')}/chat/completions",
@@ -315,20 +413,15 @@ async def stream_chat(
                         choices = chunk.get("choices", [])
                         if not choices or not isinstance(choices[0], dict):
                             continue
+                        finish_reason = choices[0].get("finish_reason")
+                        if isinstance(finish_reason, str):
+                            provider_finish_reason = finish_reason
                         delta = choices[0].get("delta", {})
                         if not isinstance(delta, dict):
                             continue
                         text_delta = delta.get("content")
                         if isinstance(text_delta, str) and text_delta:
-                            assistant_text.append(text_delta)
                             step_text.append(text_delta)
-                            yield sse_chunk(
-                                {
-                                    "type": "text-delta",
-                                    "id": assistant_message_id,
-                                    "delta": text_delta,
-                                }
-                            )
 
                         raw_tool_calls = delta.get("tool_calls", [])
                         if not isinstance(raw_tool_calls, list):
@@ -376,6 +469,79 @@ async def stream_chat(
                                     }
                                 )
 
+                step_content = "".join(step_text)
+                has_dsml_control_text = _has_dsml_control_text(step_content)
+                logger.info(
+                    "Provider chat stream step completed",
+                    extra={
+                        "request_id": request_id,
+                        "step": step,
+                        "finish_reason": provider_finish_reason,
+                        "structured_tool_call_count": len(tool_calls),
+                        "content_length": len(step_content),
+                        "content_has_dsml": has_dsml_control_text,
+                    },
+                )
+                if not tool_calls and has_dsml_control_text:
+                    dsml_tool_calls = _parse_dsml_tool_calls(
+                        step_content,
+                        allowed_tool_names,
+                    )
+                    if dsml_tool_calls:
+                        logger.warning(
+                            "Provider returned a DSML tool call in content; "
+                            "using the compatibility parser",
+                            extra={
+                                "request_id": request_id,
+                                "tool_names": [
+                                    tool_call["name"] for tool_call in dsml_tool_calls
+                                ],
+                            },
+                        )
+                        for index, tool_call in enumerate(dsml_tool_calls):
+                            tool_calls[index] = tool_call
+                            yield sse_chunk(
+                                {
+                                    "type": "tool-input-start",
+                                    "toolCallId": tool_call["id"],
+                                    "toolName": tool_call["name"],
+                                    "dynamic": True,
+                                }
+                            )
+                        step_content = ""
+                    else:
+                        logger.warning(
+                            "Provider returned invalid DSML/control text",
+                            extra={"request_id": request_id},
+                        )
+                        # Never expose provider control markup to the user. Force
+                        # one tool-free synthesis attempt; if that also fails,
+                        # return a regular SSE error instead of a misleading answer.
+                        if summary_retry_count < 1:
+                            summary_retry_count += 1
+                            tool_step_count = MAX_CHAT_TOOL_STEPS
+                            continue
+                        yield sse_chunk(
+                            {
+                                "type": "error",
+                                "errorText": (
+                                    "The model returned an invalid tool call. "
+                                    f"Reference: {request_id}"
+                                ),
+                            }
+                        )
+                        return
+
+                if step_content and not has_dsml_control_text:
+                    assistant_text.append(step_content)
+                    yield sse_chunk(
+                        {
+                            "type": "text-delta",
+                            "id": assistant_message_id,
+                            "delta": step_content,
+                        }
+                    )
+
                 if not tool_calls:
                     if tool_step_count and not is_final_summary_step:
                         # A provider may return a process update or malformed textual
@@ -391,7 +557,19 @@ async def stream_chat(
                         "Model attempted a tool call during final summary step",
                         extra={"request_id": request_id},
                     )
-                    break
+                    if summary_retry_count < 1:
+                        summary_retry_count += 1
+                        continue
+                    yield sse_chunk(
+                        {
+                            "type": "error",
+                            "errorText": (
+                                "The model attempted a tool call while composing the "
+                                f"final answer. Reference: {request_id}"
+                            ),
+                        }
+                    )
+                    return
 
                 ordered_tool_calls = [tool_calls[index] for index in sorted(tool_calls)]
                 ordered_tool_calls = ordered_tool_calls[:remaining_tool_steps]
@@ -401,7 +579,10 @@ async def stream_chat(
                 conversation.append(
                     {
                         "role": "assistant",
-                        "content": "".join(step_text) or None,
+                        "content": (
+                            None if has_dsml_control_text else step_content
+                        )
+                        or None,
                         "tool_calls": [
                             {
                                 "id": tool_call["id"],
