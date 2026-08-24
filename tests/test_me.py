@@ -61,3 +61,41 @@ def test_effective_permissions_apply_role_defaults_and_overrides() -> None:
         "audit.read",
     ]
     assert memberships[0].overrides[0].permission == "audit.read"
+
+
+def test_employee_role_matches_editor_without_knowledge_permissions() -> None:
+    membership_id = UUID("00000000-0000-0000-0000-000000000020")
+    workspace_id = UUID("00000000-0000-0000-0000-000000000021")
+
+    memberships = _build_memberships(
+        [
+            {
+                "membership_id": membership_id,
+                "workspace_id": workspace_id,
+                "workspace_name": "Asianode",
+                "role": "employee",
+                "status": "active",
+            }
+        ],
+        [
+            {
+                "membership_id": membership_id,
+                "effect": "grant",
+                "permission": "knowledge.read",
+            },
+            {
+                "membership_id": membership_id,
+                "effect": "grant",
+                "permission": "knowledge.manage",
+            },
+        ],
+        is_guest=False,
+    )
+
+    assert memberships[0].permissions == [
+        "chat.read",
+        "chat.write",
+        "chat.delete",
+        "document.read",
+        "document.write",
+    ]

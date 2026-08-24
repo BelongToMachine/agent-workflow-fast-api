@@ -12,7 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from app.core.auth import create_dev_direct_token
 from app.core.config import Settings, get_settings
-from app.core.permissions import DEFAULT_PERMISSIONS_BY_ROLE, PERMISSION_CATALOG
+from app.core.permissions import (
+    DEFAULT_PERMISSIONS_BY_ROLE,
+    PERMISSION_CATALOG,
+    get_forbidden_permissions,
+)
 
 router = APIRouter(prefix="/dev/oidc", tags=["dev-oidc"])
 
@@ -75,7 +79,7 @@ class DevDirectTokenRequest(BaseModel):
     email: str | None = Field(default=None, max_length=320)
     is_guest: bool = Field(alias="isGuest", default=False)
     permissions: list[str] = Field(default_factory=list, max_length=len(PERMISSION_CATALOG))
-    role: Literal["owner", "admin", "editor", "viewer"] = "viewer"
+    role: Literal["owner", "admin", "editor", "employee", "viewer"] = "viewer"
     subject: str = Field(min_length=1, max_length=100)
     workspace_id: str = Field(alias="workspaceId", min_length=1, max_length=100)
 
@@ -281,6 +285,9 @@ async def create_development_token(
     unknown_permissions = set(payload.permissions).difference(PERMISSION_CATALOG)
     if unknown_permissions:
         return _error("The request contains an unknown permission.", 400)
+
+    if get_forbidden_permissions(payload.role).intersection(payload.permissions):
+        return _error("The employee role cannot receive knowledge permissions.", 400)
 
     token = create_dev_direct_token(
         {

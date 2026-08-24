@@ -25,6 +25,13 @@ DEFAULT_PERMISSIONS_BY_ROLE = {
         "document.read",
         "document.write",
     ),
+    "employee": (
+        "chat.read",
+        "chat.write",
+        "chat.delete",
+        "document.read",
+        "document.write",
+    ),
     "viewer": (
         "knowledge.read",
         "chat.read",
@@ -32,6 +39,14 @@ DEFAULT_PERMISSIONS_BY_ROLE = {
         "document.read",
     ),
 }
+
+ROLE_FORBIDDEN_PERMISSIONS = {
+    "employee": frozenset(("knowledge.read", "knowledge.manage")),
+}
+
+
+def get_forbidden_permissions(role: str) -> frozenset[str]:
+    return ROLE_FORBIDDEN_PERMISSIONS.get(role, frozenset())
 
 
 def get_effective_permissions(
@@ -52,5 +67,7 @@ def get_effective_permissions(
             permissions.add(permission)
         elif effect == "deny":
             permissions.discard(permission)
+
+    permissions.difference_update(get_forbidden_permissions(role))
 
     return [permission for permission in PERMISSION_CATALOG if permission in permissions]

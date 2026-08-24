@@ -10,13 +10,17 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser, get_current_user
-from app.core.permissions import PERMISSION_CATALOG, get_effective_permissions
+from app.core.permissions import (
+    PERMISSION_CATALOG,
+    get_effective_permissions,
+    get_forbidden_permissions,
+)
 from app.core.workspace_access import WorkspaceAccess, require_workspace_permission
 from app.db.session import get_db_connection
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-WorkspaceRole = Literal["owner", "admin", "editor", "viewer"]
+WorkspaceRole = Literal["owner", "admin", "editor", "employee", "viewer"]
 
 
 class PermissionOverride(BaseModel):
@@ -259,6 +263,10 @@ async def _update_member_access(
                 raise MemberAccessError("Only the workspace owner can edit an owner.")
             if body.role == "owner" and actor_role != "owner":
                 raise MemberAccessError("Only the workspace owner can grant owner access.")
+            if get_forbidden_permissions(body.role).intersection(body.permissions):
+                raise MemberAccessError(
+                    "The employee role cannot receive knowledge permissions."
+                )
             if target_user_id == actor_user_id and (
                 "members.manage" not in body.permissions
                 or body.role not in {"owner", "admin"}

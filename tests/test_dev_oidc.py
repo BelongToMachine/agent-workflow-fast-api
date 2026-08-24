@@ -212,3 +212,53 @@ def test_development_token_endpoint_issues_a_custom_permission_profile(
             )
         )
     assert error.value.status_code == 403
+
+
+def test_development_token_endpoint_supports_employee_role_without_knowledge_access(
+    dev_settings: Settings,
+) -> None:
+    response = client.post(
+        "/api/v1/dev/oidc/token",
+        json={
+            "permissions": [
+                "chat.read",
+                "chat.write",
+                "chat.delete",
+                "document.read",
+                "document.write",
+            ],
+            "role": "employee",
+            "subject": "dev-employee",
+            "workspaceId": "00000000-0000-0000-0000-000000000001",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["role"] == "employee"
+    assert result["defaults"] == [
+        "chat.read",
+        "chat.write",
+        "chat.delete",
+        "document.read",
+        "document.write",
+    ]
+
+
+def test_development_token_endpoint_rejects_employee_knowledge_access(
+    dev_settings: Settings,
+) -> None:
+    response = client.post(
+        "/api/v1/dev/oidc/token",
+        json={
+            "permissions": ["knowledge.read"],
+            "role": "employee",
+            "subject": "dev-employee",
+            "workspaceId": "00000000-0000-0000-0000-000000000001",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "message": "The employee role cannot receive knowledge permissions."
+    }

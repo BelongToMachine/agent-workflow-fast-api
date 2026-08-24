@@ -86,6 +86,24 @@ def test_update_request_rejects_unknown_or_duplicate_permissions() -> None:
         )
 
 
+def test_update_request_accepts_employee_role() -> None:
+    request = UpdateMemberRequest.model_validate(
+        {
+            "memberId": "00000000-0000-0000-0000-000000000010",
+            "permissions": [
+                "chat.read",
+                "chat.write",
+                "chat.delete",
+                "document.read",
+                "document.write",
+            ],
+            "role": "employee",
+        }
+    )
+
+    assert request.role == "employee"
+
+
 def test_admin_endpoint_does_not_accept_anonymous_development_identity(
     development_settings: Settings,
 ) -> None:
