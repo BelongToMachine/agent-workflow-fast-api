@@ -215,7 +215,7 @@ def test_uninitialized_real_access_token_returns_structured_forbidden(monkeypatc
     assert raised.value.detail == "auth_identity:not_initialized"
 
 
-def test_bootstrap_creates_a_local_user_without_workspace_membership() -> None:
+def test_bootstrap_creates_a_local_user_with_default_workspace_membership() -> None:
     connection = _BootstrapConnection(
         {"email": None, "is_anonymous": False, "status": "active"}
     )
@@ -230,6 +230,15 @@ def test_bootstrap_creates_a_local_user_without_workspace_membership() -> None:
     assert UUID(user.user_id)
     assert any('INSERT INTO "User"' in sql for sql, _params in connection.calls)
     assert any('INSERT INTO "ExternalIdentity"' in sql for sql, _params in connection.calls)
+    membership_params = next(
+        params
+        for sql, params in connection.calls
+        if 'INSERT INTO "WorkspaceMember"' in sql
+    )
+    assert membership_params["workspace_id"] == UUID(
+        "00000000-0000-0000-0000-000000000001"
+    )
+    assert membership_params["role"] == "viewer"
 
 
 def test_bootstrap_reuses_the_existing_local_user() -> None:
@@ -247,6 +256,7 @@ def test_bootstrap_reuses_the_existing_local_user() -> None:
         params for sql, params in connection.calls if 'UPDATE "User"' in sql
     )
     assert update_params["user_id"] == local_user_id
+    assert not any('INSERT INTO "WorkspaceMember"' in sql for sql, _params in connection.calls)
 
 
 def test_bootstrap_rejects_a_suspended_local_user() -> None:

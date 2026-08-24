@@ -1,5 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+from uuid import UUID
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,6 +50,20 @@ class Settings(BaseSettings):
     postgres_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("POSTGRES_URL", "ASIANODE_POSTGRES_URL"),
+    )
+    default_workspace_id: UUID = Field(
+        default=UUID("00000000-0000-0000-0000-000000000001"),
+        validation_alias=AliasChoices(
+            "DEFAULT_WORKSPACE_ID",
+            "ASIANODE_DEFAULT_WORKSPACE_ID",
+        ),
+    )
+    default_workspace_role: Literal["editor", "employee", "viewer"] = Field(
+        default="viewer",
+        validation_alias=AliasChoices(
+            "DEFAULT_WORKSPACE_ROLE",
+            "ASIANODE_DEFAULT_WORKSPACE_ROLE",
+        ),
     )
     redis_url: str | None = Field(
         default=None,

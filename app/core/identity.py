@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.auth import AuthenticatedUser, ExternalPrincipal
+from app.core.config import get_settings
 
 LOGTO_PROVIDER = "logto"
 
@@ -51,6 +52,28 @@ class UserSuspended(Exception):
     """Raised when the mapped local user is suspended."""
 
 
+DEFAULT_WORKSPACE_QUERY = text(
+    """
+    SELECT "id"
+    FROM "Workspace"
+    WHERE "id" = :workspace_id
+    """
+)
+
+DEFAULT_WORKSPACE_MEMBER_INSERT = text(
+    """
+    INSERT INTO "WorkspaceMember" (
+        "role", "status", "userId", "workspaceId", "createdAt", "updatedAt"
+    )
+    VALUES (
+        :role, 'active', :user_id, :workspace_id,
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    )
+    ON CONFLICT ("workspaceId", "userId") DO NOTHING
+    """
+)
+
+
 async def bootstrap_external_identity(
     connection: AsyncConnection,
     principal: ExternalPrincipal,
@@ -58,9 +81,11 @@ async def bootstrap_external_identity(
     """Create or update the local identity for one external Logto subject.
 
     The external subject is the only identity key. Profile claims are refreshed
-    when present, while no workspace membership is created here. The unique
-    ``(provider, subject)`` constraint makes concurrent requests converge on a
-    single local User UUID.
+    when present. Newly created users are assigned to the configured default
+    workspace with the configured default role. The unique ``(provider,
+    subject)`` constraint makes concurrent requests converge on a single local
+    User UUID without re-granting access to an existing user whose membership
+    was removed.
     """
     candidate_user_id = uuid4()
     candidate_identity_id = uuid4()
@@ -157,6 +182,25 @@ async def bootstrap_external_identity(
             "image": principal.picture,
         },
     )
+
+    if user_id == candidate_user_id:
+        settings = get_settings()
+        workspace_result = await connection.execute(
+            DEFAULT_WORKSPACE_QUERY,
+            {"workspace_id": settings.default_workspace_id},
+        )
+        if workspace_result.mappings().first() is None:
+            raise BootstrapResultError(
+                "The configured default workspace does not exist."
+            )
+        await connection.execute(
+            DEFAULT_WORKSPACE_MEMBER_INSERT,
+            {
+                "role": settings.default_workspace_role,
+                "user_id": user_id,
+                "workspace_id": settings.default_workspace_id,
+            },
+        )
 
     return AuthenticatedUser(
         user_id=str(user_id),

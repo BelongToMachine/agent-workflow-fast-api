@@ -25,6 +25,12 @@ def test_production_runtime_settings_accept_a_complete_secure_configuration() ->
     validate_runtime_settings(_production_settings())
 
 
+def test_default_workspace_role_accepts_employee() -> None:
+    settings = Settings(default_workspace_role="employee")
+
+    assert settings.default_workspace_role == "employee"
+
+
 def test_production_runtime_settings_reject_missing_identity_configuration() -> None:
     settings = _production_settings(
         auth_issuer=None,

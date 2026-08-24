@@ -24,8 +24,10 @@ async def bootstrap_auth_identity(
 ) -> CurrentUserResponse:
     """Initialize a local user for a valid Logto identity.
 
-    Bootstrap is intentionally idempotent and never grants workspace access.
-    Memberships must be created by a separate owner/admin workflow.
+    Bootstrap is idempotent. Newly created users receive access to the
+    configured default workspace with the configured default role; existing
+    users keep their current memberships and are not re-granted access if an
+    administrator removed it.
     """
     try:
         async with get_db_connection() as connection:
