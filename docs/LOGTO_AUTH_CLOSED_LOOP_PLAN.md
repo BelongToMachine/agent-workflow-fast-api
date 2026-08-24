@@ -2,13 +2,16 @@
 
 > 适用架构：`asianodeagent-front`（React + Vite）+ `asianode-fastapi`（FastAPI）+ PostgreSQL + Logto
 > 文档状态：实施计划
-> 最后更新：2026-08-20
+> 最后更新：2026-08-24
+
+> 当前范围决策：微信网页登录暂缓。本期认证闭环只以“邮箱 + Google Hosted Sign-in”作为交付与验收范围；微信相关 Connector、开放平台配置、审核和 E2E 保留在计划中，但不作为本期阻断项或完成条件。
 
 ## 实施进度
 
-- Phase 0：进行中。Logto Cloud Dev tenant、SPA 和 API Resource 已在控制台创建；第一个 owner subject、Google 发布方式、微信开放平台审核负责人仍待确认。
+- Phase 0：进行中。Logto Cloud Dev tenant、SPA 和 API Resource 已在控制台创建；第一个 owner subject、Google 发布方式仍待确认。微信开放平台审核负责人随微信登录一并暂缓。
 - Phase 1（数据库身份模型）：已完成。`0005_auth_identity` migration、status、只读 preflight、Makefile 命令和测试已加入；migration 已在当前开发数据库提交并完成 schema 验证。
-- Phase 2（FastAPI 身份解析）：进行中。已完成 `ExternalPrincipal`、JWT 验证结果拆分、`ExternalIdentity` 解析、幂等 bootstrap 和 `/me` 状态扩展；真实 Logto Bearer Token 现在可以初始化并映射到本地 User UUID，未加入 workspace 的用户返回 `pending_workspace`。成员授权、完整结构化错误模型和最终业务路由审计仍待实现；旧 NextAuth bridge 已从 FastAPI 认证入口删除，仅保留开发 direct token。
+- Phase 2（FastAPI 身份解析）：进行中。已完成 `ExternalPrincipal`、JWT 验证结果拆分、`ExternalIdentity` 解析、幂等 bootstrap、`/me` 状态扩展以及结构化 401/403 响应；真实 Logto Bearer Token 现在可以初始化并映射到本地 User UUID，未加入 workspace 的用户返回 `pending_workspace`。成员授权和最终业务路由审计仍待实现；旧 NextAuth bridge 已从 FastAPI 认证入口删除，仅保留开发 direct token。
+- Phase 4（React/Vite AuthContext）：进行中。已完成业务认证状态模型、登录回调后的 bootstrap + `/me` 初始化、状态页以及 401/403 处理；active workspace 的选择和持久化仍待实现。
 - 现存迁移状态：`0001–0004` 知识库迁移仍为 pending；本次只执行并验证了 `0005_auth_identity`，未修改既有知识库迁移状态。
 
 ## 1. 目标
@@ -16,7 +19,7 @@
 建立一条可用于生产环境的完整认证授权链路：
 
 ```text
-Google / 微信网页用户
+Google 网页用户（微信网页登录暂缓）
   → Logto Hosted Sign-in
   → React/Vite 获取 Logto Access Token
   → Authorization: Bearer <access_token>
@@ -29,7 +32,7 @@ Google / 微信网页用户
 
 闭环完成后必须满足：
 
-- Google 和微信网页登录都能成功完成回调；
+- Google 网页登录能成功完成回调；微信网页登录暂缓；
 - 浏览器只持有 SPA 可以持有的 Logto Token，不持有任何第三方 client secret；
 - FastAPI 能验证 Logto Access Token 的签名、issuer、audience、有效期和 subject；
 - 同一个 Logto 用户始终映射到同一个本地 `User.id`；
@@ -44,7 +47,7 @@ Google / 微信网页用户
 
 - React SPA 的 Logto 登录、回调、退出和 Token 生命周期；
 - Google Social Connector；
-- WeChat Web Social Connector；
+- WeChat Web Social Connector（暂缓）；
 - Logto API Resource 和 FastAPI JWT 验证；
 - Logto 外部身份与本地 `User` 的稳定映射；
 - 首次登录用户初始化；
@@ -736,7 +739,7 @@ CORS_ORIGINS=https://<frontend-domain>
 - [ ] 确认 JIT User + pending workspace 策略；
 - [ ] 确认第一个 owner 的 Logto subject；
 - [ ] 确认 Google External/Internal 发布方式；
-- [ ] 确认微信开放平台账号、网页应用和审核负责人；
+- [ ] 确认微信开放平台账号、网页应用和审核负责人（暂缓）；
 - [ ] 确认不同 Logto `sub` 不自动合并。
 
 完成条件：配置表和负责人明确，数据库方案获确认。
@@ -767,7 +770,7 @@ CORS_ORIGINS=https://<frontend-domain>
 - [x] 调整 `/api/v1/me` 响应和状态码；
 - [x] 增加 User suspended 检查；
 - [ ] 保证业务路由无需认识 Logto `sub`；
-- [ ] 增加结构化 401/403 错误码；
+- [x] 增加结构化 401/403 错误码；
 - [x] 给 bootstrap 加限流和安全日志。
 
 完成条件：非 UUID Logto `sub` 能稳定访问 `/me`，所有业务路由收到本地 UUID。
@@ -787,22 +790,27 @@ CORS_ORIGINS=https://<frontend-domain>
 
 ### Phase 4：React/Vite AuthContext
 
-- [ ] 扩展 AuthContext 状态模型；
-- [ ] callback 后调用 bootstrap；
+- [x] 扩展 AuthContext 状态模型；
+- [x] callback 后调用 bootstrap；
 - [x] 增加 `/me` 查询；
-- [ ] 增加 `/access-pending`；
-- [ ] 增加 `/account-suspended`；
-- [ ] 增加 `/forbidden`；
+- [x] 增加 `/access-pending`；
+- [x] 增加 `/account-suspended`；
+- [x] 增加 `/forbidden`；
 - [ ] 实现 active workspace 选择和持久化；
 - [ ] 将 workspace 注入从固定 env 改为 active workspace；
 - [x] 让 Sidebar/Settings 路由使用后端 permissions；
-- [ ] 401 时回到登录，403 时保留登录并显示业务状态；
-- [ ] 退出、切换用户和 workspace 时清理缓存；
+- [x] 401 时回到登录，403 时保留登录并显示业务状态；
+- [x] 退出、切换用户时清理用户级缓存；
+- [ ] workspace 切换时清理 workspace 级缓存；
 - [x] 删除新前端对 server-only/NextAuth 遗留模块的引用。
 
 完成条件：前端可以明确区分未登录、初始化中、待授权、已登录无权限和正常可用。
 
+当前阶段说明：`ApplicationAuthProvider` 将 SDK 登录态与业务身份状态分开，提供 `loading`、`unauthenticated`、`initializing`、`pending_workspace`、`authenticated`、`suspended`、`error`。回调成功后会先 bootstrap、再读取 `/me`；401 会清除本地会话并回到登录页，403 保留有效登录态并按 `user:suspended`、`workspace:membership_required` 或通用权限不足显示业务状态。当前仍使用固定 workspace 环境变量，尚未提供工作区选择/持久化。
+
 ### Phase 5：Logto、Google 和微信配置
+
+微信网页登录相关条目暂缓，不纳入本期上线阻断或验收。保留这些条目是为了恢复该工作时保持完整上下文。
 
 - [ ] 创建 Logto SPA；
 - [ ] 配置开发/生产 redirect URI；
@@ -810,14 +818,14 @@ CORS_ORIGINS=https://<frontend-domain>
 - [ ] 创建 API Resource；
 - [ ] 配置 Google OAuth Client 和 Logto Connector；
 - [ ] 发布或配置 Google test users；
-- [ ] 创建微信开放平台网页应用；
-- [ ] 配置微信授权回调域为 Logto 域名；
-- [ ] 完成微信审核；
-- [ ] 配置 Logto WeChat Web Connector；
-- [ ] 在 Sign-up and sign-in 启用 Google/微信；
+- [ ] 创建微信开放平台网页应用（暂缓）；
+- [ ] 配置微信授权回调域为 Logto 域名（暂缓）；
+- [ ] 完成微信审核（暂缓）；
+- [ ] 配置 Logto WeChat Web Connector（暂缓）；
+- [ ] 在 Sign-up and sign-in 启用 Google；微信启用暂缓；
 - [ ] 配置各环境变量和 CORS。
 
-完成条件：Google 和微信都可以在目标域名完成 Hosted Sign-in。
+完成条件：本期 Google 可以在目标域名完成 Hosted Sign-in；微信登录暂缓。
 
 ### Phase 6：测试和联调
 
@@ -832,14 +840,14 @@ CORS_ORIGINS=https://<frontend-domain>
 - [ ] suspended User 被拒绝；
 - [ ] workspace membership、deny override 和跨 workspace 拒绝；
 - [ ] Google 浏览器 E2E；
-- [ ] 微信扫码浏览器 E2E；
+- [ ] 微信扫码浏览器 E2E（暂缓）；
 - [ ] 刷新页面保持登录；
 - [ ] Token 过期后自动刷新；
 - [ ] 退出后受保护页面重新要求登录；
 - [ ] 权限修改后 UI 和 API 同步；
 - [ ] 浏览器日志、后端日志和错误监控不包含 Token。
 
-完成条件：自动化测试通过，Google/微信真实账号验收通过。
+完成条件：自动化测试通过，Google 真实账号验收通过；微信验收暂缓。
 
 ### Phase 7：生产切换与遗留清理
 
@@ -963,14 +971,15 @@ bun run build
 
 只有同时满足以下条件，才认为认证授权闭环完成：
 
-- [ ] Google 和微信网页登录都通过真实账号验收；
+- [ ] Google 网页登录通过真实账号验收；
+- [ ] 微信网页登录通过真实账号验收（暂缓，不作为本期完成条件）；
 - [ ] Access Token 的 audience 是 Asianode FastAPI API Resource；
 - [ ] FastAPI 不再把 Logto `sub` 当作本地 UUID；
 - [ ] 同一个 Logto `sub` 始终映射到同一个本地 User UUID；
 - [ ] 微信无 email 用户可正常初始化；
 - [x] 新用户首次登录自动获得默认 workspace 的 viewer 权限，不自动获得 owner/admin 权限；
 - [ ] 管理员可以在产品流程内授予 membership；
-- [ ] 前端以 `/me` 为本地身份和权限来源；
+- [x] 前端以 `/me` 为本地身份和权限来源；
 - [ ] active workspace 来自 memberships，而不是生产环境固定值；
 - [ ] 所有业务接口继续执行 workspace/role/permission/resource 校验；
 - [ ] Token 过期、退出、suspended、401、403、503 都有明确行为；

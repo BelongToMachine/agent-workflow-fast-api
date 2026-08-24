@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.admin import install_sqladmin
+from app.api.errors import structured_http_exception_handler
 from app.api.router import api_router
 from app.core.config import get_settings, validate_runtime_settings
 from app.core.rate_limit import RateLimitMiddleware
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
         limit=settings.rate_limit_requests,
         window_seconds=settings.rate_limit_window_seconds,
     )
+    application.add_exception_handler(HTTPException, structured_http_exception_handler)
     application.include_router(api_router)
     if settings.sqladmin_enabled:
         install_sqladmin(application, settings, get_engine())
