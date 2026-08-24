@@ -112,7 +112,7 @@ authSubject    = Logto token 的 sub
 MVP 建议采用以下任一种方式：
 
 - 预先把第一个 Logto 用户加入默认 workspace，并设为 owner；或
-- 首次登录自动创建本地 User，但没有 workspace membership，交由管理员手动授权。
+- 首次登录自动创建本地 User，并以 viewer 角色加入配置的默认 workspace；owner/admin 仍交由管理员授予。
 
 不建议根据前端提交的 email 自动授予 owner 或 admin 权限。
 
@@ -376,7 +376,7 @@ ADD COLUMN "authSubject" TEXT;
 3. 运维脚本将其加入默认 workspace 并设置 owner；
 4. 后续用户由管理员在成员设置中授权。
 
-这样可以避免任何人只要登录就自动获得 workspace 管理权限。
+这样可以让 MVP 用户登录后直接进入默认 workspace，同时避免任何人只要登录就自动获得 workspace 管理权限。
 
 ## 6. 配置清单
 

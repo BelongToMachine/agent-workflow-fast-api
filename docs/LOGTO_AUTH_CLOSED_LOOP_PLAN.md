@@ -273,18 +273,17 @@ JWT 验证函数只产生 `ExternalPrincipal`；业务依赖必须在查询 `Ext
 
 ### 6.1 推荐 MVP 策略
 
-采用“JIT 创建 User，但不自动授予 workspace”策略：
+采用“JIT 创建 User，并自动加入配置好的默认 workspace（viewer）”策略：
 
 ```text
 首次 Logto 登录
   → 创建本地 User + ExternalIdentity
-  → memberships = []
-  → 前端显示“账号已创建，等待管理员授权”
-  → 管理员加入 workspace
-  → 用户刷新 /me 后进入业务页面
+  → 加入默认 workspace，role = viewer
+  → /me 返回默认 workspace membership
+  → 用户进入业务页面
 ```
 
-这样可以确保任何能够在 Logto 注册的人都不会自动获得业务数据权限。
+默认角色只拥有 viewer 权限，不会自动获得 owner/admin 或成员管理权限。若产品改为邀请制，后续可以关闭默认 workspace 分配并恢复管理员显式授权流程。
 
 ### 6.2 第一个 owner
 
@@ -351,7 +350,7 @@ require_workspace_permission
 - 创建或读取 User + ExternalIdentity；
 - 同步允许同步的资料；
 - 返回与 `/me` 相同的业务身份数据；
-- 不自动创建 workspace membership；
+- 仅对本次新创建的 User 创建默认 workspace membership，已有用户不重复授予；
 - 限流；
 - 不记录或返回完整 Token。
 
@@ -773,7 +772,7 @@ CORS_ORIGINS=https://<frontend-domain>
 
 完成条件：非 UUID Logto `sub` 能稳定访问 `/me`，所有业务路由收到本地 UUID。
 
-当前阶段说明：真实 Logto token 已先经过 JWT 签名、issuer、audience 和有效期验证。首次调用 bootstrap 时，服务会按 `(provider=logto, subject=sub)` 幂等创建或复用本地 `User + ExternalIdentity`，同步非敏感 profile 字段但不创建 workspace membership；响应通过 `/me` 同一套模型返回 `accessState=ready|pending_workspace`。已映射的 active User 会以本地 UUID 进入业务依赖；未完成 bootstrap 的用户返回 `auth_identity:not_initialized`，suspended User 返回 `user:suspended`。开发 direct token 仅用于本地开发，NextAuth bridge 已删除。
+当前阶段说明：真实 Logto token 已先经过 JWT 签名、issuer、audience 和有效期验证。首次调用 bootstrap 时，服务会按 `(provider=logto, subject=sub)` 幂等创建或复用本地 `User + ExternalIdentity`，同步非敏感 profile 字段；仅新创建的用户会加入配置的默认 workspace 并使用 viewer role，已存在用户不会因为重复登录而重新获得被撤销的 membership。响应通过 `/me` 同一套模型返回 `accessState=ready|pending_workspace`。已映射的 active User 会以本地 UUID 进入业务依赖；未完成 bootstrap 的用户返回 `auth_identity:not_initialized`，suspended User 返回 `user:suspended`。开发 direct token 仅用于本地开发，NextAuth bridge 已删除。
 
 ### Phase 3：成员初始化闭环
 
@@ -969,7 +968,7 @@ bun run build
 - [ ] FastAPI 不再把 Logto `sub` 当作本地 UUID；
 - [ ] 同一个 Logto `sub` 始终映射到同一个本地 User UUID；
 - [ ] 微信无 email 用户可正常初始化；
-- [ ] 首次登录不自动获得 workspace 权限；
+- [x] 新用户首次登录自动获得默认 workspace 的 viewer 权限，不自动获得 owner/admin 权限；
 - [ ] 管理员可以在产品流程内授予 membership；
 - [ ] 前端以 `/me` 为本地身份和权限来源；
 - [ ] active workspace 来自 memberships，而不是生产环境固定值；
