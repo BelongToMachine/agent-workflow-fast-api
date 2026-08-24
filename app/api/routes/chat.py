@@ -301,6 +301,58 @@ def _has_dsml_control_text(text: str) -> bool:
     return _DSML_OPEN in text or _DSML_CLOSE in text
 
 
+class _IncrementalUserText:
+    """Release provider text immediately without leaking split DSML markers."""
+
+    def __init__(self) -> None:
+        self._pending = ""
+        self._blocked = False
+
+    def push(self, delta: str) -> str:
+        if self._blocked:
+            return ""
+
+        self._pending += delta
+        marker_positions = [
+            position
+            for marker in (_DSML_OPEN, _DSML_CLOSE)
+            if (position := self._pending.find(marker)) >= 0
+        ]
+        if marker_positions:
+            marker_position = min(marker_positions)
+            visible = self._pending[:marker_position]
+            self._pending = ""
+            self._blocked = True
+            return visible
+
+        retained_length = 0
+        for marker in (_DSML_OPEN, _DSML_CLOSE):
+            for length in range(
+                min(len(marker) - 1, len(self._pending)),
+                0,
+                -1,
+            ):
+                if self._pending.endswith(marker[:length]):
+                    retained_length = max(retained_length, length)
+                    break
+
+        if not retained_length:
+            visible = self._pending
+            self._pending = ""
+            return visible
+
+        visible = self._pending[:-retained_length]
+        self._pending = self._pending[-retained_length:]
+        return visible
+
+    def finish(self) -> str:
+        if self._blocked:
+            return ""
+        visible = self._pending
+        self._pending = ""
+        return visible
+
+
 async def stream_chat(
     payload: ChatRequest,
     request_id: str,
@@ -377,6 +429,7 @@ async def stream_chat(
                 tool_calls: dict[int, dict[str, str]] = {}
                 allowed_tool_call_indexes: set[int] = set()
                 step_text: list[str] = []
+                user_text = _IncrementalUserText()
                 provider_finish_reason: str | None = None
                 async with client.stream(
                     "POST",
@@ -422,6 +475,16 @@ async def stream_chat(
                         text_delta = delta.get("content")
                         if isinstance(text_delta, str) and text_delta:
                             step_text.append(text_delta)
+                            visible_delta = user_text.push(text_delta)
+                            if visible_delta:
+                                assistant_text.append(visible_delta)
+                                yield sse_chunk(
+                                    {
+                                        "type": "text-delta",
+                                        "id": assistant_message_id,
+                                        "delta": visible_delta,
+                                    }
+                                )
 
                         raw_tool_calls = delta.get("tool_calls", [])
                         if not isinstance(raw_tool_calls, list):
@@ -468,6 +531,17 @@ async def stream_chat(
                                         "inputTextDelta": argument_delta,
                                     }
                                 )
+
+                visible_tail = user_text.finish()
+                if visible_tail:
+                    assistant_text.append(visible_tail)
+                    yield sse_chunk(
+                        {
+                            "type": "text-delta",
+                            "id": assistant_message_id,
+                            "delta": visible_tail,
+                        }
+                    )
 
                 step_content = "".join(step_text)
                 has_dsml_control_text = _has_dsml_control_text(step_content)
@@ -531,16 +605,6 @@ async def stream_chat(
                             }
                         )
                         return
-
-                if step_content and not has_dsml_control_text:
-                    assistant_text.append(step_content)
-                    yield sse_chunk(
-                        {
-                            "type": "text-delta",
-                            "id": assistant_message_id,
-                            "delta": step_content,
-                        }
-                    )
 
                 if not tool_calls:
                     if tool_step_count and not is_final_summary_step:

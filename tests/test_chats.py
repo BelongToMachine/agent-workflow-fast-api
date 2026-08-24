@@ -824,6 +824,66 @@ class FakeStreamingClient:
         return self.responses.pop(0)
 
 
+def test_stream_chat_forwards_provider_text_deltas_incrementally(monkeypatch) -> None:
+    provider = FakeStreamingClient(
+        [
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps({"choices": [{"delta": {"content": "First "}}]}),
+                    "data: "
+                    + json.dumps({"choices": [{"delta": {"content": "second."}}]}),
+                    "data: [DONE]",
+                ]
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.httpx.AsyncClient",
+        lambda **_kwargs: provider,
+    )
+    completed: dict[str, str] = {}
+
+    async def on_complete(message_id: str, text: str) -> None:
+        completed.update({"message_id": message_id, "text": text})
+
+    payload = ChatRequest(
+        id="00000000-0000-0000-0000-000000000010",
+        message={
+            "parts": [{"text": "Stream the answer", "type": "text"}],
+            "role": "user",
+        },
+    )
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in stream_chat(
+                payload,
+                "request-streaming",
+                "test-key",
+                "https://provider.example/v1",
+                "deepseek-chat",
+                AuthenticatedUser(user_id="development-user", is_development=True),
+                UUID("00000000-0000-0000-0000-000000000001"),
+                False,
+                False,
+                on_complete=on_complete,
+            )
+        ]
+
+    chunks = asyncio.run(collect())
+    text_deltas = [
+        json.loads(chunk.removeprefix("data: "))["delta"]
+        for chunk in chunks
+        if '"type": "text-delta"' in chunk
+    ]
+
+    assert text_deltas == ["First ", "second."]
+    assert completed["message_id"]
+    assert completed["text"] == "First second."
+
+
 def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(monkeypatch) -> None:
     provider = FakeStreamingClient(
         [
@@ -977,7 +1037,21 @@ def test_stream_chat_parses_dsml_without_leaking_control_text(monkeypatch) -> No
                                 {
                                     "delta": {
                                         "content": (
-                                            '<｜｜DSML｜｜tool_calls>'
+                                            '<｜｜DS'
+                                        )
+                                    }
+                                }
+                            ]
+                        }
+                    ),
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "content": (
+                                            'ML｜｜tool_calls>'
                                             '<｜｜DSML｜｜invoke name="searchProductsTool">'
                                             '<｜｜DSML｜｜parameter name="limit" '
                                             'string="false">50'
