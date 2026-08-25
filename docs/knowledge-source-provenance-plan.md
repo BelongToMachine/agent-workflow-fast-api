@@ -10,9 +10,9 @@ download URLs, or file preview.
 
 ## Current status
 
-- [ ] Step 1: Confirm the data model and source relationship
-- [ ] Step 2: Add the `KnowledgeSource` schema and migration
-- [ ] Step 3: Add `sourceId` relationships and indexes
+- [x] Step 1: Confirm the data model and source relationship
+- [x] Step 2: Add or reconcile the `KnowledgeSource` schema and migration
+- [x] Step 3: Add `sourceId` relationships and indexes
 - [ ] Step 4: Update import/seed scripts
 - [ ] Step 5: Add source-scoped database queries
 - [ ] Step 6: Update AI tools and source-aware prompts
@@ -38,6 +38,7 @@ Create one row for each imported knowledge source file:
 | `fileHash` | Detect duplicate files or new versions |
 | `version` | Source version number |
 | `status` | `pending`, `ready`, or `failed` |
+| `workspaceId` | Current workspace/tenant boundary for the source |
 | `createdAt` | Creation timestamp |
 | `updatedAt` | Last update timestamp |
 
@@ -85,16 +86,73 @@ Acceptance criteria:
 - Existing `sourceSheet` and `sourceRow` remain useful.
 - No VPS-related implementation is required yet.
 
-### Step 2 — Add the source schema and migration
+#### Step 1 decision record — 2026-08-25
+
+Step 1 is complete. The following decisions are based on the current FastAPI
+schema, query code, and database contents:
+
+1. **Table and ownership**
+
+   Keep `KnowledgeSource` as the source-file provenance table. The current
+   database already contains this table and two ready legacy source rows. The
+   FastAPI project is the migration and database authority; the old frontend
+   Drizzle schema is compatibility/reference code and must not be used to run
+   production migrations.
+
+2. **Storage placeholders**
+
+   Keep `storageProvider` and `storageKey` nullable. The current database has no
+   populated `storageKey` values and no file-storage implementation is part of
+   this phase. Keep `fileHash` nullable as well because the existing legacy
+   rows do not have hashes.
+
+3. **Workspace boundary**
+
+   Keep `workspaceId` required on `KnowledgeSource`. The current deployment
+   has one workspace, but the source-to-workspace relationship is already the
+   correct isolation boundary for a future multi-workspace rollout. This step
+   does not add workspace switching or split the current workspace.
+
+4. **`ProductDocument` semantics**
+
+   `ProductDocument` is a product-attached document record, not automatically
+   a new source file. `researchId` expresses the business/product relationship;
+   `sourceId`, `sourceSheet`, and `sourceRow` express provenance. A document
+   imported from a separate file may point to a different `KnowledgeSource`;
+   a derived document reuses the source relationship of its product research
+   record. The first iteration will not create a separate source row for every
+   derived document.
+
+5. **Row-level provenance**
+
+   Keep `sourceSheet` and `sourceRow`. The accepted uniqueness scope is
+   `(sourceId, sourceSheet, sourceRow)`, so identical sheet/row coordinates in
+   two files remain distinct. `ProductOperation` and `ProductPrice` continue to
+   inherit provenance through `researchId`.
+
+6. **Current database baseline**
+
+   The existing database contains one workspace, two `KnowledgeSource` rows,
+   47 `RealProductResearch` rows, and 46 `ContentRecord` rows. All existing
+   research and content rows currently have valid source references. The
+   knowledge-base migrations `0001`–`0004` are still pending, so this step did
+   not run them or change any database data.
+
+The next step must reconcile this confirmed model with the FastAPI migration
+chain. It should add or adjust backend SQL migrations under `migrations/` and
+the related migration tooling, rather than generating a frontend migration.
+
+### Step 2 — Add or reconcile the source schema and migration
 
 Files:
 
-- `lib/db/schema.ts`
-- Generated file under `lib/db/migrations/`
+- `migrations/*.sql`
+- `app/db/migrate_knowledge*.py`
+- `app/db/migration_status.py`
 
 Tasks:
 
-- Add `KnowledgeSource`.
+- Reconcile the existing `KnowledgeSource` and knowledge-base migration chain.
 - Add nullable `sourceId` columns first for safe migration.
 - Add foreign keys and indexes.
 - Keep `storageKey` nullable.
@@ -102,9 +160,31 @@ Tasks:
 Validation:
 
 ```bash
-pnpm db:generate
-pnpm db:check
+make migration-status
+make knowledge-integrity
 ```
+
+#### Step 2 implementation record — 2026-08-25
+
+Step 2 is complete at the repository level:
+
+- Added `migrations/0006_knowledge_source_provenance.sql` to reconcile the
+  existing legacy `KnowledgeSource` table without renaming or recreating it.
+- The migration is idempotent and preserves nullable `storageProvider`,
+  `storageKey`, and `fileHash` values.
+- Required provenance fields and the `workspaceId` foreign-key relationship
+  are validated before the migration succeeds. Missing workspace assignments
+  fail explicitly instead of receiving an unsafe default workspace.
+- Added the workspace/status index needed for source-scoped lookups.
+- Registered the migration in `app/db/migrate_knowledge.py` and added schema
+  capability checks to `app/db/migration_status.py`.
+- No `sourceId` columns were added yet; those belong to Step 3.
+
+The configured database is a remote development Supabase target. The migration
+has not been applied remotely in this batch because the repository requires an
+explicit `--allow-remote` opt-in for that operation. Until it is applied,
+`make migration-status` will correctly report `0006_knowledge_source_provenance`
+as pending.
 
 ### Step 3 — Add source relationships and indexes
 
@@ -119,6 +199,31 @@ Tasks:
 
 This prevents two different files with the same worksheet and row number from
 being treated as duplicates.
+
+#### Step 3 implementation record — 2026-08-25
+
+Step 3 is complete at the repository level:
+
+- Added `migrations/0007_knowledge_source_relationships.sql`.
+- Added nullable `sourceId` columns and `KnowledgeSource` foreign keys for
+  `ContentRecord`, `RealProductResearch`, and `ProductDocument`.
+- Added source lookup indexes for all three tables.
+- Replaced the legacy global `(sourceSheet, sourceRow)` uniqueness indexes on
+  `ContentRecord` and `RealProductResearch` with
+  `(sourceId, sourceSheet, sourceRow)` indexes.
+- Kept `ProductDocument`'s existing business uniqueness on
+  `(researchId, documentType, fileReference)`; its source relationship is
+  provenance only.
+- Kept the new columns nullable so Step 8 can backfill legacy rows before
+  enforcing non-nullability.
+- Registered the migration and capability checks in the FastAPI migration
+  tooling.
+
+The configured remote development database already has all three source
+relationships, valid foreign keys, and the source-scoped indexes. The read-only
+baseline confirmed 46 `ContentRecord` rows, 47 `RealProductResearch` rows, and
+21 `ProductDocument` rows with no null or orphan source references, and no
+`ProductDocument`/`RealProductResearch` source mismatches.
 
 ### Step 4 — Update import and seed scripts
 

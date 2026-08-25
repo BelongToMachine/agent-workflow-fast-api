@@ -13,6 +13,123 @@ from app.db.session import get_db_connection
 MIGRATION_STATUS_QUERY = text(
     """
     SELECT
+        to_regclass('public."KnowledgeSource"') IS NOT NULL AS source_table,
+        (
+            SELECT COUNT(*) = 11
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'KnowledgeSource'
+              AND column_name IN (
+                  'createdAt', 'displayName', 'fileHash', 'id', 'sourceType',
+                  'status', 'storageKey', 'storageProvider', 'updatedAt',
+                  'version', 'workspaceId'
+              )
+        ) AS source_required_columns,
+        to_regclass('public."KnowledgeSource_fileHash_idx"') IS NOT NULL
+            AND to_regclass('public."KnowledgeSource_workspace_status_idx"') IS NOT NULL
+            AS source_indexes,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint AS constraint_record
+            WHERE constraint_record.conrelid = to_regclass('public."KnowledgeSource"')
+              AND constraint_record.contype = 'f'
+              AND constraint_record.confrelid = to_regclass('public."Workspace"')
+              AND constraint_record.conkey = ARRAY[
+                  (
+                      SELECT attribute.attnum
+                      FROM pg_attribute AS attribute
+                      WHERE attribute.attrelid = to_regclass('public."KnowledgeSource"')
+                        AND attribute.attname = 'workspaceId'
+                        AND NOT attribute.attisdropped
+                  )
+              ]::smallint[]
+        ) AS source_workspace_fk,
+        to_regclass('public."ContentRecord"') IS NOT NULL AS content_table,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ContentRecord'
+              AND column_name = 'sourceId'
+        ) AS content_source_column,
+        to_regclass('public."ContentRecord_sourceId_idx"') IS NOT NULL
+            AS content_source_idx,
+        to_regclass('public."ContentRecord_sourceId_sourceSheet_sourceRow_idx"') IS NOT NULL
+            AS content_source_unique_idx,
+        to_regclass('public."ContentRecord_sourceSheet_sourceRow_idx"') IS NULL
+            AS content_legacy_unique_idx_removed,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint AS constraint_record
+            WHERE constraint_record.conrelid = to_regclass('public."ContentRecord"')
+              AND constraint_record.contype = 'f'
+              AND constraint_record.confrelid = to_regclass('public."KnowledgeSource"')
+              AND constraint_record.conkey = ARRAY[
+                  (
+                      SELECT attribute.attnum
+                      FROM pg_attribute AS attribute
+                      WHERE attribute.attrelid = to_regclass('public."ContentRecord"')
+                        AND attribute.attname = 'sourceId'
+                        AND NOT attribute.attisdropped
+                  )
+              ]::smallint[]
+        ) AS content_source_fk,
+        to_regclass('public."RealProductResearch"') IS NOT NULL AS research_table,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'RealProductResearch'
+              AND column_name = 'sourceId'
+        ) AS research_source_column,
+        to_regclass('public."RealProductResearch_sourceId_idx"') IS NOT NULL
+            AS research_source_idx,
+        to_regclass('public."RealProductResearch_sourceId_sourceSheet_sourceRow_idx"') IS NOT NULL
+            AS research_source_unique_idx,
+        to_regclass('public."RealProductResearch_sourceSheet_sourceRow_idx"') IS NULL
+            AS research_legacy_unique_idx_removed,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint AS constraint_record
+            WHERE constraint_record.conrelid = to_regclass('public."RealProductResearch"')
+              AND constraint_record.contype = 'f'
+              AND constraint_record.confrelid = to_regclass('public."KnowledgeSource"')
+              AND constraint_record.conkey = ARRAY[
+                  (
+                      SELECT attribute.attnum
+                      FROM pg_attribute AS attribute
+                      WHERE attribute.attrelid = to_regclass('public."RealProductResearch"')
+                        AND attribute.attname = 'sourceId'
+                        AND NOT attribute.attisdropped
+                  )
+              ]::smallint[]
+        ) AS research_source_fk,
+        to_regclass('public."ProductDocument"') IS NOT NULL AS document_table,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ProductDocument'
+              AND column_name = 'sourceId'
+        ) AS document_source_column,
+        to_regclass('public."ProductDocument_sourceId_idx"') IS NOT NULL
+            AS document_source_idx,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint AS constraint_record
+            WHERE constraint_record.conrelid = to_regclass('public."ProductDocument"')
+              AND constraint_record.contype = 'f'
+              AND constraint_record.confrelid = to_regclass('public."KnowledgeSource"')
+              AND constraint_record.conkey = ARRAY[
+                  (
+                      SELECT attribute.attnum
+                      FROM pg_attribute AS attribute
+                      WHERE attribute.attrelid = to_regclass('public."ProductDocument"')
+                        AND attribute.attname = 'sourceId'
+                        AND NOT attribute.attisdropped
+                  )
+              ]::smallint[]
+        ) AS document_source_fk,
         to_regclass('public."KnowledgeBaseGrant"') IS NOT NULL AS grants_table,
         (
             SELECT COUNT(*) = 8
@@ -189,6 +306,36 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
     def flag(name: str) -> bool:
         return bool(row.get(name, False))
 
+    source_applied = all(
+        flag(key)
+        for key in (
+            "source_table",
+            "source_required_columns",
+            "source_indexes",
+            "source_workspace_fk",
+        )
+    )
+    source_relationships_applied = all(
+        flag(key)
+        for key in (
+            "content_table",
+            "content_source_column",
+            "content_source_idx",
+            "content_source_unique_idx",
+            "content_legacy_unique_idx_removed",
+            "content_source_fk",
+            "research_table",
+            "research_source_column",
+            "research_source_idx",
+            "research_source_unique_idx",
+            "research_legacy_unique_idx_removed",
+            "research_source_fk",
+            "document_table",
+            "document_source_column",
+            "document_source_idx",
+            "document_source_fk",
+        )
+    )
     grants_applied = all(
         flag(key)
         for key in (
@@ -257,6 +404,16 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "0004_knowledge_bases",
             entity_applied,
             "KnowledgeBase table, indexes, and dependent foreign keys",
+        ),
+        MigrationStatus(
+            "0006_knowledge_source_provenance",
+            source_applied,
+            "KnowledgeSource columns, workspace foreign key, and indexes",
+        ),
+        MigrationStatus(
+            "0007_knowledge_source_relationships",
+            source_relationships_applied,
+            "sourceId foreign keys, indexes, and source-scoped row uniqueness",
         ),
     ]
 

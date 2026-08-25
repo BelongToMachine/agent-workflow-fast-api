@@ -52,6 +52,26 @@ def test_staging_migration_is_always_rejected() -> None:
 
 def test_migration_status_requires_all_entity_dependencies() -> None:
     row = {
+        "source_table": True,
+        "source_required_columns": True,
+        "source_indexes": True,
+        "source_workspace_fk": True,
+        "content_table": True,
+        "content_source_column": True,
+        "content_source_idx": True,
+        "content_source_unique_idx": True,
+        "content_legacy_unique_idx_removed": True,
+        "content_source_fk": True,
+        "research_table": True,
+        "research_source_column": True,
+        "research_source_idx": True,
+        "research_source_unique_idx": True,
+        "research_legacy_unique_idx_removed": True,
+        "research_source_fk": True,
+        "document_table": True,
+        "document_source_column": True,
+        "document_source_idx": True,
+        "document_source_fk": True,
         "grants_table": True,
         "grants_required_columns": True,
         "grants_indexes": True,
@@ -84,8 +104,8 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
 
     statuses = build_migration_statuses(row)
 
-    assert [status.applied for status in statuses] == [True, True, True, False]
-    assert statuses[-1].name == "0004_knowledge_bases"
+    assert [status.applied for status in statuses] == [True, True, True, False, True, True]
+    assert statuses[3].name == "0004_knowledge_bases"
 
 
 def test_migration_status_rejects_a_partial_schema() -> None:
@@ -105,6 +125,11 @@ def test_migration_status_rejects_a_partial_schema() -> None:
 def test_migration_status_query_covers_schema_capabilities() -> None:
     sql = str(MIGRATION_STATUS_QUERY)
 
+    assert "source_required_columns" in sql
+    assert "source_workspace_fk" in sql
+    assert "content_source_unique_idx" in sql
+    assert "research_source_unique_idx" in sql
+    assert "document_source_fk" in sql
     assert "grants_required_columns" in sql
     assert "files_required_columns" in sql
     assert "chunks_required_columns" in sql
