@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 
 from app.api.routes.content import (
+    ContentRecordSummary,
     ContentSearchRequest,
     _build_content_search_query,
     _iso_timestamp,
@@ -91,3 +92,9 @@ def test_content_query_can_apply_knowledge_base_grants() -> None:
 
 def test_content_timestamp_matches_nextjs_iso_format() -> None:
     assert _iso_timestamp(datetime(2026, 6, 8, 15, 59, 17)) == ("2026-06-08T15:59:17.000Z")
+
+
+def test_content_result_exposes_the_shared_citation_contract() -> None:
+    citation_schema = ContentRecordSummary.model_json_schema()["properties"]["citation"]
+
+    assert citation_schema["$ref"].endswith("SourceCitation")

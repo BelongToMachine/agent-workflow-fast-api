@@ -13,10 +13,10 @@ download URLs, or file preview.
 - [x] Step 1: Confirm the data model and source relationship
 - [x] Step 2: Add or reconcile the `KnowledgeSource` schema and migration
 - [x] Step 3: Add `sourceId` relationships and indexes
-- [ ] Step 4: Update import/seed scripts
-- [ ] Step 5: Add source-scoped database queries
-- [ ] Step 6: Update AI tools and source-aware prompts
-- [ ] Step 7: Return and render source citations
+- [x] Step 4: Update import/seed scripts
+- [x] Step 5: Add source-scoped database queries
+- [x] Step 6: Update AI tools and source-aware prompts
+- [x] Step 7: Return and render source citations
 - [ ] Step 8: Backfill legacy data and verify the full flow
 
 We will stop after each step for review. A step is only marked complete after
@@ -229,9 +229,14 @@ baseline confirmed 46 `ContentRecord` rows, 47 `RealProductResearch` rows, and
 
 Files:
 
-- `scripts/seed-content-data.ts`
-- `scripts/seed-real-product-data.ts`
-- `scripts/seed-real-operations-data.ts`
+- `app/db/knowledge_provenance.py`
+- `app/db/knowledge_seed.py`
+- `scripts/seed_knowledge_data.py`
+- `scripts/seed_content_data.py`
+- `scripts/seed_real_product_data.py`
+- `scripts/seed_real_operations_data.py`
+- `docs/knowledge-source-import-contract.md`
+- `migrations/0008_knowledge_source_import_key.sql`
 
 Tasks:
 
@@ -244,13 +249,48 @@ Tasks:
 Legacy data that cannot be matched to a known file will receive a clearly
 marked legacy source rather than an invented file name.
 
+#### Step 4 implementation record — 2026-08-25
+
+Step 4 is complete at the repository level. The original Next.js seed paths
+(`scripts/seed-content-data.ts`, `scripts/seed-real-product-data.ts`, and
+`scripts/seed-real-operations-data.ts`) are not present in the current
+repositories, so the import contract is implemented as FastAPI-native Python
+adapters instead of inventing a missing source-file mapping.
+
+- `app/db/knowledge_provenance.py` provides transactional source registration,
+  SHA-256 helpers, and authoritative row-level provenance injection.
+- `app/db/knowledge_seed.py` provides a shared JSON payload loader and writer
+  for `ContentRecord`, `RealProductResearch`, `ProductDocument`,
+  `ProductOperation`, and `ProductPrice`.
+- The four CLI adapters expose full-source, content-only, product-only, and
+  operations-only imports. They use allowlisted columns, source-scoped
+  idempotent upserts, source coordinate validation, and same-source research
+  dependency checks.
+- `migrations/0008_knowledge_source_import_key.sql` makes repeated imports of
+  the same `(workspaceId, fileHash)` deterministic while preserving nullable
+  hashes for legacy/manual sources.
+- `docs/knowledge-source-import-contract.md` documents the JSON contract and
+  the `make seed-* INPUT=...` entry points.
+
+No real seed input was run in this batch because the repository does not
+contain a source dataset. Script help, validation/unit tests, SQL parsing, and
+the local/remote-write safety gate were verified; no remote database write was
+performed.
+
 ### Step 5 — Add source-scoped database queries
 
 Files:
 
-- `lib/db/content-queries.ts`
-- `lib/db/trade-queries.ts`
-- Any product-document query added later
+- `app/api/routes/content.py`
+- `app/api/routes/products.py`
+- `app/api/routes/knowledge_sources.py`
+- `app/core/knowledge_access.py`
+- `app/core/knowledge_base_entity.py`
+- `app/services/agent_tools.py`
+- `tests/test_content.py`
+- `tests/test_products.py`
+- `tests/test_knowledge_sources.py`
+- `tests/test_knowledge_base_entity.py`
 
 Tasks:
 
@@ -261,14 +301,38 @@ Tasks:
 - Do not fall back to the full knowledge base when an explicit source filter
   returns no result.
 
+#### Step 5 implementation record — 2026-08-25
+
+Step 5 is complete at the FastAPI repository level. The source-scoped query
+path was already present in the migrated backend routes; this step audited the
+full request-to-query path and fixed the remaining product-query gap.
+
+- `sourceFileNames` is resolved within the requested workspace and, when
+  grants are enabled, intersected with the caller's authorized source IDs.
+- Content search applies the resolved IDs to `ContentRecord.sourceId`.
+- Product search now applies the resolved IDs to
+  `RealProductResearch.sourceId`; it no longer uses only a display-name
+  predicate after source resolution.
+- Multiple source files are supported by an expanding SQL `IN` parameter.
+- An explicit source filter with no authorized/matching source returns an empty
+  result and an explanatory message; it never falls back to the full dataset.
+- The knowledge-base entity feature flag consistently switches source lookup,
+  authorization, content search, product search, and source listing between
+  `KnowledgeSource` and `KnowledgeBase`.
+- Agent tool input and execution already pass `sourceFileNames` through to the
+  same FastAPI query boundary, so the database filter remains authoritative.
+
+Focused content/product/source/entity tests and Ruff checks pass. No database
+migration or remote data write is required for this step.
+
 ### Step 6 — Update AI tools and prompts
 
 Files:
 
-- `lib/ai/tools/search-content.ts`
-- Product search tool definition
-- `lib/ai/prompts.ts`
-- `lib/types.ts`
+- `app/services/agent_tools.py`
+- `app/services/agent_workflow.py`
+- `app/api/routes/chat.py`
+- `tests/test_knowledge_search.py`
 
 Tasks:
 
@@ -278,7 +342,38 @@ Tasks:
 - Keep the actual restriction in the database layer; prompts are not a
   security boundary.
 
+#### Step 6 implementation record — 2026-08-25
+
+Step 6 is complete at the FastAPI repository level:
+
+- `ProductToolInput` and `ContentToolInput` expose the optional
+  `sourceFileNames` filter with an explicit exact-display-name description.
+- `searchProductsTool` and `searchContentTool` descriptions instruct the model
+  to pass every source file named by the user, avoid treating file names as
+  ordinary keywords, and use only returned rows as factual evidence.
+- The final-summary prompts used by both the bounded agent workflow and the
+  streaming chat workflow now state that enterprise tool results are the only
+  authoritative evidence. Empty or missing-source results must be reported,
+  and named-source requests must not be answered from other sources.
+- The database query layer remains the enforcement boundary; prompt guidance
+  does not replace workspace or source authorization checks.
+
+The tool schema and workflow tests pass. No database migration or remote data
+write is required for this step.
+
 ### Step 7 — Return and render citations
+
+Files:
+
+- `app/core/knowledge_citation.py`
+- `app/api/routes/content.py`
+- `app/api/routes/products.py`
+- `tests/test_content.py`
+- `tests/test_products.py`
+- `../asianodeagent-front/src/lib/knowledgeCitation.ts`
+- `../asianodeagent-front/src/lib/db/contentQueries.ts`
+- `../asianodeagent-front/src/lib/db/tradeQueries.ts`
+- `../asianodeagent-front/src/components/chat/message.tsx`
 
 Tasks:
 
@@ -298,6 +393,30 @@ Example citation:
   "row": 18
 }
 ```
+
+#### Step 7 implementation record — 2026-08-25
+
+Step 7 is complete at the repository level:
+
+- Added the shared backend `SourceCitation` contract with `sourceId`,
+  `fileName`, `sheet`, and `row`, plus optional `page` and `section` fields
+  reserved for PDF and document citations.
+- Content and product API summaries now return a nested `citation` object.
+  The existing flat source fields remain in the response for compatibility with
+  current clients.
+- Updated the frontend result types and chat tool-result cards to render a
+  consistent source line using the file name, sheet, and row. The internal
+  `sourceId` is available to the application but is not shown to end users.
+- Added schema contract tests for both content and product responses.
+- No database migration or remote database write was required.
+
+Validation completed:
+
+- Backend Ruff checks passed.
+- 27 focused backend tests passed; 3 unrelated environment/auth-gated tests
+  were deselected.
+- Frontend `npm run lint` passed.
+- Frontend `npm run build` passed.
 
 ### Step 8 — Backfill and verify
 

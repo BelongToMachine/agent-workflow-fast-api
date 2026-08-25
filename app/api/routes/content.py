@@ -12,6 +12,7 @@ from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.knowledge_access import get_authorized_source_ids
 from app.core.knowledge_base_entity import render_knowledge_base_query
+from app.core.knowledge_citation import SourceCitation, build_source_citation
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -65,6 +66,7 @@ class ContentRecordSummary(BaseModel):
     source_sheet: str = Field(alias="sourceSheet")
     source_id: str = Field(alias="sourceId")
     source_file_name: str | None = Field(default=None, alias="sourceFileName")
+    citation: SourceCitation
     submitter: str | None = None
     tags: str | None = None
     target_topic: str | None = Field(default=None, alias="targetTopic")
@@ -365,6 +367,12 @@ async def search_content(
                 **row,
                 "planned_at": _iso_timestamp(row["planned_at"]),
                 "source_id": str(row["source_id"]),
+                "citation": build_source_citation(
+                    source_id=row["source_id"],
+                    file_name=row["source_file_name"],
+                    source_sheet=row["source_sheet"],
+                    source_row=row["source_row"],
+                ),
             }
         )
         for row in rows

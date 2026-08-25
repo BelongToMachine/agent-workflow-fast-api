@@ -19,10 +19,12 @@ from app.core.config import Settings, get_settings
 from app.main import app
 from app.services.agent_tools import (
     AgentToolError,
+    ContentToolInput,
     KnowledgeBaseLookupToolInput,
     KnowledgeBaseToolInput,
     KnowledgeFileListToolInput,
     KnowledgeFileLookupToolInput,
+    ProductToolInput,
     agent_tool_definitions,
     execute_agent_tool,
 )
@@ -81,6 +83,30 @@ def test_agent_tools_expose_only_read_only_enterprise_search_tools() -> None:
         "searchKnowledgeBaseTool",
     ]
     assert all(item["function"]["parameters"]["type"] == "object" for item in definitions)
+
+
+def test_agent_search_tools_describe_source_scoped_grounding() -> None:
+    definitions = {
+        item["function"]["name"]: item["function"]
+        for item in agent_tool_definitions()
+    }
+
+    for tool_name, input_model in (
+        ("searchProductsTool", ProductToolInput),
+        ("searchContentTool", ContentToolInput),
+    ):
+        description = definitions[tool_name]["description"]
+        schema = input_model.model_json_schema()
+
+        assert "sourceFileNames" in schema["properties"]
+        assert "Exact source file display names" in schema["properties"][
+            "sourceFileNames"
+        ]["description"]
+        assert "only returned" in description
+
+    assert ProductToolInput.model_validate(
+        {"sourceFileNames": ["products.xlsx"]}
+    ).source_file_names == ["products.xlsx"]
 
 
 def test_disabled_knowledge_embeddings_do_not_expose_knowledge_base_tool() -> None:

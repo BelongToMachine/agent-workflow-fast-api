@@ -71,7 +71,7 @@ def test_knowledge_queries_share_the_independent_entity() -> None:
         proposer=None,
         logistics=None,
         qualification=None,
-        source_file_names=[],
+        source_ids=[],
         settings=settings,
     )
     assert '"KnowledgeBase" AS source' in str(product_query)

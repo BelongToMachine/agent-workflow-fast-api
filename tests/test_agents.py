@@ -19,6 +19,7 @@ from app.core.config import Settings, get_settings
 from app.main import app
 from app.services.agent_tools import AgentToolError
 from app.services.agent_workflow import (
+    FINAL_SUMMARY_SYSTEM_PROMPT,
     AgentToolExecution,
     AgentWorkflowResult,
     run_agent_workflow,
@@ -65,6 +66,15 @@ def test_agent_run_request_limits_the_provider_tool_loop() -> None:
         "steps": 2,
         "toolCalls": [],
     }
+
+
+def test_agent_final_summary_requires_source_grounded_answers() -> None:
+    from app.api.routes.chat import FINAL_SUMMARY_SYSTEM_PROMPT as chat_prompt
+
+    for prompt in (FINAL_SUMMARY_SYSTEM_PROMPT, chat_prompt):
+        assert "only authoritative source" in prompt
+        assert "source file was not found" in prompt
+        assert "only results returned for those files" in prompt
 
 
 class FakeProviderResponse:

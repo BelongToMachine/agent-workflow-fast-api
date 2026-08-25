@@ -130,6 +130,14 @@ MIGRATION_STATUS_QUERY = text(
                   )
               ]::smallint[]
         ) AS document_source_fk,
+        EXISTS (
+            SELECT 1
+            FROM pg_index AS index_record
+            WHERE index_record.indexrelid = to_regclass(
+                'public."KnowledgeSource_workspace_fileHash_unique_idx"'
+            )
+              AND index_record.indisunique
+        ) AS source_import_key_idx,
         to_regclass('public."KnowledgeBaseGrant"') IS NOT NULL AS grants_table,
         (
             SELECT COUNT(*) = 8
@@ -336,6 +344,7 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "document_source_fk",
         )
     )
+    source_import_key_applied = flag("source_import_key_idx")
     grants_applied = all(
         flag(key)
         for key in (
@@ -414,6 +423,11 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "0007_knowledge_source_relationships",
             source_relationships_applied,
             "sourceId foreign keys, indexes, and source-scoped row uniqueness",
+        ),
+        MigrationStatus(
+            "0008_knowledge_source_import_key",
+            source_import_key_applied,
+            "workspace-scoped unique KnowledgeSource fileHash import key",
         ),
     ]
 

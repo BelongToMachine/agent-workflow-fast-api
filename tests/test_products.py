@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from app.api.routes.products import (
+    ProductSummary,
     _build_product_search_query,
     _extract_lead_days,
     _normalize_operation_status,
@@ -28,15 +29,15 @@ def test_product_query_contains_nextjs_advanced_filters() -> None:
         proposer="Alice",
         logistics="FOB",
         qualification="CE",
-        source_file_names=["products.xlsx"],
+        source_ids=[UUID("00000000-0000-0000-0000-000000000002")],
     )
 
     sql = str(query)
     assert 'source."workspaceId" = :workspace_id' in sql
-    assert 'source."displayName" IN' in sql
+    assert 'research."sourceId" IN' in sql
     assert 'operation."operationStatus" = :operation_status' in sql
     assert params["operation_status"] == "review"
-    assert params["source_file_names"] == ["products.xlsx"]
+    assert params["source_ids"] == [UUID("00000000-0000-0000-0000-000000000002")]
 
 
 def test_product_query_can_apply_knowledge_base_grants() -> None:
@@ -50,9 +51,15 @@ def test_product_query_can_apply_knowledge_base_grants() -> None:
         proposer=None,
         logistics=None,
         qualification=None,
-        source_file_names=[],
+        source_ids=[],
         authorized_source_ids=[source_id],
     )
 
     assert 'source."id" IN' in str(query)
     assert params["authorized_source_ids"] == [source_id]
+
+
+def test_product_result_exposes_the_shared_citation_contract() -> None:
+    citation_schema = ProductSummary.model_json_schema()["properties"]["citation"]
+
+    assert citation_schema["$ref"].endswith("SourceCitation")

@@ -12,6 +12,7 @@ from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.knowledge_access import get_authorized_source_ids
 from app.core.knowledge_base_entity import render_knowledge_base_query
+from app.core.knowledge_citation import SourceCitation, build_source_citation
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -52,6 +53,7 @@ class ProductSummary(BaseModel):
     source_file_name: str | None = Field(default=None, alias="sourceFileName")
     source_sheet: str | None = Field(default=None, alias="sourceSheet")
     source_row: int | None = Field(default=None, alias="sourceRow")
+    citation: SourceCitation
 
 
 class ProductSearchResponse(BaseModel):
@@ -197,7 +199,7 @@ def _build_product_search_query(
     proposer: str | None,
     logistics: str | None,
     qualification: str | None,
-    source_file_names: list[str],
+    source_ids: list[UUID],
     authorized_source_ids: list[UUID] | None = None,
     settings: Settings | None = None,
 ) -> tuple[object, dict[str, object]]:
@@ -240,9 +242,9 @@ def _build_product_search_query(
         conditions.append('operation."operationStatus" = :operation_status')
         params["operation_status"] = _normalize_operation_status(operation_status)
 
-    if source_file_names:
-        conditions.append('source."displayName" IN :source_file_names')
-        params["source_file_names"] = source_file_names
+    if source_ids:
+        conditions.append('research."sourceId" IN :source_ids')
+        params["source_ids"] = source_ids
 
     if authorized_source_ids is not None:
         conditions.append('source."id" IN :authorized_source_ids')
@@ -257,8 +259,8 @@ def _build_product_search_query(
         )
     )
     bind_params = []
-    if source_file_names:
-        bind_params.append(bindparam("source_file_names", expanding=True))
+    if source_ids:
+        bind_params.append(bindparam("source_ids", expanding=True))
     if authorized_source_ids is not None:
         bind_params.append(bindparam("authorized_source_ids", expanding=True))
     if bind_params:
@@ -317,6 +319,7 @@ async def search_products(
 
     try:
         async with get_db_connection() as connection:
+            source_ids: list[UUID] = []
             missing_source_file_names: list[str] = []
             if normalized_source_file_names:
                 source_result = await connection.execute(
@@ -335,10 +338,11 @@ async def search_products(
                         if row["source_id"] in authorized_source_id_set
                     ]
                 found_source_names = {row["display_name"] for row in source_rows}
+                source_ids = [row["source_id"] for row in source_rows]
                 missing_source_file_names = [
                     name for name in normalized_source_file_names if name not in found_source_names
                 ]
-                if not found_source_names:
+                if not source_ids:
                     return _empty_response(
                         "No knowledge source matched: " + ", ".join(normalized_source_file_names)
                     )
@@ -358,7 +362,7 @@ async def search_products(
                 proposer=proposer,
                 logistics=logistics,
                 qualification=qualification,
-                source_file_names=normalized_source_file_names,
+                source_ids=source_ids,
                 authorized_source_ids=authorized_source_ids,
                 settings=settings,
             )
@@ -474,6 +478,12 @@ async def search_products(
             sourceFileName=row["source_file_name"],
             sourceSheet=row["source_sheet"],
             sourceRow=row["source_row"],
+            citation=build_source_citation(
+                source_id=row["source_id"],
+                file_name=row["source_file_name"],
+                source_sheet=row["source_sheet"],
+                source_row=row["source_row"],
+            ),
         )
         sort_price = min(usd_prices) if usd_prices else float("inf")
         products.append((sort_price, row["product_name"], product))

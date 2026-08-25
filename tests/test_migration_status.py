@@ -72,6 +72,7 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         "document_source_column": True,
         "document_source_idx": True,
         "document_source_fk": True,
+        "source_import_key_idx": True,
         "grants_table": True,
         "grants_required_columns": True,
         "grants_indexes": True,
@@ -104,7 +105,7 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
 
     statuses = build_migration_statuses(row)
 
-    assert [status.applied for status in statuses] == [True, True, True, False, True, True]
+    assert [status.applied for status in statuses] == [True, True, True, False, True, True, True]
     assert statuses[3].name == "0004_knowledge_bases"
 
 
@@ -130,6 +131,7 @@ def test_migration_status_query_covers_schema_capabilities() -> None:
     assert "content_source_unique_idx" in sql
     assert "research_source_unique_idx" in sql
     assert "document_source_fk" in sql
+    assert "source_import_key_idx" in sql
     assert "grants_required_columns" in sql
     assert "files_required_columns" in sql
     assert "chunks_required_columns" in sql

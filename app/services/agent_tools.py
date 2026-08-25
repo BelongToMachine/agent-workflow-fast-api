@@ -47,7 +47,14 @@ class ProductToolInput(BaseModel):
     proposer: str | None = None
     qualification: str | None = None
     query: str | None = None
-    source_file_names: list[str] | None = Field(default=None, alias="sourceFileNames")
+    source_file_names: list[str] | None = Field(
+        default=None,
+        alias="sourceFileNames",
+        description=(
+            "Exact source file display names. Pass every file named by the user; "
+            "the backend restricts the search to these sources."
+        ),
+    )
     target_channel: str | None = Field(default=None, alias="targetChannel")
 
 
@@ -63,7 +70,14 @@ class ContentToolInput(BaseModel):
         default=None,
         alias="recordType",
     )
-    source_file_names: list[str] | None = Field(default=None, alias="sourceFileNames")
+    source_file_names: list[str] | None = Field(
+        default=None,
+        alias="sourceFileNames",
+        description=(
+            "Exact source file display names. Pass every file named by the user; "
+            "the backend restricts the search to these sources."
+        ),
+    )
     status: str | None = None
     submitter: str | None = None
 
@@ -111,7 +125,10 @@ def agent_tool_definitions(
                 "name": "searchProductsTool",
                 "description": (
                     "Search enterprise product research and operations data. "
-                    "Use sourceFileNames when the user names source files."
+                    "When the user names one or more source files, pass their exact "
+                    "display names in sourceFileNames and do not treat file names as "
+                    "ordinary keywords. Use only returned products as factual evidence; "
+                    "if no products are returned, say the requested source has no match."
                 ),
                 "parameters": ProductToolInput.model_json_schema(),
             },
@@ -122,7 +139,10 @@ def agent_tool_definitions(
                 "name": "searchContentTool",
                 "description": (
                     "Search enterprise content operations data. "
-                    "Use sourceFileNames when the user names source files."
+                    "When the user names one or more source files, pass their exact "
+                    "display names in sourceFileNames and do not treat file names as "
+                    "ordinary keywords. Use only returned records as factual evidence; "
+                    "if no records are returned, say the requested source has no match."
                 ),
                 "parameters": ContentToolInput.model_json_schema(),
             },

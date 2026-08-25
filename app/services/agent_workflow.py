@@ -41,8 +41,12 @@ FINAL_SUMMARY_SYSTEM_PROMPT = (
     "Tool execution is complete. Provide the final answer to the user now. "
     "Synthesize the available tool results, state important limitations, and give "
     "a clear recommendation or conclusion. Return only the user-facing answer in "
-    "normal Markdown or plain text. Do not call tools, emit DSML/XML/tool syntax, "
-    "describe internal reasoning, or say that you are about to search."
+    "normal Markdown or plain text. Treat tool results as the only authoritative "
+    "source for enterprise data. If a tool result is empty or reports that a "
+    "source file was not found, say so instead of inferring from another source. "
+    "When the user named source files, use only results returned for those files. "
+    "Do not call tools, emit DSML/XML/tool syntax, describe internal reasoning, "
+    "or say that you are about to search."
 )
 
 
