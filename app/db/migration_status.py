@@ -104,6 +104,22 @@ MIGRATION_STATUS_QUERY = text(
                   )
               ]::smallint[]
         ) AS research_source_fk,
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ContentRecord'
+              AND column_name = 'sourceId'
+              AND is_nullable = 'YES'
+        ) AS content_source_non_null,
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'RealProductResearch'
+              AND column_name = 'sourceId'
+              AND is_nullable = 'YES'
+        ) AS research_source_non_null,
         to_regclass('public."ProductDocument"') IS NOT NULL AS document_table,
         EXISTS (
             SELECT 1
@@ -130,6 +146,14 @@ MIGRATION_STATUS_QUERY = text(
                   )
               ]::smallint[]
         ) AS document_source_fk,
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ProductDocument'
+              AND column_name = 'sourceId'
+              AND is_nullable = 'YES'
+        ) AS document_source_non_null,
         EXISTS (
             SELECT 1
             FROM pg_index AS index_record
@@ -345,6 +369,14 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
         )
     )
     source_import_key_applied = flag("source_import_key_idx")
+    source_relationships_required = all(
+        flag(key)
+        for key in (
+            "content_source_non_null",
+            "research_source_non_null",
+            "document_source_non_null",
+        )
+    )
     grants_applied = all(
         flag(key)
         for key in (
@@ -428,6 +460,11 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "0008_knowledge_source_import_key",
             source_import_key_applied,
             "workspace-scoped unique KnowledgeSource fileHash import key",
+        ),
+        MigrationStatus(
+            "0009_knowledge_source_relationships_required",
+            source_relationships_required,
+            "non-null sourceId columns after legacy provenance backfill",
         ),
     ]
 

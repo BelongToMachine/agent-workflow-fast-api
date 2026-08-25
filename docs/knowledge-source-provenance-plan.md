@@ -420,6 +420,50 @@ Validation completed:
 
 ### Step 8 — Backfill and verify
 
+#### Step 8 progress record — 2026-08-25
+
+Step 8 is partially prepared but not marked complete because the real database
+migration and end-to-end seed verification have not been executed yet.
+
+- The remote development database was checked read-only and currently contains
+  1 workspace, 2 knowledge sources, 46 content records, 47 product research
+  records, and 21 product documents.
+- Read-only provenance checks found zero null `sourceId` values and zero orphan
+  source references in `ContentRecord`, `RealProductResearch`, and
+  `ProductDocument`. The existing data is therefore ready for the nullability
+  tightening migration.
+- Added `migrations/0009_knowledge_source_relationships_required.sql`. It
+  fails before changing schema if any legacy row still needs backfill, then
+  makes the three root-record `sourceId` columns non-null.
+- Registered the migration and its schema-capability checks in
+  `app/db/migrate_knowledge.py` and `app/db/migration_status.py`.
+- The configured target is a remote Supabase development database, while this
+  environment has no local Docker/PostgreSQL runtime. No remote write was
+  performed during the initial preparation pass. Applying the pending
+  migration chain requires an explicit reviewed development-database approval
+  and a test database or backup plan.
+- After explicit approval, the complete pending migration chain was applied to
+  the configured remote development database in one transaction. The database
+  now reports `0001`–`0009` and the auth identity migration as applied.
+- Post-migration read-only verification found 2 `KnowledgeBase` rows for the 2
+  existing `KnowledgeSource` rows, no orphan knowledge bases, and
+  `sourceId` set to `NOT NULL` on all three root record tables.
+- `make knowledge-integrity` passed all workspace, grant, file, chunk, and
+  source-backfill checks.
+- No seed command was run because the repository contains no real source-file
+  dataset. The seed adapters and payload validation remain covered by unit
+  tests; real-data seed and end-to-end search checks must happen when a source
+  file is supplied.
+
+Validation completed:
+
+- 41 focused backend tests passed; 1 unrelated environment/auth-gated test was
+  deselected.
+- Ruff checks passed.
+- The new Step 8 migration SQL parsed into four valid statements.
+- `make migration-status` passed after the remote migration.
+- `make knowledge-integrity` passed with zero violations.
+
 Tasks:
 
 - Create source rows for existing imported datasets.

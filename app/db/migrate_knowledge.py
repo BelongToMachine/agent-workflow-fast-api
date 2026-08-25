@@ -8,7 +8,7 @@ from app.db.migration_status import (
     MigrationStatus,
     build_migration_statuses,
 )
-from app.db.migration_utils import migration_apply_error
+from app.db.migration_utils import migration_apply_error, split_sql_statements
 from app.db.session import get_db_connection
 
 MIGRATION_NAMES = (
@@ -19,6 +19,7 @@ MIGRATION_NAMES = (
     "0006_knowledge_source_provenance",
     "0007_knowledge_source_relationships",
     "0008_knowledge_source_import_key",
+    "0009_knowledge_source_relationships_required",
 )
 MIGRATION_PATHS = tuple(
     Path(__file__).resolve().parents[2] / "migrations" / f"{name}.sql"
@@ -77,7 +78,9 @@ async def _run(*, apply: bool, allow_remote: bool = False) -> int:
         await connection.rollback()
         async with connection.begin():
             for path in pending_paths:
-                await connection.exec_driver_sql(path.read_text(encoding="utf-8"))
+                sql = path.read_text(encoding="utf-8")
+                for statement in split_sql_statements(sql):
+                    await connection.exec_driver_sql(statement)
                 print(f"Applied {path.stem}.")
 
         statuses = await _read_status(connection)

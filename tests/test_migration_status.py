@@ -68,10 +68,13 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         "research_source_unique_idx": True,
         "research_legacy_unique_idx_removed": True,
         "research_source_fk": True,
+        "content_source_non_null": True,
+        "research_source_non_null": True,
         "document_table": True,
         "document_source_column": True,
         "document_source_idx": True,
         "document_source_fk": True,
+        "document_source_non_null": True,
         "source_import_key_idx": True,
         "grants_table": True,
         "grants_required_columns": True,
@@ -105,7 +108,16 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
 
     statuses = build_migration_statuses(row)
 
-    assert [status.applied for status in statuses] == [True, True, True, False, True, True, True]
+    assert [status.applied for status in statuses] == [
+        True,
+        True,
+        True,
+        False,
+        True,
+        True,
+        True,
+        True,
+    ]
     assert statuses[3].name == "0004_knowledge_bases"
 
 
@@ -131,6 +143,9 @@ def test_migration_status_query_covers_schema_capabilities() -> None:
     assert "content_source_unique_idx" in sql
     assert "research_source_unique_idx" in sql
     assert "document_source_fk" in sql
+    assert "content_source_non_null" in sql
+    assert "research_source_non_null" in sql
+    assert "document_source_non_null" in sql
     assert "source_import_key_idx" in sql
     assert "grants_required_columns" in sql
     assert "files_required_columns" in sql
@@ -174,6 +189,13 @@ def test_knowledge_integrity_checks_report_each_violation() -> None:
 def test_knowledge_migration_runner_uses_dependency_order() -> None:
     assert [path.stem for path in MIGRATION_PATHS] == list(MIGRATION_NAMES)
     assert all(path.is_file() for path in MIGRATION_PATHS)
+
+
+def test_required_source_migration_is_last_and_guarded() -> None:
+    assert MIGRATION_NAMES[-1] == "0009_knowledge_source_relationships_required"
+    sql = MIGRATION_PATHS[-1].read_text(encoding="utf-8")
+    assert "legacy rows still need backfill" in sql
+    assert 'ALTER COLUMN "sourceId" SET NOT NULL' in sql
 
 
 def test_knowledge_migration_runner_only_selects_pending_migrations() -> None:
