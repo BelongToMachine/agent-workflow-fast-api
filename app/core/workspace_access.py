@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser
+from app.core.config import Settings, get_settings
 from app.core.permissions import get_effective_permissions
 from app.db.session import get_db_connection
 
@@ -31,23 +32,40 @@ class WorkspaceAccess:
 def validate_workspace_context(
     current_user: AuthenticatedUser,
     workspace_id: UUID,
+    settings: Settings | None = None,
 ) -> None:
-    """Reject a request that crosses the workspace bound to its access token."""
-    if current_user.is_development or not current_user.workspace_id:
+    """Reject requests outside the configured MVP workspace boundary.
+
+    The single-workspace guard is a product-scope constraint, not an
+    authorization shortcut. Membership and permission checks still run for
+    the configured workspace below.
+    """
+    if current_user.is_development:
         return
 
-    try:
-        token_workspace_id = UUID(current_user.workspace_id)
-    except ValueError as error:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="The authenticated user has an invalid workspace context.",
-        ) from error
+    if current_user.workspace_id:
+        try:
+            token_workspace_id = UUID(current_user.workspace_id)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="The authenticated user has an invalid workspace context.",
+            ) from error
 
-    if token_workspace_id != workspace_id:
+        if token_workspace_id != workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="The requested workspace does not match the authenticated context.",
+            )
+
+    runtime_settings = settings or get_settings()
+    if (
+        runtime_settings.single_workspace_mode
+        and workspace_id != runtime_settings.default_workspace_id
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="The requested workspace does not match the authenticated context.",
+            detail="Only the configured default workspace is available in single-workspace mode.",
         )
 
 

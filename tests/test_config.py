@@ -31,6 +31,12 @@ def test_default_workspace_role_accepts_employee() -> None:
     assert settings.default_workspace_role == "employee"
 
 
+def test_single_workspace_mode_is_enabled_by_default() -> None:
+    settings = Settings()
+
+    assert settings.single_workspace_mode is True
+
+
 def test_production_runtime_settings_reject_missing_identity_configuration() -> None:
     settings = _production_settings(
         auth_issuer=None,

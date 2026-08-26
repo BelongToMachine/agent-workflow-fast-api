@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.auth import AuthenticatedUser
+from app.core.config import Settings
 from app.core.workspace_access import (
     require_workspace_permission,
     validate_workspace_context,
@@ -38,6 +39,23 @@ def test_invalid_workspace_claim_is_rejected_before_database_access() -> None:
 
     assert error.value.status_code == 403
     assert "invalid workspace context" in str(error.value.detail)
+
+
+def test_single_workspace_mode_rejects_a_non_default_workspace(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.core.workspace_access.get_settings",
+        lambda: Settings(
+            default_workspace_id=WORKSPACE_A,
+            single_workspace_mode=True,
+        ),
+    )
+    user = AuthenticatedUser(user_id="00000000-0000-0000-0000-000000000010")
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(require_workspace_permission(user, WORKSPACE_B, "knowledge.read"))
+
+    assert error.value.status_code == 403
+    assert "single-workspace mode" in str(error.value.detail)
 
 
 def test_development_identity_keeps_local_workspace_fallback() -> None:

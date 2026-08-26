@@ -65,6 +65,13 @@ class Settings(BaseSettings):
             "ASIANODE_DEFAULT_WORKSPACE_ROLE",
         ),
     )
+    single_workspace_mode: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "SINGLE_WORKSPACE_MODE",
+            "ASIANODE_SINGLE_WORKSPACE_MODE",
+        ),
+    )
     redis_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("REDIS_URL", "ASIANODE_REDIS_URL"),

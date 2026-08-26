@@ -53,6 +53,10 @@ def connection_context(connection: FakeConnection):
 def test_member_lookup_is_scoped_to_requested_workspace(monkeypatch) -> None:
     connection = FakeConnection([[]])
     monkeypatch.setattr(
+        "app.core.workspace_access.get_settings",
+        lambda: Settings(single_workspace_mode=False),
+    )
+    monkeypatch.setattr(
         "app.core.workspace_access.get_db_connection",
         connection_context(connection),
     )
