@@ -2,16 +2,18 @@
 
 > 适用架构：`asianodeagent-front`（React + Vite）+ `asianode-fastapi`（FastAPI）+ PostgreSQL + Logto
 > 文档状态：实施计划
-> 最后更新：2026-08-24
+> 最后更新：2026-08-26
 
 > 当前范围决策：微信网页登录暂缓。本期认证闭环只以“邮箱 + Google Hosted Sign-in”作为交付与验收范围；微信相关 Connector、开放平台配置、审核和 E2E 保留在计划中，但不作为本期阻断项或完成条件。
 
 ## 实施进度
 
-- Phase 0：进行中。Logto Cloud Dev tenant、SPA 和 API Resource 已在控制台创建；第一个 owner subject、Google 发布方式仍待确认。微信开放平台审核负责人随微信登录一并暂缓。
+- 状态约定：`[x]` 已实现并完成本地验证；`[~]` 部分完成、等待外部环境确认或已延期；`[ ]` 尚未完成。
+- Phase 0：部分完成。Logto Cloud Dev tenant、SPA、API Resource、本地回调和 Google Connector 已配置；Production 域名、首个 owner subject、Google 发布方式和正式环境验收仍待确认。微信开放平台相关事项暂缓。
 - Phase 1（数据库身份模型）：已完成。`0005_auth_identity` migration、status、只读 preflight、Makefile 命令和测试已加入；migration 已在当前开发数据库提交并完成 schema 验证。
-- Phase 2（FastAPI 身份解析）：进行中。已完成 `ExternalPrincipal`、JWT 验证结果拆分、`ExternalIdentity` 解析、幂等 bootstrap、`/me` 状态扩展以及结构化 401/403 响应；真实 Logto Bearer Token 现在可以初始化并映射到本地 User UUID，未加入 workspace 的用户返回 `pending_workspace`。成员授权和最终业务路由审计仍待实现；旧 NextAuth bridge 已从 FastAPI 认证入口删除，仅保留开发 direct token。
-- Phase 4（React/Vite AuthContext）：进行中。已完成业务认证状态模型、登录回调后的 bootstrap + `/me` 初始化、状态页以及 401/403 处理；active workspace 的选择和持久化仍待实现。
+- Phase 2（FastAPI 身份解析）：已完成。已完成 `ExternalPrincipal`、JWT 验证结果拆分、`ExternalIdentity` 解析、幂等 bootstrap、`/me` 状态扩展以及结构化 401/403 响应；真实 Logto Bearer Token 可以初始化并映射到本地 User UUID，未加入 workspace 的用户返回 `pending_workspace`。旧 NextAuth bridge 已从 FastAPI 认证入口删除，仅保留开发 direct token。
+- Phase 3（成员初始化闭环）：已完成。已加入首个 owner 运维命令、未入组用户查询、成员添加、停用/恢复、owner 保护和 AuditLog；前端成员管理页面已接入真实 FastAPI。首次操作手册见 `docs/FIRST_ADMIN_BOOTSTRAP.md`。
+- Phase 4（React/Vite AuthContext）：MVP 已完成。已完成业务认证状态模型、登录回调后的 bootstrap + `/me` 初始化、状态页、401/403 处理和单 workspace 请求约束；多 workspace 的选择、持久化和切换缓存清理延期。
 - 现存迁移状态：`0001–0004` 知识库迁移仍为 pending；本次只执行并验证了 `0005_auth_identity`，未修改既有知识库迁移状态。
 
 ## 1. 目标
@@ -68,6 +70,15 @@ Google 网页用户（微信网页登录暂缓）
 - 根据 email 自动授予 owner/admin 权限。
 
 当前阶段坚持一个授权来源：Logto 负责“是谁”，FastAPI/PostgreSQL 负责“能做什么”。
+
+### 2.3 当前 MVP：单 workspace 模式
+
+本期只有一个业务 workspace，因此不实现 workspace selector、用户选择持久化和切换缓存清理。所有业务请求使用 `DEFAULT_WORKSPACE_ID` / `VITE_WORKSPACE_ID` 指向的默认 workspace，但该 ID 仅是请求上下文，不是身份凭证或授权依据。
+
+- [x] 新用户自动加入默认 workspace，并由 FastAPI 校验 membership 和 permission；
+- [x] 前端 Logto 模式固定使用默认 workspace；
+- [x] 后端 `SINGLE_WORKSPACE_MODE` 拒绝非默认 workspace 请求；
+- [~] active workspace 选择、持久化和切换缓存清理：延期到多 workspace 需求出现时。
 
 ## 3. 当前代码现状
 
@@ -167,7 +178,7 @@ Logto `sub` 是外部身份标识，不能假设等于本地 PostgreSQL UUID。�
 | permissions | role 默认值 + permission override | 否 |
 | knowledge base grant | PostgreSQL `KnowledgeBaseGrant` | 否 |
 | 资源 owner | PostgreSQL 业务表 | 否 |
-| active workspace | 前端选择的请求上下文 | 否，后端必须再次校验 membership |
+| active workspace | MVP 中由配置确定的默认 workspace 请求上下文 | 否，后端必须再次校验 membership |
 
 ### 4.2 生产主链路
 
@@ -495,6 +506,8 @@ type AuthContextValue = {
 
 ### 8.3 Active workspace
 
+当前 MVP 不提供 active workspace 选择器。前端和后端都使用配置的默认 workspace；当系统需要支持第二个 workspace 时，再按下述规则恢复实现。
+
 选择规则：
 
 1. 从 `/me.memberships` 获取 active memberships；
@@ -512,8 +525,9 @@ type AuthContextValue = {
 
 - 调用 `getAccessToken(VITE_LOGTO_API_RESOURCE)`；
 - 注入 Bearer Token；
-- 为 workspace-scoped API 注入 active workspace；
-- 不从固定 `VITE_WORKSPACE_ID` 获取生产 workspace；
+- 为 workspace-scoped API 注入 MVP 默认 workspace；
+- 在 Logto 模式下覆盖旧调用方传入的 workspace 参数，避免浏览器侧意外切换业务上下文；
+- 多 workspace 上线后，改为从 AuthContext 的 active workspace 注入，而不是继续依赖固定默认值；
 - 统一解析 401/403/503；
 - 不在日志、toast、错误监控中输出 Token；
 - Token 获取失败时通知 AuthContext，而不是发送匿名业务请求。
@@ -638,7 +652,8 @@ VITE_FASTAPI_URL=https://api.<your-domain>
 规则：
 
 - 不增加 `VITE_LOGTO_CLIENT_SECRET`；
-- 生产不使用 `VITE_WORKSPACE_ID` 作为真实 active workspace；
+- MVP 单 workspace 可以使用 `VITE_WORKSPACE_ID` 作为默认请求上下文，但它不是授权凭证，且必须与 FastAPI 的 `DEFAULT_WORKSPACE_ID` 一致；
+- 多 workspace 上线后，移除生产请求对固定 `VITE_WORKSPACE_ID` 的依赖；
 - 所有 `VITE_*` 都视为浏览器公开配置；
 - production build 缺少三项 Logto 配置时应失败或显示阻断页。
 
@@ -653,12 +668,15 @@ AUTH_AUDIENCE=https://api.<your-domain>
 AUTH_JWKS_URL=https://<tenant>.logto.app/oidc/jwks
 AUTH_ALGORITHMS=RS256
 CORS_ORIGINS=https://<frontend-domain>
+# MVP only: restrict business requests to DEFAULT_WORKSPACE_ID.
+SINGLE_WORKSPACE_MODE=true
 ```
 
 规则：
 
 - `AUTH_ISSUER` 必须与 Token `iss` 完全一致；
 - `AUTH_AUDIENCE` 必须与 API Resource identifier 完全一致；
+- MVP `SINGLE_WORKSPACE_MODE=true` 时，后端拒绝非 `DEFAULT_WORKSPACE_ID` 的业务请求；
 - CORS 只允许真实前端 origin；
 - Preview 域名需要明确的环境策略，不能使用 `*`；
 - `SQLADMIN_ENABLED=false`；
@@ -733,14 +751,14 @@ CORS_ORIGINS=https://<frontend-domain>
 
 ### Phase 0：确定配置和数据策略
 
-- [ ] 确认 Logto Cloud 或 self-hosted 实例；
-- [ ] 确认开发、preview、production 前端/API 域名；
-- [ ] 确认 API Resource identifier；
-- [ ] 确认 JIT User + pending workspace 策略；
+- [x] 确认 Logto Cloud 或 self-hosted 实例；当前使用 Logto Cloud Dev tenant；
+- [~] 确认开发、preview、production 前端/API 域名；本地和 Preview 已使用，Production 域名仍待确认；
+- [x] 确认 API Resource identifier；
+- [x] 确认 JIT User + pending workspace 策略；当前 MVP 新用户自动加入默认 workspace；
 - [ ] 确认第一个 owner 的 Logto subject；
 - [ ] 确认 Google External/Internal 发布方式；
-- [ ] 确认微信开放平台账号、网页应用和审核负责人（暂缓）；
-- [ ] 确认不同 Logto `sub` 不自动合并。
+- [~] 确认微信开放平台账号、网页应用和审核负责人（暂缓）；本期不处理；
+- [x] 确认不同 Logto `sub` 不自动合并。
 
 完成条件：配置表和负责人明确，数据库方案获确认。
 
@@ -766,10 +784,10 @@ CORS_ORIGINS=https://<frontend-domain>
 - [x] 增加 external identity resolver；
 - [x] 增加幂等 bootstrap service；
 - [x] 新增 `POST /api/v1/auth/bootstrap`；
-- [ ] 调整 `AuthenticatedUser.user_id` 为本地 UUID；
+- [x] 调整 `AuthenticatedUser.user_id` 为本地 UUID；
 - [x] 调整 `/api/v1/me` 响应和状态码；
 - [x] 增加 User suspended 检查；
-- [ ] 保证业务路由无需认识 Logto `sub`；
+- [x] 保证业务路由无需认识 Logto `sub`；
 - [x] 增加结构化 401/403 错误码；
 - [x] 给 bootstrap 加限流和安全日志。
 
@@ -779,14 +797,16 @@ CORS_ORIGINS=https://<frontend-domain>
 
 ### Phase 3：成员初始化闭环
 
-- [ ] 增加第一个 owner 运维命令；
-- [ ] 增加 access candidates 查询；
-- [ ] 增加 `POST /admin/members`；
-- [ ] 复用 owner 和权限保护；
-- [ ] 增加创建/停用/恢复 membership 的 AuditLog；
-- [ ] 更新成员管理前端。
+- [x] 增加第一个 owner 运维命令；
+- [x] 增加 access candidates 查询；
+- [x] 增加 `POST /admin/members`；
+- [x] 复用 owner 和权限保护；
+- [x] 增加创建/停用/恢复 membership 的 AuditLog；
+- [x] 更新成员管理前端。
 
-完成条件：新 Logto 用户无需直接改 SQL 即可由管理员加入 workspace。
+完成条件：新 Logto 用户无需直接改 SQL 即可由管理员加入 workspace。当前 MVP 仍只使用默认 workspace，不提供 workspace 选择器；首次 owner 操作步骤见 `docs/FIRST_ADMIN_BOOTSTRAP.md`。
+
+当前阶段说明：后端新增 `GET /api/v1/admin/access-candidates`、`POST /api/v1/admin/members` 和 `PATCH /api/v1/admin/members/{member_id}/status`。候选用户必须已经完成 Logto bootstrap 且尚未拥有目标 workspace membership；成员新增、权限更新、停用、恢复和首个 owner 运维授权都会写入 `AuditLog`。前端成员管理页面已通过 FastAPI 请求层接入候选用户、添加成员和停用/恢复操作。
 
 ### Phase 4：React/Vite AuthContext
 
@@ -796,51 +816,52 @@ CORS_ORIGINS=https://<frontend-domain>
 - [x] 增加 `/access-pending`；
 - [x] 增加 `/account-suspended`；
 - [x] 增加 `/forbidden`；
-- [ ] 实现 active workspace 选择和持久化；
-- [ ] 将 workspace 注入从固定 env 改为 active workspace；
+- [~] 实现 active workspace 选择和持久化（延期：MVP 单 workspace）；
+- [x] MVP 使用固定默认 workspace 注入请求；多 workspace 时改为 active workspace；
 - [x] 让 Sidebar/Settings 路由使用后端 permissions；
 - [x] 401 时回到登录，403 时保留登录并显示业务状态；
 - [x] 退出、切换用户时清理用户级缓存；
-- [ ] workspace 切换时清理 workspace 级缓存；
+- [~] workspace 切换时清理 workspace 级缓存（延期：当前没有 workspace 切换）；
 - [x] 删除新前端对 server-only/NextAuth 遗留模块的引用。
 
 完成条件：前端可以明确区分未登录、初始化中、待授权、已登录无权限和正常可用。
 
-当前阶段说明：`ApplicationAuthProvider` 将 SDK 登录态与业务身份状态分开，提供 `loading`、`unauthenticated`、`initializing`、`pending_workspace`、`authenticated`、`suspended`、`error`。回调成功后会先 bootstrap、再读取 `/me`；401 会清除本地会话并回到登录页，403 保留有效登录态并按 `user:suspended`、`workspace:membership_required` 或通用权限不足显示业务状态。当前仍使用固定 workspace 环境变量，尚未提供工作区选择/持久化。
+当前阶段说明：`ApplicationAuthProvider` 将 SDK 登录态与业务身份状态分开，提供 `loading`、`unauthenticated`、`initializing`、`pending_workspace`、`authenticated`、`suspended`、`error`。回调成功后会先 bootstrap、再读取 `/me`；401 会清除本地会话并回到登录页，403 保留有效登录态并按 `user:suspended`、`workspace:membership_required` 或通用权限不足显示业务状态。当前 MVP 使用固定默认 workspace；工作区选择、持久化和切换缓存清理已明确延期。
 
 ### Phase 5：Logto、Google 和微信配置
 
 微信网页登录相关条目暂缓，不纳入本期上线阻断或验收。保留这些条目是为了恢复该工作时保持完整上下文。
 
-- [ ] 创建 Logto SPA；
-- [ ] 配置开发/生产 redirect URI；
-- [ ] 配置 post sign-out URI；
-- [ ] 创建 API Resource；
-- [ ] 配置 Google OAuth Client 和 Logto Connector；
+- [x] 创建 Logto SPA；已创建 Dev SPA；
+- [~] 配置开发/生产 redirect URI；本地回调已配置，Preview/Production 仍需按真实域名验收；
+- [~] 配置 post sign-out URI；本地地址已配置，正式环境仍需验收；
+- [x] 创建 API Resource；
+- [x] 配置 Google OAuth Client 和 Logto Connector；
 - [ ] 发布或配置 Google test users；
-- [ ] 创建微信开放平台网页应用（暂缓）；
-- [ ] 配置微信授权回调域为 Logto 域名（暂缓）；
-- [ ] 完成微信审核（暂缓）；
-- [ ] 配置 Logto WeChat Web Connector（暂缓）；
-- [ ] 在 Sign-up and sign-in 启用 Google；微信启用暂缓；
-- [ ] 配置各环境变量和 CORS。
+- [~] 创建微信开放平台网页应用（暂缓）；
+- [~] 配置微信授权回调域为 Logto 域名（暂缓）；
+- [~] 完成微信审核（暂缓）；
+- [~] 配置 Logto WeChat Web Connector（暂缓）；
+- [~] 在 Sign-up and sign-in 启用 Google；Connector 已配置，但最终启用状态和真实账号验收仍待确认；微信启用暂缓；
+- [~] 配置各环境变量和 CORS；本地/Preview 已配置，Production 仍待确认。
 
 完成条件：本期 Google 可以在目标域名完成 Hosted Sign-in；微信登录暂缓。
 
 ### Phase 6：测试和联调
 
-- [ ] JWT 正确 issuer/audience/签名/有效期；
+- [x] JWT 正确 issuer/audience/签名/有效期；
 - [ ] 错误 issuer/audience/签名/过期 Token 返回 401；
 - [ ] JWKS key rotation 测试；
-- [ ] 非 UUID `sub` 映射测试；
+- [x] 非 UUID `sub` 映射测试；
 - [ ] 并发首次登录只创建一个 User；
-- [ ] email 改变不创建新 User；
-- [ ] 无 email 微信用户可以 bootstrap；
-- [ ] 无 membership 返回 pending 状态；
-- [ ] suspended User 被拒绝；
-- [ ] workspace membership、deny override 和跨 workspace 拒绝；
+- [x] email 改变不创建新 User；
+- [~] 无 email 微信用户可以 bootstrap；后端通用 bootstrap 已支持，微信登录 E2E 暂缓；
+- [x] 无 membership 返回 pending 状态；
+- [x] suspended User 被拒绝；
+- [x] workspace membership、deny override 和跨 workspace 拒绝；
+- [x] 单 workspace 模式拒绝非默认 workspace 请求；
 - [ ] Google 浏览器 E2E；
-- [ ] 微信扫码浏览器 E2E（暂缓）；
+- [~] 微信扫码浏览器 E2E（暂缓）；
 - [ ] 刷新页面保持登录；
 - [ ] Token 过期后自动刷新；
 - [ ] 退出后受保护页面重新要求登录；
@@ -974,13 +995,13 @@ bun run build
 - [ ] Google 网页登录通过真实账号验收；
 - [ ] 微信网页登录通过真实账号验收（暂缓，不作为本期完成条件）；
 - [ ] Access Token 的 audience 是 Asianode FastAPI API Resource；
-- [ ] FastAPI 不再把 Logto `sub` 当作本地 UUID；
-- [ ] 同一个 Logto `sub` 始终映射到同一个本地 User UUID；
-- [ ] 微信无 email 用户可正常初始化；
+- [x] FastAPI 不再把 Logto `sub` 当作本地 UUID；
+- [x] 同一个 Logto `sub` 始终映射到同一个本地 User UUID；
+- [~] 微信无 email 用户可正常初始化（延期：微信登录暂不纳入 MVP）；
 - [x] 新用户首次登录自动获得默认 workspace 的 viewer 权限，不自动获得 owner/admin 权限；
-- [ ] 管理员可以在产品流程内授予 membership；
+- [x] 管理员可以在产品流程内授予 membership；
 - [x] 前端以 `/me` 为本地身份和权限来源；
-- [ ] active workspace 来自 memberships，而不是生产环境固定值；
+- [~] active workspace 来自 memberships，而不是生产环境固定值（延期：MVP 单 workspace；当前由默认 workspace 配置确定，并由后端强制约束）；
 - [ ] 所有业务接口继续执行 workspace/role/permission/resource 校验；
 - [ ] Token 过期、退出、suspended、401、403、503 都有明确行为；
 - [ ] 自动化测试和真实 E2E 通过；
