@@ -1,4 +1,4 @@
-.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status auth-migration-status knowledge-integrity migrate-knowledge migrate-auth-identity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings seed-knowledge seed-content seed-products seed-operations
+.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status auth-migration-status knowledge-integrity migrate-knowledge migrate-auth-identity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings grant-first-owner seed-knowledge seed-content seed-products seed-operations
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= compose.yaml
@@ -64,6 +64,9 @@ migrate-knowledge-bases:
 
 migrate-knowledge-embeddings:
 	uv run python -m app.db.migrate_knowledge_embeddings --apply
+
+grant-first-owner:
+	uv run python -m app.db.grant_workspace_member --provider logto --subject $(SUBJECT) --workspace-id $(or $(WORKSPACE_ID),00000000-0000-0000-0000-000000000001) --yes
 
 seed-knowledge:
 	uv run python -m scripts.seed_knowledge_data --input $(INPUT)

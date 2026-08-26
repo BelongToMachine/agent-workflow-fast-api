@@ -68,7 +68,10 @@ validation error 的标准结构由 FastAPI 生成：
 | DELETE | `/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | query：`workspace_id` | `{deleted:true}` |
 | POST | `/api/v1/knowledge-bases/{knowledge_base_id}/search` | knowledge-base `read` + `KNOWLEDGE_EMBEDDINGS_ENABLED` | query：`workspace_id`；body：`{query,limit?}` | `{results:[{chunkId,content,fileId,fileName,score}]}`；Embedding provider 请求受 `EMBEDDING_PROVIDER_TIMEOUT_SECONDS`（1–300 秒）限制 |
 | GET | `/api/v1/admin/members` | `members.read` | query：`workspace_id` | `MembersResponse` |
+| GET | `/api/v1/admin/access-candidates` | `members.manage` | query：`workspace_id`、`query?` | `{candidates:[{userId,email,name,status}]}`；只返回已完成本地 bootstrap 且尚未拥有该 workspace membership 的用户 |
+| POST | `/api/v1/admin/members` | `members.manage` | query：`workspace_id`；body：`{userId,role,permissions?}` | `201 {member:WorkspaceMemberView}`；不能重复添加，只有 owner 能授予 owner |
 | PATCH | `/api/v1/admin/members` | `members.manage` | query：`workspace_id`；body：`{memberId,role,permissions}` | `{member:WorkspaceMemberView|null}` |
+| PATCH | `/api/v1/admin/members/{member_id}/status` | `members.manage` | query：`workspace_id`；body：`{status:"active"|"suspended"}` | `{member:WorkspaceMemberView|null}`；不能停用自己或最后一个 active owner |
 | GET | `/api/v1/admin/knowledge-base-grants` | `members.manage` + `KNOWLEDGE_GRANTS_ENABLED` | query：`workspace_id`、`knowledge_base_id?` | `{grants:[KnowledgeBaseGrantView]}` |
 | PUT | `/api/v1/admin/knowledge-base-grants` | `members.manage` + `KNOWLEDGE_GRANTS_ENABLED` | query：`workspace_id`；body：`{knowledgeBaseId,subjectType,subjectId,accessLevel}` | `{grant:KnowledgeBaseGrantView|null}` |
 | DELETE | `/api/v1/admin/knowledge-base-grants/{grant_id}` | `members.manage` + `KNOWLEDGE_GRANTS_ENABLED` | query：`workspace_id` | `{deleted:true}` |

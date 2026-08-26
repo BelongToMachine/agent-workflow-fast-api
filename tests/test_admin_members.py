@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.api.routes.admin_members import (
+    CreateMemberRequest,
     UpdateMemberRequest,
+    UpdateMemberStatusRequest,
     _build_member_views,
     _require_non_anonymous_development_identity,
 )
@@ -102,6 +104,39 @@ def test_update_request_accepts_employee_role() -> None:
     )
 
     assert request.role == "employee"
+
+
+def test_create_request_defaults_permissions_to_role_baseline() -> None:
+    request = CreateMemberRequest.model_validate(
+        {
+            "userId": "00000000-0000-0000-0000-000000000011",
+            "role": "employee",
+        }
+    )
+
+    assert request.permissions is None
+    assert request.role == "employee"
+
+
+def test_create_request_preserves_explicit_initial_permissions() -> None:
+    request = CreateMemberRequest.model_validate(
+        {
+            "userId": "00000000-0000-0000-0000-000000000011",
+            "role": "employee",
+            "permissions": ["knowledge.read"],
+        }
+    )
+
+    assert "knowledge.read" in request.permissions
+
+
+def test_member_status_request_only_accepts_supported_states() -> None:
+    assert (
+        UpdateMemberStatusRequest.model_validate({"status": "suspended"}).status
+        == "suspended"
+    )
+    with pytest.raises(ValidationError):
+        UpdateMemberStatusRequest.model_validate({"status": "deleted"})
 
 
 def test_admin_endpoint_does_not_accept_anonymous_development_identity(
