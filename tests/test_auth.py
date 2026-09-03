@@ -48,6 +48,7 @@ def test_verify_access_token_checks_oidc_claims_and_jwks(monkeypatch) -> None:
         auth_issuer="https://issuer.example.com/oidc",
         auth_audience="api://asianode",
         auth_jwks_url="https://issuer.example.com/oidc/jwks",
+        auth_algorithms="RS256",
     )
     token = jwt.encode(
         {
@@ -87,6 +88,7 @@ def test_verify_access_token_rejects_a_tampered_token(monkeypatch) -> None:
         auth_issuer="https://issuer.example.com/oidc",
         auth_audience="api://asianode",
         auth_jwks_url="https://issuer.example.com/oidc/jwks",
+        auth_algorithms="RS256",
     )
     token = jwt.encode(
         {

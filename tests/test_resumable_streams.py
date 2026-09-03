@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi.testclient import TestClient
 
@@ -7,6 +8,35 @@ from app.main import app
 from app.services.resumable_streams import ResumableStreamStore
 
 client = TestClient(app)
+
+
+class _EmptyResult:
+    def mappings(self) -> "_EmptyResult":
+        return self
+
+    def first(self) -> None:
+        return None
+
+
+class _EmptyTransaction:
+    async def __aenter__(self) -> "_EmptyTransaction":
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+class _EmptyChatConnection:
+    def begin(self) -> _EmptyTransaction:
+        return _EmptyTransaction()
+
+    async def execute(self, *_args: object, **_kwargs: object) -> _EmptyResult:
+        return _EmptyResult()
+
+
+@asynccontextmanager
+async def _empty_db_connection() -> AsyncIterator[_EmptyChatConnection]:
+    yield _EmptyChatConnection()
 
 
 class FakeRedis:
@@ -66,7 +96,11 @@ def test_capture_persists_and_resume_replays_completed_stream() -> None:
     assert redis.values[store._done_key(stream_id)] == "1"
 
 
-def test_resume_endpoint_returns_no_content_for_development_identity() -> None:
+def test_resume_endpoint_returns_no_content_for_development_identity(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_db_connection",
+        _empty_db_connection,
+    )
     response = client.get(
         "/api/v1/chat/00000000-0000-0000-0000-000000000010/stream",
         params={"workspace_id": "00000000-0000-0000-0000-000000000001"},

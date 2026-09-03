@@ -202,7 +202,7 @@ def test_independent_agent_workflow_executes_authorized_tools_then_answers(monke
     ]
 
 
-def test_independent_agent_workflow_finalizes_after_the_configured_tool_limit() -> None:
+def test_independent_agent_workflow_finalizes_after_the_configured_tool_limit(monkeypatch) -> None:
     provider = FakeProviderClient(
         [
             FakeProviderResponse(
@@ -238,6 +238,14 @@ def test_independent_agent_workflow_finalizes_after_the_configured_tool_limit() 
                 }
             ),
         ]
+    )
+
+    async def fake_execute_agent_tool(name, arguments, **kwargs):
+        return {"knowledgeBases": []}
+
+    monkeypatch.setattr(
+        "app.services.agent_workflow.execute_agent_tool",
+        fake_execute_agent_tool,
     )
 
     result = asyncio.run(
