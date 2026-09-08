@@ -10,6 +10,10 @@ _ERROR_CODE_PATTERN = re.compile(r"^[a-z_]+:[a-z_]+$")
 _DETAIL_CODES = {
     "Bearer access token is required.": "auth:token_missing",
     "Bearer access token is invalid or expired.": "auth:token_invalid",
+    "Email or password is incorrect.": "auth:credentials_invalid",
+    "Session cookie is required.": "auth:session_missing",
+    "Session cookie is invalid or expired.": "auth:session_invalid",
+    "Authentication storage is unavailable.": "auth:storage_unavailable",
     "The authenticated user has an invalid workspace context.": "workspace:context_mismatch",
     "The requested workspace does not match the authenticated context.": (
         "workspace:context_mismatch"

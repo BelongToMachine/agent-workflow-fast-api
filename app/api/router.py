@@ -5,6 +5,7 @@ from app.api.routes.admin_members import router as admin_members_router
 from app.api.routes.agents import router as agents_router
 from app.api.routes.attachments import router as attachments_router
 from app.api.routes.auth_bootstrap import router as auth_bootstrap_router
+from app.api.routes.auth_local import router as auth_local_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.chats import router as chats_router
 from app.api.routes.content import router as content_router
@@ -26,6 +27,7 @@ api_router.include_router(health_router)
 api_router.include_router(agents_router)
 api_router.include_router(attachments_router)
 api_router.include_router(auth_bootstrap_router)
+api_router.include_router(auth_local_router)
 api_router.include_router(admin_knowledge_grants_router)
 api_router.include_router(admin_members_router)
 api_router.include_router(chat_router)

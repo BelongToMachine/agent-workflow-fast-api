@@ -4,12 +4,16 @@ import hashlib
 import hmac
 import json
 import time
+from contextlib import asynccontextmanager
+from datetime import datetime
+from uuid import uuid4
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.security import HTTPAuthorizationCredentials
 
 import app.core.auth as auth
+import app.db.auth_sessions as auth_sessions
 from app.core.auth import (
     AuthenticatedUser,
     AuthTokenError,
@@ -36,6 +40,86 @@ def test_production_requires_authentication_by_default() -> None:
         assert getattr(error, "status_code", None) == 401
     else:
         raise AssertionError("Production authentication must not silently allow anonymous access.")
+
+
+def test_dual_mode_prefers_a_valid_local_session(monkeypatch) -> None:
+    settings = Settings(environment="development", auth_mode="dual", auth_required=True)
+    record = auth_sessions.AuthSessionRecord(
+        session_id=uuid4(),
+        user_id=uuid4(),
+        token_hash="a" * 64,
+        created_at=datetime(2026, 1, 1),
+        last_seen_at=datetime(2026, 1, 1),
+        idle_expires_at=datetime(2026, 1, 2),
+        absolute_expires_at=datetime(2026, 1, 8),
+        revoked_at=None,
+        user_status="active",
+    )
+
+    class FakeRepository:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+
+        async def get_active(self, token: str):
+            assert token == "opaque-session-token"
+            return record
+
+    @asynccontextmanager
+    async def fake_db_connection():
+        yield object()
+
+    monkeypatch.setattr(auth, "get_db_connection", fake_db_connection)
+    monkeypatch.setattr(auth_sessions, "AuthSessionRepository", FakeRepository)
+
+    user = asyncio.run(
+        auth.get_current_user(
+            None,
+            settings,
+            "opaque-session-token",
+        )
+    )
+
+    assert user.user_id == str(record.user_id)
+    assert user.auth_provider == "local"
+
+
+def test_local_session_mode_rejects_missing_cookie_when_required() -> None:
+    settings = Settings(environment="production", auth_mode="local_session")
+
+    try:
+        asyncio.run(auth.get_current_user(None, settings, None))
+    except Exception as error:
+        assert getattr(error, "status_code", None) == 401
+        assert getattr(error, "detail", None) == "Session cookie is required."
+    else:
+        raise AssertionError("Local session mode must require a session cookie.")
+
+
+def test_dual_mode_rejects_an_invalid_local_session_cookie(monkeypatch) -> None:
+    settings = Settings(environment="development", auth_mode="dual", auth_required=True)
+
+    class FakeRepository:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+
+        async def get_active(self, token: str):
+            assert token == "invalid-session-token"
+            return None
+
+    @asynccontextmanager
+    async def fake_db_connection():
+        yield object()
+
+    monkeypatch.setattr(auth, "get_db_connection", fake_db_connection)
+    monkeypatch.setattr(auth_sessions, "AuthSessionRepository", FakeRepository)
+
+    try:
+        asyncio.run(auth.get_current_user(None, settings, "invalid-session-token"))
+    except Exception as error:
+        assert getattr(error, "status_code", None) == 401
+        assert getattr(error, "detail", None) == "Session cookie is invalid or expired."
+    else:
+        raise AssertionError("An invalid local session cookie must be rejected.")
 
 
 def test_verify_access_token_checks_oidc_claims_and_jwks(monkeypatch) -> None:
@@ -119,6 +203,7 @@ def test_verify_access_token_rejects_a_tampered_token(monkeypatch) -> None:
 def test_development_direct_token_is_accepted() -> None:
     settings = Settings(
         environment="development",
+        auth_mode="dual",
         auth_required=True,
         dev_direct_auth_secret="direct-secret",
     )

@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-- 状态：阶段 0 部分实施；本地认证数据模型和认证路径尚未切换
+- 状态：阶段 0 预检部分完成；本地 Session 双轨路径已在本地开发接入，生产尚未切换
 - 目标前端：`asianodeagent-front`（React + Vite，部署于 Vercel）
 - 目标后端：`asianode-fastapi`（FastAPI，部署于阿里云 VPS）
 - 生产前端域名：`https://copilot.asianodeatlas.com`
@@ -451,41 +451,46 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 1：新增本地认证基础设施
 
-当前状态：本地基础设施第一轮已完成，认证 API 和登录路径尚未切换。
+当前状态：本地基础设施和第一轮浏览器认证 API 已完成，邀请、激活和密码重置流程尚未实现。
 
 - [x] 增加认证数据表和迁移：`0010_local_auth.sql`，并提供本地安全门控的 `make local-auth-status` / `make migrate-local-auth`；
 - [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 15–1024 字符策略；
 - [x] 实现 Session repository：只保存 SHA-256 Token hash，同时支持 idle/absolute expiry、touch 和撤销；
 - [x] 实现 CSRF 和严格 Origin 校验基础工具；
 - [ ] 实现认证专用限流；
-- [ ] 实现邀请、激活、登录、登出、修改密码和重置密码接口；
+- [ ] 实现邀请、激活、修改密码和重置密码接口；
+- [x] 实现 CSRF、登录、登出和当前 Session 查询接口；
 - [x] 保留现有 Logto Bearer 路径，本轮未改变当前认证行为。
 
 完成条件：自动测试通过，本地测试账号可以独立完成完整生命周期。
 
 ### 阶段 2：后端双认证模式
 
+当前状态：本地双认证入口已开始实现，尚未完成本地凭据领取和邀请制账号创建。
+
 在 `AUTH_MODE=dual` 下：
 
-- 优先验证本地 Session；
-- 没有 Session 时临时接受现有 Logto Bearer Token；
-- Logto 用户登录后可以领取或设置本地凭据；
-- 两种方式解析后都返回同一个 `AuthenticatedUser`；
-- Workspace 和权限逻辑保持不变；
-- 新账号只通过本地邀请创建，不再通过 Logto bootstrap 创建。
+- [x] 优先验证本地 Session；
+- [x] 没有 Session 时临时接受现有 Logto Bearer Token；
+- [ ] Logto 用户登录后可以领取或设置本地凭据；
+- [x] 两种方式解析后都返回同一个 `AuthenticatedUser`；
+- [x] Workspace 和权限逻辑保持不变；
+- [ ] 新账号只通过本地邀请创建，不再通过 Logto bootstrap 创建。
 
 完成条件：已存在用户可以用 Logto 登录，也可以完成本地密码激活。
 
 ### 阶段 3：前端切换到本地 Session
 
-- 实现真实登录表单；
+- [x] 实现真实登录表单；
 - 实现激活、忘记密码、重置密码和修改密码页面；
-- 所有 FastAPI 请求增加 `credentials: "include"`；
-- 写请求增加 `X-CSRF-Token`；
-- 认证状态改为读取 `/api/v1/auth/session` 或 `/api/v1/me`；
-- 401 清空前端用户缓存并跳转 `/login`；
-- 403 保持现有 suspended 和 workspace pending UX；
+- [x] 所有 FastAPI 请求增加 `credentials: "include"`；
+- [x] 写请求增加 `X-CSRF-Token`；
+- [x] 认证状态改为读取 `/api/v1/auth/session` 和 `/api/v1/me`；
+- [x] 401 清空前端用户缓存并跳转 `/login`；
+- [x] 403 保持现有 suspended 和 workspace pending UX；
 - 停止在生产浏览器中获取 Logto Access Token。
+
+当前状态：本地 Session 登录、Cookie 请求、CSRF 注入和前端会话守卫已接入，完整账号生命周期仍在后续工作中。
 
 完成条件：Vercel 生产域名通过 Cloudflare Tunnel API 完成登录、刷新、业务请求和登出闭环。
 

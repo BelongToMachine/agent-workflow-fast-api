@@ -82,7 +82,7 @@ def _client_key(request: Request) -> str:
 
 
 def _path_limit(path: str, default_limit: int) -> int:
-    if path == "/api/v1/auth/bootstrap":
+    if path in {"/api/v1/auth/bootstrap", "/api/v1/auth/login"}:
         return min(default_limit, 10)
     if path == "/api/v1/chat":
         return min(default_limit, 20)

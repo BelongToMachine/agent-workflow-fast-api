@@ -3,16 +3,17 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import Settings, get_settings
+from app.core.sessions import SESSION_COOKIE_NAME
 from app.db.session import get_db_connection
 
 JWKS_CACHE_TTL_SECONDS = 300
@@ -172,6 +173,40 @@ def _auth_is_required(settings: Settings) -> bool:
         "production",
         "staging",
     }
+
+
+def _session_mode(settings: Settings) -> bool:
+    return settings.auth_mode in {"dual", "local_session"}
+
+
+async def _get_local_session_user(
+    session_token: str,
+) -> AuthenticatedUser | None:
+    from app.db.auth_sessions import AuthSessionRepository
+
+    try:
+        async with get_db_connection() as connection:
+            record = await AuthSessionRepository(connection).get_active(session_token)
+    except (ValueError, RuntimeError, SQLAlchemyError) as error:
+        if isinstance(error, ValueError):
+            return None
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication session storage is unavailable.",
+        ) from error
+
+    if record is None:
+        return None
+    if record.user_status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="user:suspended",
+        )
+
+    return AuthenticatedUser(
+        user_id=str(record.user_id),
+        auth_provider="local",
+    )
 
 
 def _algorithm_list(settings: Settings) -> list[str]:
@@ -349,7 +384,26 @@ async def get_external_principal(
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     settings: Settings = Depends(get_settings),
+    session_token: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
 ) -> AuthenticatedUser:
+    if _session_mode(settings):
+        if session_token:
+            session_user = await _get_local_session_user(session_token)
+            if session_user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session cookie is invalid or expired.",
+                )
+            return session_user
+        if settings.auth_mode == "local_session":
+            if _auth_is_required(settings):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session cookie is required.",
+                    headers={"WWW-Authenticate": "Session"},
+                )
+            return AuthenticatedUser(user_id="development-user", is_development=True)
+
     if credentials is None:
         if _auth_is_required(settings):
             raise HTTPException(
