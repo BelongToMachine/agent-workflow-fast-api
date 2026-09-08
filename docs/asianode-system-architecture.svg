@@ -1,0 +1,250 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1660" viewBox="0 0 2400 1660" role="img" aria-labelledby="title desc">
+  <title id="title">Asianode Agent system architecture</title>
+  <desc id="desc">Architecture diagram showing a React and Vite frontend connecting to a FastAPI backend, PostgreSQL with pgvector, Redis, object storage, Logto OIDC, and AI providers.</desc>
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7f9fc"/>
+      <stop offset="1" stop-color="#eef3f9"/>
+    </linearGradient>
+    <linearGradient id="api" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f2857"/>
+      <stop offset="1" stop-color="#173e74"/>
+    </linearGradient>
+    <linearGradient id="database" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b182f"/>
+      <stop offset="1" stop-color="#142a4d"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#10253d" flood-opacity="0.10"/>
+    </filter>
+    <filter id="small-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#10253d" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#2b72c7"/>
+    </marker>
+    <marker id="arrow-teal" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#13a6a0"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#e77f31"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#8da1b9"/>
+    </marker>
+    <style>
+      .sans { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+      .ink { fill: #10233f; }
+      .muted { fill: #60728a; }
+      .white { fill: #f7fbff; }
+      .dbmuted { fill: #a9bfd8; }
+      .eyebrow { font-size: 18px; font-weight: 700; letter-spacing: 3px; }
+      .title { font-size: 46px; font-weight: 760; letter-spacing: -1px; }
+      .subtitle { font-size: 22px; font-weight: 450; }
+      .section { font-size: 21px; font-weight: 760; letter-spacing: 1px; }
+      .node-title { font-size: 24px; font-weight: 750; }
+      .node-subtitle { font-size: 17px; font-weight: 650; letter-spacing: 1px; }
+      .body { font-size: 18px; font-weight: 500; }
+      .small { font-size: 15px; font-weight: 500; }
+      .tiny { font-size: 13px; font-weight: 650; letter-spacing: .6px; }
+      .label { font-size: 14px; font-weight: 750; letter-spacing: 1px; }
+    </style>
+  </defs>
+
+  <rect width="2400" height="1660" fill="url(#page)"/>
+  <rect x="44" y="44" width="2312" height="1572" rx="30" fill="none" stroke="#dbe5f0" stroke-width="2"/>
+
+  <!-- Header -->
+  <text x="90" y="112" class="sans eyebrow" fill="#2b72c7">ASIANODE AGENT</text>
+  <text x="90" y="168" class="sans title ink">Production Architecture</text>
+  <text x="90" y="207" class="sans subtitle muted">React / Vite frontend · FastAPI service layer · multi-tenant knowledge workflows</text>
+  <rect x="1880" y="92" width="390" height="46" rx="23" fill="#e5f2ff" stroke="#b9d9f6"/>
+  <text x="2075" y="122" text-anchor="middle" class="sans label" fill="#2b72c7">CURRENT IMPLEMENTATION</text>
+  <text x="2270" y="175" text-anchor="end" class="sans small muted">Source: asianodeagent-front + asianode-fastapi</text>
+
+  <!-- Flow lines behind nodes -->
+  <path d="M480 352 C530 352 552 352 625 352" fill="none" stroke="#2b72c7" stroke-width="5" marker-end="url(#arrow-blue)"/>
+  <path d="M1570 352 C1640 352 1670 352 1730 352" fill="none" stroke="#13a6a0" stroke-width="5" marker-end="url(#arrow-teal)"/>
+  <path d="M1095 1060 C1095 1160 1095 1210 1095 1280" fill="none" stroke="#2b72c7" stroke-width="4" marker-end="url(#arrow-blue)"/>
+  <path d="M1495 1060 C1540 1150 1600 1200 1690 1280" fill="none" stroke="#13a6a0" stroke-width="4" marker-end="url(#arrow-teal)"/>
+  <path d="M1740 1060 C1870 1130 1940 1195 2020 1280" fill="none" stroke="#e77f31" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrow-orange)"/>
+
+  <!-- Top flow row -->
+  <g filter="url(#shadow)">
+    <rect x="90" y="260" width="390" height="184" rx="22" fill="#ffffff" stroke="#b9d9f6" stroke-width="2"/>
+    <rect x="625" y="260" width="945" height="184" rx="22" fill="#ffffff" stroke="#d6e2ef" stroke-width="2"/>
+    <rect x="1730" y="260" width="540" height="184" rx="22" fill="#ffffff" stroke="#bce9e4" stroke-width="2"/>
+  </g>
+  <circle cx="132" cy="307" r="18" fill="#2b72c7"/>
+  <path d="M123 306 h18 M132 297 v18" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <text x="165" y="316" class="sans node-title ink">Browser / User</text>
+  <text x="120" y="358" class="sans body muted">Workspace user interacts with chat,</text>
+  <text x="120" y="384" class="sans body muted">knowledge and admin surfaces.</text>
+  <rect x="120" y="402" width="175" height="25" rx="12" fill="#edf6ff"/>
+  <text x="207" y="420" text-anchor="middle" class="sans tiny" fill="#2b72c7">HTTPS + SSE</text>
+
+  <text x="665" y="306" class="sans node-subtitle" fill="#2b72c7">FRONTEND DELIVERY</text>
+  <text x="665" y="344" class="sans node-title ink">React + Vite SPA</text>
+  <text x="665" y="379" class="sans body muted">React 19 · React Router · AI SDK · React Query / SWR</text>
+  <text x="665" y="411" class="sans body muted">Chat UI · artifacts / documents · knowledge settings · workspace admin</text>
+  <rect x="1336" y="292" width="186" height="30" rx="15" fill="#f2efff"/>
+  <text x="1429" y="312" text-anchor="middle" class="sans tiny" fill="#7255bf">PROXY OR DIRECT</text>
+
+  <text x="1770" y="306" class="sans node-subtitle" fill="#13a6a0">IDENTITY &amp; ACCESS</text>
+  <text x="1770" y="344" class="sans node-title ink">Logto OIDC</text>
+  <text x="1770" y="379" class="sans body muted">Bearer access token · JWKS validation</text>
+  <text x="1770" y="411" class="sans body muted">External identity mapped to local User</text>
+
+  <!-- Frontend panel -->
+  <g filter="url(#shadow)">
+    <rect x="90" y="500" width="500" height="560" rx="24" fill="#ffffff" stroke="#b9d9f6" stroke-width="2"/>
+  </g>
+  <rect x="90" y="500" width="500" height="72" rx="24" fill="#eaf4ff"/>
+  <rect x="90" y="548" width="500" height="24" fill="#eaf4ff"/>
+  <text x="125" y="545" class="sans section" fill="#2b72c7">1 · EXPERIENCE LAYER</text>
+  <text x="125" y="612" class="sans node-title ink">Client application</text>
+  <text x="125" y="643" class="sans body muted">Typed request boundary with auth-aware transport.</text>
+
+  <rect x="125" y="681" width="430" height="82" rx="14" fill="#f8fbff" stroke="#dce9f5"/>
+  <circle cx="153" cy="710" r="9" fill="#2b72c7"/>
+  <text x="176" y="717" class="sans body ink">Auth state</text>
+  <text x="176" y="742" class="sans small muted">Logto React SDK or development OIDC flow</text>
+
+  <rect x="125" y="785" width="430" height="82" rx="14" fill="#f8fbff" stroke="#dce9f5"/>
+  <circle cx="153" cy="814" r="9" fill="#7255bf"/>
+  <text x="176" y="821" class="sans body ink">API adapter</text>
+  <text x="176" y="846" class="sans small muted">Legacy /api/* → /api/v1/* · workspace_id</text>
+
+  <rect x="125" y="889" width="430" height="82" rx="14" fill="#f8fbff" stroke="#dce9f5"/>
+  <circle cx="153" cy="918" r="9" fill="#13a6a0"/>
+  <text x="176" y="925" class="sans body ink">Streaming &amp; data</text>
+  <text x="176" y="950" class="sans small muted">AI SDK chat stream · React Query · local UI state</text>
+
+  <rect x="125" y="993" width="430" height="32" rx="16" fill="#edf6ff"/>
+  <text x="340" y="1014" text-anchor="middle" class="sans tiny" fill="#2b72c7">BEARER TOKEN + SSE RECONNECT</text>
+
+  <!-- Backend panel -->
+  <g filter="url(#shadow)">
+    <rect x="625" y="500" width="945" height="560" rx="24" fill="url(#api)" stroke="#315a8f" stroke-width="2"/>
+  </g>
+  <text x="665" y="545" class="sans section" fill="#92c8ff">2 · APPLICATION / API LAYER</text>
+  <text x="665" y="612" class="sans node-title white">FastAPI service</text>
+  <text x="665" y="643" class="sans body" fill="#b8cbe1">Async API boundary, authorization policy and domain orchestration.</text>
+
+  <rect x="665" y="681" width="865" height="66" rx="14" fill="#183d71" stroke="#396797"/>
+  <text x="695" y="708" class="sans body white">FastAPI /api/v1</text>
+  <text x="695" y="731" class="sans small" fill="#b8cbe1">health · chat · agents · knowledge · products · content · documents · admin</text>
+  <rect x="1272" y="698" width="229" height="29" rx="14" fill="#2d5b92"/>
+  <text x="1386" y="718" text-anchor="middle" class="sans tiny" fill="#d7e9ff">CORS / RATE LIMITING</text>
+
+  <rect x="665" y="771" width="267" height="210" rx="16" fill="#f7fbff"/>
+  <text x="695" y="809" class="sans node-subtitle" fill="#2b72c7">CHAT + AGENT</text>
+  <text x="695" y="844" class="sans body ink">SSE chat generation</text>
+  <text x="695" y="874" class="sans small muted">Model tool-calling loop</text>
+  <text x="695" y="899" class="sans small muted">Read-only enterprise tools</text>
+  <text x="695" y="924" class="sans small muted">Stream resume support</text>
+  <rect x="695" y="945" width="168" height="23" rx="11" fill="#eaf4ff"/>
+  <text x="779" y="961" text-anchor="middle" class="sans tiny" fill="#2b72c7">/chat · /agents</text>
+
+  <rect x="958" y="771" width="267" height="210" rx="16" fill="#f7fbff"/>
+  <text x="988" y="809" class="sans node-subtitle" fill="#13a6a0">KNOWLEDGE</text>
+  <text x="988" y="844" class="sans body ink">Upload &amp; process files</text>
+  <text x="988" y="874" class="sans small muted">Extract → chunk → embed</text>
+  <text x="988" y="899" class="sans small muted">Permission-filtered search</text>
+  <text x="988" y="924" class="sans small muted">KB grants &amp; provenance</text>
+  <rect x="988" y="945" width="196" height="23" rx="11" fill="#e8fbf8"/>
+  <text x="1086" y="961" text-anchor="middle" class="sans tiny" fill="#138b86">/knowledge-bases</text>
+
+  <rect x="1251" y="771" width="279" height="210" rx="16" fill="#f7fbff"/>
+  <text x="1281" y="809" class="sans node-subtitle" fill="#e77f31">BUSINESS APIS</text>
+  <text x="1281" y="844" class="sans body ink">Products &amp; content</text>
+  <text x="1281" y="874" class="sans small muted">Chat history &amp; votes</text>
+  <text x="1281" y="899" class="sans small muted">Documents &amp; suggestions</text>
+  <text x="1281" y="924" class="sans small muted">Workspace administration</text>
+  <rect x="1281" y="945" width="212" height="23" rx="11" fill="#fff3e8"/>
+  <text x="1387" y="961" text-anchor="middle" class="sans tiny" fill="#c66a22">/products · /content</text>
+
+  <text x="665" y="1027" class="sans small" fill="#a9bfd8">Shared services: SQLAlchemy async DB session · storage adapter · agent tools · policy checks</text>
+
+  <!-- Runtime / integrations panel -->
+  <g filter="url(#shadow)">
+    <rect x="1635" y="500" width="635" height="560" rx="24" fill="#ffffff" stroke="#bce9e4" stroke-width="2"/>
+  </g>
+  <rect x="1635" y="500" width="635" height="72" rx="24" fill="#e8fbf8"/>
+  <rect x="1635" y="548" width="635" height="24" fill="#e8fbf8"/>
+  <text x="1675" y="545" class="sans section" fill="#138b86">3 · RUNTIME &amp; PROVIDERS</text>
+  <text x="1675" y="612" class="sans node-title ink">External capabilities</text>
+  <text x="1675" y="643" class="sans body muted">Replaceable integrations behind small service adapters.</text>
+
+  <rect x="1675" y="681" width="555" height="70" rx="14" fill="#f8fffe" stroke="#d4f0ed"/>
+  <circle cx="1704" cy="716" r="9" fill="#13a6a0"/>
+  <text x="1728" y="712" class="sans body ink">Chat provider</text>
+  <text x="1728" y="736" class="sans small muted">DeepSeek / OpenAI-compatible chat completions</text>
+
+  <rect x="1675" y="769" width="555" height="70" rx="14" fill="#f8fffe" stroke="#d4f0ed"/>
+  <circle cx="1704" cy="804" r="9" fill="#7255bf"/>
+  <text x="1728" y="800" class="sans body ink">Embedding provider</text>
+  <text x="1728" y="824" class="sans small muted">OpenAI-compatible embeddings · 1,536 dimensions</text>
+
+  <rect x="1675" y="857" width="555" height="70" rx="14" fill="#f8fffe" stroke="#d4f0ed"/>
+  <circle cx="1704" cy="892" r="9" fill="#e77f31"/>
+  <text x="1728" y="888" class="sans body ink">Object storage</text>
+  <text x="1728" y="912" class="sans small muted">Local filesystem in development · S3-compatible in production</text>
+
+  <rect x="1675" y="945" width="555" height="70" rx="14" fill="#f8fffe" stroke="#d4f0ed"/>
+  <circle cx="1704" cy="980" r="9" fill="#efb83e"/>
+  <text x="1728" y="976" class="sans body ink">Redis 7</text>
+  <text x="1728" y="1000" class="sans small muted">Shared rate-limit counters + short-lived SSE chunks</text>
+
+  <!-- Runtime notes -->
+  <rect x="90" y="1100" width="2180" height="104" rx="18" fill="#ffffff" stroke="#d6e2ef" filter="url(#small-shadow)"/>
+  <circle cx="130" cy="1152" r="16" fill="#2b72c7"/>
+  <path d="M130 1143 v11 M130 1160 v2" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <text x="168" y="1144" class="sans node-subtitle" fill="#2b72c7">TENANT-SAFE REQUEST FLOW</text>
+  <text x="168" y="1175" class="sans body muted">Bearer identity → local User / WorkspaceMember → permission checks → workspace-scoped queries and knowledge grants.</text>
+  <rect x="1833" y="1131" width="390" height="42" rx="21" fill="#fff3e8" stroke="#f2c99e"/>
+  <text x="2028" y="1157" text-anchor="middle" class="sans tiny" fill="#c66a22">LOCAL FALLBACKS PRESERVED</text>
+
+  <!-- Database panel -->
+  <g filter="url(#shadow)">
+    <rect x="90" y="1280" width="2180" height="280" rx="24" fill="url(#database)" stroke="#28496e" stroke-width="2"/>
+  </g>
+  <text x="130" y="1330" class="sans section" fill="#92c8ff">4 · SYSTEM OF RECORD</text>
+  <text x="130" y="1368" class="sans node-title white">PostgreSQL 16 + pgvector</text>
+  <text x="130" y="1396" class="sans small dbmuted">Relational source of truth · workspace isolation · optional HNSW vector index on KnowledgeChunk.embedding</text>
+
+  <!-- Database domains -->
+  <rect x="130" y="1423" width="620" height="104" rx="14" fill="#173354" stroke="#315a80"/>
+  <text x="160" y="1452" class="sans node-subtitle" fill="#92c8ff">IDENTITY &amp; TENANCY</text>
+  <text x="160" y="1480" class="sans body white">User · ExternalIdentity · Workspace</text>
+  <text x="160" y="1505" class="sans small dbmuted">WorkspaceMember · Permission overrides · AuditLog · KB grants</text>
+
+  <rect x="780" y="1423" width="620" height="104" rx="14" fill="#173354" stroke="#315a80"/>
+  <text x="810" y="1452" class="sans node-subtitle" fill="#13c1b8">CONVERSATION &amp; ARTIFACTS</text>
+  <text x="810" y="1480" class="sans body white">Chat → Message_v2 → Vote_v2</text>
+  <text x="810" y="1505" class="sans small dbmuted">Stream · Document · Suggestion</text>
+
+  <rect x="1430" y="1423" width="800" height="104" rx="14" fill="#173354" stroke="#315a80"/>
+  <text x="1460" y="1452" class="sans node-subtitle" fill="#f2b25a">KNOWLEDGE &amp; DOMAIN DATA</text>
+  <text x="1460" y="1480" class="sans body white">KnowledgeBase → KnowledgeFile → KnowledgeChunk [vector]</text>
+  <text x="1460" y="1505" class="sans small dbmuted">KnowledgeSource (legacy compatibility) → product research / operations / content records</text>
+
+  <!-- Bottom footnotes -->
+  <path d="M130 1590 H2270" stroke="#dbe5f0" stroke-width="2"/>
+  <text x="130" y="1609" class="sans tiny muted">ARCHITECTURE NOTE</text>
+  <text x="310" y="1609" class="sans small muted">KnowledgeSource remains supported during migration; KnowledgeBase is the target independent entity.</text>
+  <text x="2270" y="1609" text-anchor="end" class="sans tiny muted">v1.0 · CLIENT-FACING OVERVIEW</text>
+
+  <!-- Connection labels -->
+  <rect x="506" y="330" width="112" height="30" rx="15" fill="#eaf4ff"/>
+  <text x="562" y="350" text-anchor="middle" class="sans tiny" fill="#2b72c7">API CALLS</text>
+  <rect x="1590" y="330" width="124" height="30" rx="15" fill="#e8fbf8"/>
+  <text x="1652" y="350" text-anchor="middle" class="sans tiny" fill="#138b86">AUTH FLOW</text>
+  <rect x="1026" y="1168" width="138" height="30" rx="15" fill="#eaf4ff"/>
+  <text x="1095" y="1188" text-anchor="middle" class="sans tiny" fill="#2b72c7">SQL / VECTOR</text>
+  <rect x="1442" y="1176" width="140" height="30" rx="15" fill="#e8fbf8"/>
+  <text x="1512" y="1196" text-anchor="middle" class="sans tiny" fill="#138b86">FILE BYTES</text>
+  <rect x="1850" y="1187" width="160" height="30" rx="15" fill="#fff3e8"/>
+  <text x="1930" y="1207" text-anchor="middle" class="sans tiny" fill="#c66a22">EMBEDDINGS</text>
+</svg>
