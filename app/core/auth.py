@@ -96,7 +96,11 @@ def _verify_dev_direct_token(
     token: str,
     settings: Settings,
 ) -> AuthenticatedUser | None:
-    if settings.environment.strip().lower() != "development" or not token.startswith("dev."):
+    if (
+        settings.environment.strip().lower() != "development"
+        or not token.startswith("dev.")
+        or not token.isascii()
+    ):
         return None
 
     parts = token.split(".")
@@ -258,7 +262,7 @@ async def _signing_key(token: str, settings: Settings) -> Any:
 def _principal_from_claims(claims: dict[str, Any]) -> ExternalPrincipal:
     subject = claims.get("sub")
     issuer = claims.get("iss")
-    if not isinstance(subject, str) or not subject:
+    if not isinstance(subject, str) or not subject or len(subject) > 255:
         raise AuthTokenError("The access token is missing a subject.")
     if not isinstance(issuer, str) or not issuer:
         raise AuthTokenError("The access token is missing an issuer.")

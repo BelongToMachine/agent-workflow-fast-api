@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +14,11 @@ class SettingsConfigurationError(RuntimeError):
 
 
 class Settings(BaseSettings):
+    @field_validator("environment")
+    @classmethod
+    def normalize_environment(cls, value: str) -> str:
+        return value.strip().lower()
+
     app_name: str = Field(
         default="Asianode FastAPI",
         validation_alias=AliasChoices("APP_NAME", "ASIANODE_APP_NAME"),

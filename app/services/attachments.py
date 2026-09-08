@@ -102,7 +102,7 @@ def verify_local_attachment_token(
     token: str,
 ) -> dict[str, str] | None:
     secret = _signing_secret(settings)
-    if not secret or "." not in token:
+    if not secret or "." not in token or not token.isascii():
         return None
     encoded_payload, encoded_signature = token.split(".", 1)
     expected_signature = hmac.new(
