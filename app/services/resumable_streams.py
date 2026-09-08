@@ -132,12 +132,15 @@ class ResumableStreamStore:
                 if await self._redis.get(active_key) != stream_id:
                     return
 
+                # Snapshot completion before reading chunks: a producer that finishes
+                # during LRANGE must get one final read on the next iteration.
+                done = await self._redis.exists(done_key)
                 chunks = await self._redis.lrange(chunks_key, index, -1)
                 for chunk in chunks:
                     index += 1
                     yield str(chunk)
 
-                if await self._redis.exists(done_key):
+                if done:
                     return
             except RedisError:
                 return

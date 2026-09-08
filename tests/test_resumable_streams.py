@@ -111,3 +111,22 @@ def test_resume_endpoint_returns_no_content_for_development_identity(monkeypatch
 
 async def _collect(stream: AsyncIterator[str]) -> list[str]:
     return [chunk async for chunk in stream]
+
+
+def test_resume_does_not_lose_tail_written_between_read_and_done_check() -> None:
+    class FinishingRedis(FakeRedis):
+        async def lrange(self, key, start, end):
+            chunks = await super().lrange(key, start, end)
+            if not self.values.get(store._done_key("stream")):
+                self.lists[key].append("data: final\n\n")
+                self.values[store._done_key("stream")] = "1"
+            return chunks
+
+    redis = FinishingRedis()
+    store = ResumableStreamStore(None, 60, client=redis)
+    redis.values[store._active_key("chat")] = "stream"
+    redis.lists[store._chunks_key("stream")] = ["data: first\n\n"]
+
+    assert asyncio.run(_collect(store.resume("chat", "stream"))) == [
+        "data: first\n\n", "data: final\n\n"
+    ]
