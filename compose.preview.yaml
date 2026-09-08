@@ -47,6 +47,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Start as the image's non-root user so rootless Docker does not need setpriv.
+    user: "redis"
     command:
       - redis-server
       - --appendonly
