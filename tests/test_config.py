@@ -37,6 +37,24 @@ def test_single_workspace_mode_is_enabled_by_default() -> None:
     assert settings.single_workspace_mode is True
 
 
+def test_auth_mode_defaults_to_logto_during_migration() -> None:
+    settings = Settings()
+
+    assert settings.auth_mode == "logto"
+
+
+@pytest.mark.parametrize("auth_mode", ["logto", "dual", "local_session"])
+def test_auth_mode_accepts_planned_migration_modes(auth_mode: str) -> None:
+    settings = Settings(auth_mode=auth_mode)
+
+    assert settings.auth_mode == auth_mode
+
+
+def test_auth_mode_rejects_unknown_values() -> None:
+    with pytest.raises(ValueError):
+        Settings(auth_mode="unsupported")
+
+
 def test_production_runtime_settings_reject_missing_identity_configuration() -> None:
     settings = _production_settings(
         auth_issuer=None,

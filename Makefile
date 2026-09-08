@@ -1,4 +1,4 @@
-.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status auth-migration-status knowledge-integrity migrate-knowledge migrate-auth-identity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings grant-first-owner seed-knowledge seed-content seed-products seed-operations
+.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status auth-migration-status auth-migration-preflight knowledge-integrity migrate-knowledge migrate-auth-identity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings grant-first-owner seed-knowledge seed-content seed-products seed-operations
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= compose.yaml
@@ -43,6 +43,9 @@ migration-status:
 
 auth-migration-status:
 	uv run python -m app.db.auth_identity_status
+
+auth-migration-preflight:
+	uv run python -m app.db.auth_migration_preflight
 
 knowledge-integrity:
 	uv run python -m app.db.knowledge_integrity

@@ -93,6 +93,10 @@ class Settings(BaseSettings):
         default="http://localhost:3000,http://127.0.0.1:3000",
         validation_alias=AliasChoices("CORS_ORIGINS", "ASIANODE_CORS_ORIGINS"),
     )
+    auth_mode: Literal["logto", "dual", "local_session"] = Field(
+        default="logto",
+        validation_alias=AliasChoices("AUTH_MODE", "ASIANODE_AUTH_MODE"),
+    )
     auth_required: bool = Field(
         default=False,
         validation_alias=AliasChoices("AUTH_REQUIRED", "ASIANODE_AUTH_REQUIRED"),

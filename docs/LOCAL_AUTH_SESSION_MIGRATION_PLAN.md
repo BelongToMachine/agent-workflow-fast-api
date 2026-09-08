@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-- 状态：设计阶段，尚未实施
+- 状态：阶段 0 部分实施；本地认证数据模型和认证路径尚未切换
 - 目标前端：`asianodeagent-front`（React + Vite，部署于 Vercel）
 - 目标后端：`asianode-fastapi`（FastAPI，部署于阿里云 VPS）
 - 生产前端域名：`https://copilot.asianodeatlas.com`
@@ -437,13 +437,15 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 0：生产预检与回滚准备
 
-- 备份 PostgreSQL；
-- 导出当前用户、`ExternalIdentity` 和 Workspace membership 对照；
-- 检查重复或非法邮箱；
-- 确认每个待迁移用户可以联系；
-- 记录当前 Vercel 和 VPS 认证环境变量名，不把值写入文档或日志；
-- 验证回滚镜像和数据库恢复流程；
-- 建立迁移 feature flag，例如 `AUTH_MODE=logto|dual|local_session`。
+当前状态：预检已在本地开发配置完成一部分；生产数据库备份、用户映射导出和恢复演练尚未执行。`AUTH_MODE` 已加入配置，默认值为 `logto`，本阶段不会改变现有 Logto 行为。
+
+- [ ] 备份 PostgreSQL；
+- [ ] 导出当前用户、`ExternalIdentity` 和 Workspace membership 对照；
+- [x] 对当前 `.env.local` 所指向的开发数据库执行只读身份迁移预检：`0005_auth_identity` 已应用；重复/非法邮箱检查命令已加入 `make auth-migration-preflight`。复核结果为 25 个用户、5 个外部身份、25 条 membership，发现 2 组重复邮箱和 12 条非法/空邮箱，因此用户映射仍被阻止；
+- [ ] 确认每个待迁移用户可以联系；
+- [x] 记录本地开发认证环境变量名（只记录名称，不记录值）：`AUTH_MODE`、`AUTH_REQUIRED`、`AUTH_ISSUER`、`AUTH_AUDIENCE`、`AUTH_JWKS_URL`、`AUTH_ALGORITHMS`；生产 Vercel/VPS 环境暂不处理；
+- [ ] 验证回滚镜像和数据库恢复流程；
+- [x] 建立迁移 feature flag：`AUTH_MODE=logto|dual|local_session`，默认 `logto`，当前阶段仅完成配置校验，尚未切换认证路径。
 
 完成条件：数据库可恢复，用户映射明确，认证切换可以回滚。
 
