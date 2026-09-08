@@ -112,3 +112,53 @@ def test_embedding_provider_timeout_has_safe_bounds() -> None:
 
     with pytest.raises(ValidationError):
         Settings(EMBEDDING_PROVIDER_TIMEOUT_SECONDS=0.5)
+
+
+@pytest.mark.parametrize("indexes", [[0, 0], [0, 2], [0, "1"], [False, 1], [None, 1]])
+def test_embedding_provider_rejects_invalid_indexes(monkeypatch, indexes) -> None:
+    client = FakeEmbeddingClient(FakeEmbeddingResponse({"data": [
+        {"index": index, "embedding": _embedding(0.1)} for index in indexes
+    ]}))
+    monkeypatch.setattr("app.services.embeddings.httpx.AsyncClient", lambda **_kwargs: client)
+    with pytest.raises(EmbeddingProviderError):
+        asyncio.run(embed_texts(["first", "second"], Settings(embedding_api_key="test-key")))
+
+
+@pytest.mark.parametrize("value", [None, {}, "bad", True, float("inf"), float("nan")])
+def test_embedding_provider_rejects_invalid_components(monkeypatch, value) -> None:
+    vector = _embedding(0.1)
+    vector[0] = value
+    client = FakeEmbeddingClient(FakeEmbeddingResponse({"data": [
+        {"index": 0, "embedding": vector}
+    ]}))
+    monkeypatch.setattr("app.services.embeddings.httpx.AsyncClient", lambda **_kwargs: client)
+    with pytest.raises(EmbeddingProviderError):
+        asyncio.run(embed_texts(["query"], Settings(embedding_api_key="test-key")))
+
+
+def test_embedding_requests_are_batched_with_one_client(monkeypatch) -> None:
+    requests = []
+
+    class BatchClient(FakeEmbeddingClient):
+        async def post(self, _url, **kwargs):
+            inputs = kwargs["json"]["input"]
+            requests.append(inputs)
+            return FakeEmbeddingResponse({"data": [
+                {"index": i, "embedding": _embedding(float(value))}
+                for i, value in reversed(list(enumerate(inputs)))
+            ]})
+
+    client = BatchClient(None)
+    created = []
+
+    def make_client(**_kwargs):
+        created.append(client)
+        return client
+
+    monkeypatch.setattr("app.services.embeddings.httpx.AsyncClient", make_client)
+    texts = [str(i) for i in range(300)]
+    vectors = asyncio.run(embed_texts(texts, Settings(embedding_api_key="test-key")))
+    assert [vector[0] for vector in vectors] == [float(i) for i in range(300)]
+    assert len(requests) > 1
+    assert [text for batch in requests for text in batch] == texts
+    assert len(created) == 1
