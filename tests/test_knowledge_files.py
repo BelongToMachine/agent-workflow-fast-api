@@ -240,6 +240,13 @@ def test_file_name_and_storage_path_are_sandboxed(tmp_path) -> None:
         _storage_path(settings, "../../secret.txt")
 
 
+def test_knowledge_filename_preserves_language_and_extension() -> None:
+    assert _safe_filename("产品调研.xlsx") == "产品调研.xlsx"
+    long_name = _safe_filename("产品" * 200 + ".xlsx")
+    assert long_name.endswith(".xlsx")
+    assert len(long_name.encode("utf-8")) <= 160
+
+
 def test_chunking_adds_overlap_without_empty_chunks() -> None:
     chunks = _chunk_text("a" * 2500)
 

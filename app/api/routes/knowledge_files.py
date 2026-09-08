@@ -51,7 +51,7 @@ FILE_SIGNATURES = {
     ".pdf": (b"%PDF-",),
     ".xlsx": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
 }
-SAFE_FILENAME_PATTERN = re.compile(r"[^a-zA-Z0-9._-]+")
+SAFE_FILENAME_PATTERN = re.compile(r"[^\w.-]+")
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 120
 
@@ -248,7 +248,15 @@ def _feature_disabled() -> JSONResponse:
 
 def _safe_filename(filename: str) -> str:
     candidate = SAFE_FILENAME_PATTERN.sub("_", filename).strip("._")
-    return (candidate or "upload")[:160]
+    candidate = candidate or "upload"
+    suffix = Path(candidate).suffix
+    # Preserve the parser's extension and leave space for the UUID storage prefix.
+    suffix = suffix.encode("utf-8")[:20].decode("utf-8", errors="ignore")
+    stem = candidate[: -len(Path(candidate).suffix)] if Path(candidate).suffix else candidate
+    stem = stem.encode("utf-8")[:160 - len(suffix.encode("utf-8"))].decode(
+        "utf-8", errors="ignore"
+    )
+    return stem + suffix
 
 
 def _extension(filename: str) -> str:
@@ -292,13 +300,15 @@ def _extract_text(filename: str, content: bytes) -> str:
     if extension == ".xlsx":
         workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         lines: list[str] = []
-        for worksheet in workbook.worksheets:
-            lines.append(f"[Sheet: {worksheet.title}]")
-            for row in worksheet.iter_rows(values_only=True):
-                values = ["" if value is None else str(value).strip() for value in row]
-                if any(values):
-                    lines.append("\t".join(values))
-        workbook.close()
+        try:
+            for worksheet in workbook.worksheets:
+                lines.append(f"[Sheet: {worksheet.title}]")
+                for row in worksheet.iter_rows(values_only=True):
+                    values = ["" if value is None else str(value).strip() for value in row]
+                    if any(values):
+                        lines.append("\t".join(values))
+        finally:
+            workbook.close()
         return "\n".join(lines)
     if extension == ".pdf":
         reader = PdfReader(io.BytesIO(content))
