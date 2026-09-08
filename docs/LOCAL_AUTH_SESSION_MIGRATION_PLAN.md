@@ -1,4 +1,4 @@
-# Asianode 本地账号密码与服务端会话迁移计划
+# Asianode 本地账号密码与服务端会话切换计划
 
 ## 1. 文档状态
 
@@ -9,8 +9,9 @@
 - 生产 API 域名：`https://api.asianodeatlas.com`
 - 当前认证提供方：Logto OIDC
 - 目标认证方式：本地账号密码 + FastAPI 服务端不透明 Session Cookie
+- 迁移决策（2026-09-08）：放弃现有 Logto 用户及历史身份映射，不执行用户迁移；新系统从零创建本地账号。旧账号不保证能够访问历史业务数据，旧数据的物理删除另行决定。
 
-本文档描述如何在保留现有 `User`、Workspace、聊天、文档和权限数据的前提下，逐步移除 Logto，切换到由 FastAPI 管理密码、账号生命周期和浏览器会话的认证架构。
+本文档描述如何在不迁移旧 Logto 用户的前提下，逐步移除 Logto，切换到由 FastAPI 管理新账号密码、账号生命周期和浏览器会话的认证架构。现有业务表结构可以继续复用，但旧账号与历史身份不纳入新认证映射。
 
 ## 2. 核心结论
 
@@ -56,13 +57,13 @@ Redis
 
 ## 3. 设计原则
 
-1. `User.id` 继续作为业务用户唯一标识，不迁移聊天、文档或 Workspace 外键。
+1. 新创建的 `User.id` 作为本地业务用户唯一标识；旧 Logto 用户及其身份映射不迁移，旧账号不要求保留原 `User.id`。
 2. 密码凭据与用户资料分离，不能复用当前长度不足的 legacy `User.password varchar(64)`。
 3. 浏览器只保存不透明 Session Cookie，不保存长期 Access Token 或 Refresh Token。
 4. Session 原文、邀请 Token 原文和密码重置 Token 原文不得写入数据库或日志。
 5. FastAPI 是最终认证和授权边界，前端传入的用户、角色和 Workspace 身份不可信。
 6. Workspace 角色和权限继续由 `WorkspaceMember`、`WorkspaceMemberPermission` 管理。
-7. 先双轨迁移，验证本地认证后再删除 Logto，避免一次性切换导致所有用户无法登录。
+7. 先在本地验证本地认证，再切换生产；`dual` 仅作为短期兼容/回滚模式，不承担旧用户迁移。
 8. Cloudflare Tunnel 只承担公网传输，不承担应用登录状态。
 
 ## 4. 目标数据模型
@@ -75,7 +76,7 @@ Redis
 - `WorkspaceMemberPermission`
 - 聊天、消息、文档、知识库和其他业务表
 
-切换认证方式时不得重新生成 `User.id`，否则现有业务资源的用户外键会断裂。
+新建本地账号时由数据库生成新的 `User.id`。由于旧账号不迁移，本计划不要求旧业务资源继续绑定到新账号。
 
 ### 4.2 `PasswordCredential`
 
@@ -380,7 +381,7 @@ FastAPI 路由继续通过 `Annotated[AuthenticatedUser, Depends(get_current_use
         ↓
 FastAPI 在同一事务中：
   1. 锁定并验证 Token
-  2. 创建或复用 User
+  2. 创建新的 User
   3. 写入 PasswordCredential
   4. 创建 WorkspaceMember
   5. 标记 Token 已使用
@@ -431,23 +432,23 @@ Argon2id 验证（未知用户执行 dummy hash）
 - 所有后续请求即使持有旧 Cookie 也返回 403；
 - 恢复用户不会自动恢复已撤销 Session，必须重新登录。
 
-## 10. Logto 迁移策略
+## 10. 认证切换与 Logto 清理策略
 
-不得先删除 Logto 代码。采用双轨迁移，确保现有用户能够设置本地密码并保留原有数据。
+不得先删除 Logto 代码。先完成本地账号的创建和验证，再切换生产认证；`dual` 只作为短期兼容/回滚模式。旧 Logto 用户和历史身份不迁移。
 
 ### 阶段 0：生产预检与回滚准备
 
-当前状态：预检已在本地开发配置完成一部分；生产数据库备份、用户映射导出和恢复演练尚未执行。`AUTH_MODE` 已加入配置，默认值为 `logto`，本阶段不会改变现有 Logto 行为。
+当前状态：预检已在本地开发配置完成一部分；生产数据库备份和恢复演练尚未执行。用户迁移已经取消，因此用户映射导出、联系确认和重复邮箱清理不再是本计划任务。`AUTH_MODE` 已加入配置，默认值为 `logto`，本阶段不会改变现有 Logto 行为。
 
 - [ ] 备份 PostgreSQL；
-- [ ] 导出当前用户、`ExternalIdentity` 和 Workspace membership 对照；
-- [x] 对当前 `.env.local` 所指向的开发数据库执行只读身份迁移预检：`0005_auth_identity` 已应用；重复/非法邮箱检查命令已加入 `make auth-migration-preflight`。复核结果为 25 个用户、5 个外部身份、25 条 membership，发现 2 组重复邮箱和 12 条非法/空邮箱，因此用户映射仍被阻止；
-- [ ] 确认每个待迁移用户可以联系；
+- [x] 记录用户迁移取消决策：旧 Logto 用户、`ExternalIdentity` 关联和历史身份映射不迁移，新账号从零创建；
+- [x] 保留只读身份预检结果作为历史记录：当前开发库有 25 个用户、5 个外部身份、25 条 membership，发现 2 组重复邮箱和 12 条非法/空邮箱；该结果不再阻塞认证切换；
+- [x] 取消旧用户导出、联系确认和重复邮箱清理任务：因不执行用户迁移，不再作为本计划要求；
 - [x] 记录本地开发认证环境变量名（只记录名称，不记录值）：`AUTH_MODE`、`AUTH_REQUIRED`、`AUTH_ISSUER`、`AUTH_AUDIENCE`、`AUTH_JWKS_URL`、`AUTH_ALGORITHMS`；生产 Vercel/VPS 环境暂不处理；
 - [ ] 验证回滚镜像和数据库恢复流程；
 - [x] 建立迁移 feature flag：`AUTH_MODE=logto|dual|local_session`，默认 `logto`，当前阶段仅完成配置校验，尚未切换认证路径。
 
-完成条件：数据库可恢复，用户映射明确，认证切换可以回滚。
+完成条件：数据库可恢复，首批本地账号创建方案明确，认证切换可以回滚。
 
 ### 阶段 1：新增本地认证基础设施
 
@@ -466,18 +467,18 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 2：后端双认证模式
 
-当前状态：本地双认证入口已开始实现，尚未完成本地凭据领取和邀请制账号创建。
+当前状态：本地双认证入口已实现。由于不迁移旧用户，Logto 凭据领取不再实现；`dual` 仅用于本地验证和短期回滚，新账号仍需通过本地邀请或受控管理员 provisioning 创建。
 
 在 `AUTH_MODE=dual` 下：
 
 - [x] 优先验证本地 Session；
 - [x] 没有 Session 时临时接受现有 Logto Bearer Token；
-- [ ] Logto 用户登录后可以领取或设置本地凭据；
+- [x] 取消 Logto 用户领取本地凭据：旧用户不迁移，直接创建新的本地账号；
 - [x] 两种方式解析后都返回同一个 `AuthenticatedUser`；
 - [x] Workspace 和权限逻辑保持不变；
 - [ ] 新账号只通过本地邀请创建，不再通过 Logto bootstrap 创建。
 
-完成条件：已存在用户可以用 Logto 登录，也可以完成本地密码激活。
+完成条件：新建本地账号可以独立登录；`dual` 可以在切换期间作为兼容或回滚模式使用。
 
 ### 阶段 3：前端切换到本地 Session
 
@@ -494,23 +495,21 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 完成条件：Vercel 生产域名通过 Cloudflare Tunnel API 完成登录、刷新、业务请求和登出闭环。
 
-### 阶段 4：用户迁移
+### 阶段 4：用户迁移（已取消）
 
-- 为已有 Logto 用户生成本地密码激活链接；
-- 按现有 email 找到本地 `User.id`，不得新建重复用户；
-- 激活后新增 `PasswordCredential`；
-- 验证原有聊天、文档和 Workspace 权限仍属于同一个 `User.id`；
-- 记录每个用户迁移状态；
-- 未迁移用户在截止日前仍可通过双轨模式登录。
+当前状态：根据 2026-09-08 决策，本阶段不执行。现有 Logto 用户、外部身份和历史账号映射全部放弃；新系统从零创建本地账号，不要求保留旧 `User.id` 或旧账号对历史业务数据的访问关系。
 
-Logto 不会提供现有用户的明文密码或可直接迁移的密码哈希，因此每个用户都必须通过激活或重置流程设置新密码。
+- [x] 取消已有用户的激活、映射和迁移任务；
+- [x] 取消迁移状态跟踪和“未迁移用户继续双轨登录”要求；
+- [x] 将旧账号数据标记为不纳入新认证验收；物理删除须遵循单独的数据保留/删除决定。
 
-完成条件：所有有效员工账号已有本地凭据。
+完成条件：不适用。后续验收改为验证新建本地账号的完整生命周期。
 
 ### 阶段 5：生产切换
 
 - 将后端切换到 `AUTH_MODE=local_session`；
 - 前端移除 Logto Provider 和回调路由；
+- 在切换前通过受控 provisioning 或邀请流程创建首批本地管理员和员工账号；
 - 生产 Smoke Test；
 - 观察 401、403、429、登录失败和 Session 错误指标；
 - 保留一个明确的短期回滚窗口。
@@ -724,7 +723,7 @@ LOGTO_JWKS_URL
 - 并发使用同一 Token 只有一次成功；
 - 密码重置后全部旧 Session 失效；
 - 管理员无法查看用户密码；
-- 已存在用户激活后保留原 `User.id` 和 Workspace 权限。
+- 新建用户完成激活后拥有正确的 Workspace role 和 permission。
 
 ### 14.6 生产闭环测试
 
@@ -756,9 +755,9 @@ Vercel 登录页
 
 只有全部满足后才可以删除 Logto：
 
-- [ ] 所有有效员工已经设置本地密码；
-- [ ] 每个迁移用户保持原 `User.id`；
-- [ ] Workspace role 和 permission 未改变；
+- [x] 已明确不迁移旧 Logto 用户、旧身份映射和旧账号数据；
+- [ ] 首批本地管理员和员工账号已经通过受控流程创建并设置密码；
+- [ ] 新建本地账号的 Workspace role 和 permission 正确；
 - [ ] Argon2id 参数经过生产容器基准测试；
 - [ ] Session Cookie 安全属性测试通过；
 - [ ] CSRF、CORS 和 Origin 测试通过；
@@ -770,7 +769,7 @@ Vercel 登录页
 - [ ] 数据库备份和回滚演练通过；
 - [ ] Logto 环境变量已从 Vercel 和 VPS 清除；
 - [ ] Logto SDK、callback 和 bootstrap 代码已删除；
-- [ ] 旧 Logto 账号数据已经按保留策略导出或删除。
+- [x] 旧 Logto 账号数据不纳入新认证验收；是否物理删除按单独的数据保留策略执行。
 
 ## 16. 不在第一阶段实现的内容
 
@@ -799,7 +798,7 @@ Vercel 登录页
         ↓
 前端改为 Cookie Session
         ↓
-现有员工逐个激活本地密码
+创建首批本地管理员和员工账号
         ↓
 切换 AUTH_MODE=local_session
         ↓
