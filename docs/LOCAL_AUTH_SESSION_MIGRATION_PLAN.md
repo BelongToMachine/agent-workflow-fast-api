@@ -451,13 +451,15 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 1：新增本地认证基础设施
 
-- 增加认证数据表和迁移；
-- 引入 Argon2id 库；
-- 实现 Session repository；
-- 实现 CSRF 和严格 Origin 校验；
-- 实现认证专用限流；
-- 实现邀请、激活、登录、登出、修改密码和重置密码接口；
-- 保留现有 Logto Bearer 路径。
+当前状态：本地基础设施第一轮已完成，认证 API 和登录路径尚未切换。
+
+- [x] 增加认证数据表和迁移：`0010_local_auth.sql`，并提供本地安全门控的 `make local-auth-status` / `make migrate-local-auth`；
+- [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 15–1024 字符策略；
+- [x] 实现 Session repository：只保存 SHA-256 Token hash，同时支持 idle/absolute expiry、touch 和撤销；
+- [x] 实现 CSRF 和严格 Origin 校验基础工具；
+- [ ] 实现认证专用限流；
+- [ ] 实现邀请、激活、登录、登出、修改密码和重置密码接口；
+- [x] 保留现有 Logto Bearer 路径，本轮未改变当前认证行为。
 
 完成条件：自动测试通过，本地测试账号可以独立完成完整生命周期。
 
@@ -554,6 +556,9 @@ Logto 不会提供现有用户的明文密码或可直接迁移的密码哈希�
 - `app/core/passwords.py`
 - `app/core/sessions.py`
 - `app/core/csrf.py`
+- `app/db/auth_sessions.py`
+- `app/db/local_auth_status.py`
+- `app/db/migrate_local_auth.py`
 - `app/core/auth_rate_limit.py`
 - `app/api/routes/auth_sessions.py`
 - `app/api/routes/auth_passwords.py`

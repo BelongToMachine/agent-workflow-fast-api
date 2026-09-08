@@ -97,6 +97,33 @@ class Settings(BaseSettings):
         default="logto",
         validation_alias=AliasChoices("AUTH_MODE", "ASIANODE_AUTH_MODE"),
     )
+    session_idle_timeout_seconds: int = Field(
+        default=12 * 60 * 60,
+        ge=300,
+        le=30 * 24 * 60 * 60,
+        validation_alias=AliasChoices(
+            "SESSION_IDLE_TIMEOUT_SECONDS",
+            "ASIANODE_SESSION_IDLE_TIMEOUT_SECONDS",
+        ),
+    )
+    session_absolute_timeout_seconds: int = Field(
+        default=7 * 24 * 60 * 60,
+        ge=3600,
+        le=90 * 24 * 60 * 60,
+        validation_alias=AliasChoices(
+            "SESSION_ABSOLUTE_TIMEOUT_SECONDS",
+            "ASIANODE_SESSION_ABSOLUTE_TIMEOUT_SECONDS",
+        ),
+    )
+    session_touch_interval_seconds: int = Field(
+        default=5 * 60,
+        ge=30,
+        le=24 * 60 * 60,
+        validation_alias=AliasChoices(
+            "SESSION_TOUCH_INTERVAL_SECONDS",
+            "ASIANODE_SESSION_TOUCH_INTERVAL_SECONDS",
+        ),
+    )
     auth_required: bool = Field(
         default=False,
         validation_alias=AliasChoices("AUTH_REQUIRED", "ASIANODE_AUTH_REQUIRED"),
