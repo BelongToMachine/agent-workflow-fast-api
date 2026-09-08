@@ -8,7 +8,11 @@ import {
 import {
   getLogtoAccessToken,
 } from "../auth/logtoToken";
-import { isLogtoAuthMode } from "../auth/logtoConfig";
+import {
+  isLocalSessionAuthMode,
+  isLogtoAuthMode,
+} from "../auth/logtoConfig";
+import { getLocalCsrfToken } from "../auth/localSession";
 
 const DIRECT_TOKEN_STORAGE_KEY = "asianode.fastapi.direct-token";
 
@@ -130,7 +134,7 @@ function appendWorkspaceId(url: URL, token: DirectToken | null) {
   // Override legacy caller-supplied values so the browser cannot accidentally
   // switch business context before a real workspace selector exists.
   const workspaceId =
-    isSingleWorkspaceMode && isLogtoAuthMode
+    isSingleWorkspaceMode && (isLogtoAuthMode || isLocalSessionAuthMode)
       ? fastApiWorkspaceId
       : url.searchParams.get("workspace_id") ||
         token?.workspaceId ||
@@ -230,12 +234,21 @@ export async function apiFetch(
     init?.method ?? (input instanceof Request ? input.method : "GET")
   ).toUpperCase();
 
+  const requestHeaders = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined)
+  );
+  if (
+    isLocalSessionAuthMode &&
+    ["DELETE", "PATCH", "POST", "PUT"].includes(method) &&
+    !requestHeaders.has("X-CSRF-Token")
+  ) {
+    requestHeaders.set("X-CSRF-Token", await getLocalCsrfToken());
+  }
+
   if (isFastApiProxyMode && typeof window !== "undefined") {
     const token = isLogtoAuthMode ? null : getStoredToken();
     const accessToken = await getApiAccessToken();
-    const headers = new Headers(
-      init?.headers ?? (input instanceof Request ? input.headers : undefined)
-    );
+    const headers = requestHeaders;
 
     if (accessToken && !headers.has("authorization")) {
       headers.set("authorization", `Bearer ${accessToken}`);
@@ -243,6 +256,7 @@ export async function apiFetch(
 
     return fetch(mapLegacyApiPath(input, method, token), {
       ...init,
+      credentials: init?.credentials ?? "include",
       headers,
     });
   }
@@ -254,9 +268,7 @@ export async function apiFetch(
   const storedToken = isLogtoAuthMode ? null : getStoredToken();
   const accessToken = await getApiAccessToken();
   const target = mapLegacyApiUrl(input, method, storedToken);
-  const headers = new Headers(
-    init?.headers ?? (input instanceof Request ? input.headers : undefined)
-  );
+  const headers = requestHeaders;
 
   if (accessToken && !headers.has("authorization")) {
     headers.set("authorization", `Bearer ${accessToken}`);
@@ -264,6 +276,7 @@ export async function apiFetch(
 
   return fetch(target, {
     ...init,
+    credentials: init?.credentials ?? "include",
     headers,
   });
 }

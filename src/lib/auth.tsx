@@ -14,10 +14,15 @@ import {
 } from "./backend/directClient";
 import {
   getLogtoEndSessionUri,
+  isLocalSessionAuthMode,
   isLogtoAuthMode,
   logtoAppId,
 } from "./auth/logtoConfig";
 import { clearLogtoBrowserStorage } from "./auth/logtoStorage";
+import {
+  getLocalSession,
+  signOutLocalSession,
+} from "./auth/localSession";
 import type { Permission, WorkspaceRole } from "./permissions";
 
 export type User = {
@@ -269,7 +274,89 @@ function LogtoAuthProvider({ children }: { children: ReactNode }) {
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
+function LocalSessionAuthProvider({ children }: { children: ReactNode }) {
+  const [data, setData] = useState<Session>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  const sessionToContext = useCallback((session: Awaited<ReturnType<typeof getLocalSession>>) => {
+    return session.authenticated && session.user
+      ? {
+          user: {
+            email: session.user.email ?? null,
+            id: session.user.userId,
+            image: session.user.image ?? null,
+            name: session.user.name ?? null,
+          },
+        }
+      : null;
+  }, []);
+
+  const refreshSession = useCallback(async () => {
+    try {
+      const session = await getLocalSession();
+      setData(sessionToContext(session));
+    } catch {
+      setData(null);
+    } finally {
+      setIsReady(true);
+    }
+  }, [sessionToContext]);
+
+  useEffect(() => {
+    void refreshSession();
+    window.addEventListener("asianode-auth-change", refreshSession);
+    return () => window.removeEventListener("asianode-auth-change", refreshSession);
+  }, [refreshSession]);
+
+  const update = useCallback(async () => {
+    try {
+      const session = await getLocalSession();
+      const nextData = sessionToContext(session);
+      setData(nextData);
+      setIsReady(true);
+      return nextData;
+    } catch {
+      setData(null);
+      setIsReady(true);
+      return null;
+    }
+  }, [sessionToContext]);
+
+  const signOut = useCallback(async () => {
+    try {
+      await signOutLocalSession();
+    } finally {
+      setData(null);
+      setIsReady(true);
+      window.location.assign("/login?reason=signed_out");
+    }
+  }, []);
+
+  const invalidate = useCallback(async (reason = "session_expired") => {
+    setData(null);
+    setIsReady(true);
+    window.location.assign(`/login?reason=${encodeURIComponent(reason)}`);
+  }, []);
+
+  const value = useMemo<SessionContextValue>(
+    () => ({
+      data,
+      invalidate,
+      signOut,
+      status: data ? "authenticated" : isReady ? "unauthenticated" : "loading",
+      update,
+    }),
+    [data, invalidate, isReady, signOut, update]
+  );
+
+  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
+  if (isLocalSessionAuthMode) {
+    return <LocalSessionAuthProvider>{children}</LocalSessionAuthProvider>;
+  }
+
   if (isLogtoAuthMode) {
     return <LogtoAuthProvider>{children}</LogtoAuthProvider>;
   }
@@ -294,6 +381,11 @@ export async function signOut() {
   clearStoredDirectToken();
   if (isLogtoAuthMode) {
     clearLogtoBrowserStorage();
+    window.location.assign("/login?reason=signed_out");
+    return;
+  }
+
+  if (isLocalSessionAuthMode) {
     window.location.assign("/login?reason=signed_out");
     return;
   }

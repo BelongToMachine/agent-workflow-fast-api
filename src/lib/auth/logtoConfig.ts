@@ -32,16 +32,22 @@ export const isLogtoConfigured = Boolean(
   logtoEndpoint && logtoAppId && logtoApiResource
 );
 
-export type AuthMode = "development" | "preview";
+export type AuthMode = "development" | "preview" | "local_session";
 
 const AUTH_MODE_STORAGE_KEY = "asianode.auth-mode";
 
 /**
  * Local development defaults to the dev OIDC simulator. Any built
- * environment is forced onto Logto so preview/production cannot silently
- * fall back to development credentials.
+ * built environments are forced onto an explicitly configured remote or
+ * local-session mode so production cannot silently fall back to development
+ * credentials.
  */
 function readAuthMode(): AuthMode {
+  const requestedMode = readEnv(import.meta.env.VITE_AUTH_MODE);
+  if (requestedMode === "local_session") {
+    return "local_session";
+  }
+
   if (!import.meta.env.DEV) {
     return "preview";
   }
@@ -63,6 +69,7 @@ export const authMode = readAuthMode();
 export const canSwitchAuthMode = import.meta.env.DEV;
 export const isLogtoAuthMode =
   isLogtoConfigured && authMode === "preview";
+export const isLocalSessionAuthMode = authMode === "local_session";
 
 export function setAuthMode(nextMode: AuthMode) {
   if (!canSwitchAuthMode) {

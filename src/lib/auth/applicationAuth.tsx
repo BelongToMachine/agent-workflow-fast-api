@@ -19,7 +19,10 @@ import {
 import { useBackendQuery } from "../backend/reactQuery";
 import type { Permission, WorkspaceRole } from "../permissions";
 import { type User, useSession } from "../auth";
-import { isLogtoAuthMode } from "./logtoConfig";
+import {
+  isLocalSessionAuthMode,
+  isLogtoAuthMode,
+} from "./logtoConfig";
 
 export type WorkspaceMembership = {
   membershipId: string;
@@ -119,9 +122,9 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
   });
   const currentUserQuery = useBackendQuery<CurrentUserResponse>({
     enabled:
-      isLogtoAuthMode &&
+      (isLogtoAuthMode || isLocalSessionAuthMode) &&
       sessionStatus === "authenticated" &&
-      bootstrapQuery.isSuccess,
+      (isLocalSessionAuthMode || bootstrapQuery.isSuccess),
     path: "/api/v1/me",
     queryKey: ["backend", "user", identity, "current-user"],
     retry: false,
@@ -134,7 +137,7 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
-    if (!isLogtoAuthMode) {
+    if (!isLogtoAuthMode && !isLocalSessionAuthMode) {
       return developmentCurrentUser(session.user);
     }
 
@@ -147,7 +150,7 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
         return null;
       }
 
-      if (!isLogtoAuthMode) {
+      if (!isLogtoAuthMode && !isLocalSessionAuthMode) {
         return currentUser.memberships[0] ?? null;
       }
 
@@ -208,7 +211,7 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
     if (blockedStatus) {
       return blockedStatus;
     }
-    if (!isLogtoAuthMode) {
+    if (!isLogtoAuthMode && !isLocalSessionAuthMode) {
       return "authenticated";
     }
 
@@ -241,7 +244,12 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
   ]);
 
   const refreshCurrentUser = useCallback(async () => {
-    if (!isLogtoAuthMode) {
+    if (!isLogtoAuthMode && !isLocalSessionAuthMode) {
+      return;
+    }
+
+    if (isLocalSessionAuthMode) {
+      await refetchCurrentUser({ throwOnError: false });
       return;
     }
 

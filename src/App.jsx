@@ -17,9 +17,11 @@ import {
   canSwitchAuthMode,
   isLogtoAuthMode,
   isLogtoConfigured,
+  isLocalSessionAuthMode,
   setAuthMode,
 } from "./lib/auth/logtoConfig";
 import { LogtoAppProvider } from "./lib/auth/logto";
+import { LocalAuthRequestError, signInWithLocalSession } from "./lib/auth/localSession";
 import { ThemeProvider } from "./components/themeProvider";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
@@ -40,7 +42,7 @@ function AuthGuard({ children }) {
     pathname === "/register" ||
     pathname === "/dev/oidc";
 
-  if (!import.meta.env.DEV && !isLogtoConfigured) {
+  if (!import.meta.env.DEV && !isLogtoConfigured && !isLocalSessionAuthMode) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-sm text-destructive">
         Sign-in is not configured for this deployment.
@@ -61,7 +63,7 @@ function AuthGuard({ children }) {
   }
 
   if (status === "unauthenticated") {
-    return <Navigate replace to={isLogtoAuthMode ? "/login" : "/dev/oidc"} />;
+    return <Navigate replace to={isLogtoAuthMode || isLocalSessionAuthMode ? "/login" : "/dev/oidc"} />;
   }
 
   return children;
@@ -86,7 +88,7 @@ function ChatLayout() {
   }
 
   if (authStatus === "unauthenticated") {
-    return <Navigate replace to={isLogtoAuthMode ? "/login" : "/dev/oidc"} />;
+    return <Navigate replace to={isLogtoAuthMode || isLocalSessionAuthMode ? "/login" : "/dev/oidc"} />;
   }
 
   if (authStatus === "suspended") {
@@ -430,6 +432,10 @@ function AuthPage({ mode }) {
     return <LogtoAuthPage mode={mode} />;
   }
 
+  if (isLocalSessionAuthMode) {
+    return <LocalSessionAuthPage mode={mode} />;
+  }
+
   const isLogin = mode === "login";
 
   function handleSubmit(event) {
@@ -483,6 +489,123 @@ function AuthPage({ mode }) {
   );
 }
 
+function LocalSessionAuthPage({ mode }) {
+  const router = useRouter();
+  const { update } = useSession();
+  const isLogin = mode === "login";
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!isLogin) {
+      return;
+    }
+
+    setErrorMessage("");
+    setIsSubmitting(true);
+    try {
+      await signInWithLocalSession(email, password);
+      await update();
+      router.replace("/");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof LocalAuthRequestError && error.status === 401
+          ? "Email or password is incorrect."
+          : "Unable to sign in right now. Please try again."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-dvh w-full bg-sidebar">
+      <div className="flex w-full flex-col bg-background p-8 md:p-16 xl:w-[600px] xl:shrink-0 xl:rounded-r-2xl xl:border-r xl:border-border/40">
+        <Link
+          className="flex w-fit items-center text-[13px] text-muted-foreground hover:text-foreground"
+          href="/"
+        >
+          ← Back
+        </Link>
+        <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {isLogin ? "Welcome back" : "Invitation required"}
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {isLogin
+                ? "Sign in with your organization account."
+                : "New accounts are created by an administrator invitation."}
+            </p>
+          </div>
+          {errorMessage ? (
+            <div
+              aria-live="polite"
+              className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive text-sm"
+              role="alert"
+            >
+              {errorMessage}
+            </div>
+          ) : null}
+          {isLogin ? (
+            <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+              <label className="flex flex-col gap-2 text-sm font-medium">
+                Email
+                <input
+                  autoComplete="email"
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                  type="email"
+                  value={email}
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-medium">
+                Password
+                <input
+                  autoComplete="current-password"
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  minLength={15}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={password}
+                />
+              </label>
+              <button
+                className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isSubmitting}
+                type="submit"
+              >
+                {isSubmitting ? "Signing in…" : "Sign in"}
+              </button>
+            </form>
+          ) : null}
+          {isLogin ? (
+            <p className="text-center text-[13px] text-muted-foreground">
+              Need access? Contact your workspace administrator.
+            </p>
+          ) : (
+            <button
+              className="h-10 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-muted"
+              onClick={() => router.replace("/login")}
+              type="button"
+            >
+              Back to sign in
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="hidden flex-1 overflow-hidden pl-12 pt-8 xl:block">
+        <Preview />
+      </div>
+    </div>
+  );
+}
+
 function AuthModeSwitcher() {
   if (!canSwitchAuthMode) {
     return null;
@@ -493,7 +616,12 @@ function AuthModeSwitcher() {
   return (
     <div className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-lg border border-border/60 bg-background/95 p-2 text-xs shadow-lg backdrop-blur">
       <span className="text-muted-foreground">
-        当前：{authMode === "development" ? "开发认证" : "Preview / Logto"}
+        当前：
+        {authMode === "development"
+          ? "开发认证"
+          : authMode === "local_session"
+            ? "本地 Session"
+            : "Preview / Logto"}
       </span>
       <button
         className="rounded-md border border-border px-2.5 py-1.5 font-medium text-foreground transition-colors hover:bg-muted"
