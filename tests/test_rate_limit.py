@@ -27,6 +27,20 @@ def test_in_memory_rate_limiter_returns_retry_after_when_exhausted() -> None:
     assert retry_after >= 1
 
 
+def test_idle_rate_limit_keys_are_reclaimed() -> None:
+    limiter = InMemoryRateLimiter(limit=2, window_seconds=60)
+    for index in range(1000):
+        limiter.check(str(index), now=100)
+    limiter.check("active", now=161)
+    assert len(limiter._events) == 1
+
+
+def test_fractional_retry_after_rounds_up() -> None:
+    limiter = InMemoryRateLimiter(limit=1, window_seconds=60)
+    limiter.check("user", now=100)
+    assert limiter.check("user", now=100.1)[2] == 60
+
+
 def test_rate_limit_is_stricter_for_expensive_routes() -> None:
     assert _path_limit("/api/v1/chat", 120) == 20
     assert _path_limit("/api/v1/knowledge-bases/a/files", 120) == 30

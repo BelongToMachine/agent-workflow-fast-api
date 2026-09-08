@@ -1,4 +1,5 @@
 import hashlib
+import math
 import threading
 import time
 from collections import deque
@@ -23,16 +24,23 @@ class InMemoryRateLimiter:
         self.window_seconds = window_seconds
         self._events: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
+        self._next_cleanup = 0.0
 
     def check(self, key: str, now: float | None = None) -> tuple[bool, int, int]:
         current_time = now if now is not None else time.monotonic()
         cutoff = current_time - self.window_seconds
         with self._lock:
+            if current_time >= self._next_cleanup:
+                self._events = {
+                    key: events for key, events in self._events.items()
+                    if events and events[-1] > cutoff
+                }
+                self._next_cleanup = current_time + self.window_seconds
             events = self._events.setdefault(key, deque())
             while events and events[0] <= cutoff:
                 events.popleft()
             if len(events) >= self.limit:
-                retry_after = max(1, int(events[0] + self.window_seconds - current_time))
+                retry_after = max(1, math.ceil(events[0] + self.window_seconds - current_time))
                 return False, 0, retry_after
             events.append(current_time)
             return True, self.limit - len(events), 0
