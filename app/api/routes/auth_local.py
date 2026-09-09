@@ -138,9 +138,15 @@ def _require_allowed_origin(request: Request, settings: Settings) -> None:
 
 
 def _secure_cookie(request: Request, settings: Settings) -> bool:
-    # Local development commonly runs over HTTP. Staging/production must keep
-    # Secure even when the application sees an HTTP origin behind a tunnel.
-    return request.url.scheme == "https" or settings.environment in {"staging", "production"}
+    # ``__Host-`` cookies are required to carry the Secure attribute. Browsers
+    # allow Secure cookies on loopback development origins (localhost and
+    # 127.0.0.1), so keep that prefix usable while developing over HTTP. The
+    # staging/production rule also covers deployments behind an HTTP tunnel.
+    return (
+        request.url.scheme == "https"
+        or settings.environment in {"staging", "production"}
+        or request.url.hostname in {"localhost", "127.0.0.1", "::1"}
+    )
 
 
 def _set_csrf_cookie(response: Response, token: str, request: Request, settings: Settings) -> None:

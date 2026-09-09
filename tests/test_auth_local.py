@@ -92,6 +92,23 @@ def test_local_login_requires_an_exact_origin_and_csrf_token() -> None:
     assert response.json()["code"] == "csrf:origin_invalid"
 
 
+def test_loopback_development_csrf_cookie_is_secure() -> None:
+    app.dependency_overrides[get_settings] = _settings
+    try:
+        response = client.get(
+            "/api/v1/auth/csrf",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Host": "localhost",
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 200
+    assert "; Secure" in response.headers["set-cookie"]
+
+
 def test_local_login_sets_an_opaque_httponly_session_cookie(monkeypatch) -> None:
     user_id = uuid4()
     row = {

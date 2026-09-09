@@ -36,8 +36,15 @@ CREATE_SESSION_QUERY = text(
         :idle_expires_at, :absolute_expires_at, :ip_hash, :user_agent_hash
     FROM "User"
     WHERE "id" = :user_id AND "status" = 'active'
-    RETURNING "id", "userId", "tokenHash", "createdAt", "lastSeenAt",
-              "idleExpiresAt", "absoluteExpiresAt", "revokedAt"
+    RETURNING
+        "id" AS session_id,
+        "userId" AS user_id,
+        "tokenHash" AS token_hash,
+        "createdAt" AS created_at,
+        "lastSeenAt" AS last_seen_at,
+        "idleExpiresAt" AS idle_expires_at,
+        "absoluteExpiresAt" AS absolute_expires_at,
+        "revokedAt" AS revoked_at
     """
 )
 
