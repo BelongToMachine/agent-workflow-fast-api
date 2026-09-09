@@ -125,7 +125,7 @@ class Settings(BaseSettings):
         ),
     )
     auth_frontend_url: str = Field(
-        default="http://localhost:3000",
+        default="http://localhost:5173",
         validation_alias=AliasChoices(
             "AUTH_FRONTEND_URL",
             "ASIANODE_AUTH_FRONTEND_URL",

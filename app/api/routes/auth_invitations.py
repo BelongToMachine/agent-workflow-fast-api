@@ -63,7 +63,26 @@ class InvitationResponse(BaseModel):
     workspace_id: str = Field(alias="workspaceId")
     role: WorkspaceRole
     expires_at: datetime = Field(alias="expiresAt")
-    activation_url: str | None = Field(default=None, alias="activationUrl")
+    activation_url: str = Field(alias="activationUrl")
+
+
+InvitationStatus = Literal["pending", "expired", "revoked", "accepted"]
+
+
+class InvitationListItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    invitation_id: str = Field(alias="invitationId")
+    email: str
+    workspace_id: str = Field(alias="workspaceId")
+    role: WorkspaceRole
+    status: InvitationStatus
+    expires_at: datetime = Field(alias="expiresAt")
+    created_at: datetime = Field(alias="createdAt")
+
+
+class InvitationsResponse(BaseModel):
+    invitations: list[InvitationListItem]
 
 
 class InvitationRevokeResponse(BaseModel):
@@ -142,6 +161,29 @@ INVITATION_BY_ID_QUERY = text(
       AND "purpose" = 'invitation'
       AND "workspaceId" = :workspace_id
     FOR UPDATE
+    """
+)
+
+LIST_INVITATIONS_QUERY = text(
+    """
+    SELECT
+        "id" AS invitation_id,
+        "normalizedEmail" AS email,
+        "workspaceId" AS workspace_id,
+        "workspaceRole" AS role,
+        "expiresAt" AS expires_at,
+        "createdAt" AS created_at,
+        CASE
+            WHEN "usedAt" IS NOT NULL THEN 'accepted'
+            WHEN "revokedAt" IS NOT NULL THEN 'revoked'
+            WHEN "expiresAt" <= CURRENT_TIMESTAMP THEN 'expired'
+            ELSE 'pending'
+        END AS status
+    FROM "AuthOneTimeToken"
+    WHERE "workspaceId" = :workspace_id
+      AND "purpose" = 'invitation'
+    ORDER BY "createdAt" DESC
+    LIMIT 100
     """
 )
 
@@ -272,11 +314,9 @@ def _workspace_role(value: object) -> WorkspaceRole:
     return value  # type: ignore[return-value]
 
 
-def _activation_url(token: str, settings: Settings) -> str | None:
-    # Returning a raw one-time token is intentionally restricted to local
-    # development, where an email transport is not configured yet.
-    if settings.environment != "development":
-        return None
+def _activation_url(token: str, settings: Settings) -> str:
+    # The raw one-time token is only returned in the immediate create or
+    # regenerate response and is never stored.
     return f"{settings.auth_frontend_url.rstrip('/')}/activate?token={quote(token, safe='')}"
 
 
@@ -310,17 +350,9 @@ async def create_invitation(
 ) -> InvitationResponse:
     """Create one pending invitation for a workspace member.
 
-    The development response includes a manual activation URL because no
-    email provider is configured yet. Staging and production must add a
-    delivery adapter before this endpoint is enabled there.
+    The response includes a one-time activation URL. No email delivery is
+    performed by this endpoint; the administrator shares the link privately.
     """
-    if settings.environment != "development":
-        raise _auth_error(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "auth:invitation_delivery_unavailable",
-            "Invitation email delivery is not configured.",
-        )
-
     access = await _authorize_invitation_admin(current_user, payload.workspace_id)
     if payload.role == "owner" and access.role != "owner":
         raise _auth_error(
@@ -417,6 +449,160 @@ async def create_invitation(
         email=payload.email,
         workspaceId=str(payload.workspace_id),
         role=payload.role,
+        expiresAt=expires_at,
+        activationUrl=_activation_url(token.token, settings),
+    )
+
+
+@router.get("/invitations", response_model=InvitationsResponse)
+async def list_invitations(
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    workspace_id: UUID = Query(alias="workspace_id"),
+) -> InvitationsResponse:
+    """List recent invitations without exposing bearer activation tokens."""
+    await _authorize_invitation_admin(current_user, workspace_id)
+
+    try:
+        async with get_db_connection() as connection:
+            result = await connection.execute(
+                LIST_INVITATIONS_QUERY,
+                {"workspace_id": workspace_id},
+            )
+            rows = result.mappings().all()
+    except (RuntimeError, SQLAlchemyError) as error:
+        raise _database_unavailable(error) from error
+
+    return InvitationsResponse(
+        invitations=[
+            InvitationListItem(
+                invitationId=str(row["invitation_id"]),
+                email=str(row["email"]),
+                workspaceId=str(row["workspace_id"]),
+                role=_workspace_role(row["role"]),
+                status=row["status"],
+                expiresAt=row["expires_at"],
+                createdAt=row["created_at"],
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.post(
+    "/invitations/{invitation_id}/regenerate",
+    response_model=InvitationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def regenerate_invitation(
+    invitation_id: UUID,
+    request: Request,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    _: Annotated[None, Depends(_require_csrf)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    workspace_id: UUID = Query(alias="workspace_id"),
+) -> InvitationResponse:
+    """Revoke an unused invitation and issue a fresh one-time link."""
+    await _authorize_invitation_admin(current_user, workspace_id)
+    actor_id = _actor_uuid(current_user)
+    token = new_one_time_token()
+    new_invitation_id = uuid4()
+    expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
+        seconds=settings.auth_invitation_ttl_seconds
+    )
+
+    try:
+        async with get_db_connection() as connection:
+            async with connection.begin():
+                result = await connection.execute(
+                    INVITATION_BY_ID_QUERY,
+                    {
+                        "invitation_id": invitation_id,
+                        "workspace_id": workspace_id,
+                    },
+                )
+                invitation = result.mappings().first()
+                if invitation is None:
+                    raise _auth_error(
+                        status.HTTP_404_NOT_FOUND,
+                        "auth:invitation_not_found",
+                        "The invitation was not found.",
+                    )
+                if invitation["used_at"] is not None:
+                    raise _auth_error(
+                        status.HTTP_409_CONFLICT,
+                        "auth:invitation_not_pending",
+                        "The invitation has already been used.",
+                    )
+
+                normalized_email = str(invitation["normalized_email"])
+                await connection.execute(
+                    ADVISORY_EMAIL_LOCK_QUERY,
+                    {"normalized_email": normalized_email},
+                )
+                account_result = await connection.execute(
+                    EXISTING_LOCAL_ACCOUNT_QUERY,
+                    {"normalized_email": normalized_email},
+                )
+                if account_result.mappings().first() is not None:
+                    raise _auth_error(
+                        status.HTTP_409_CONFLICT,
+                        "auth:account_exists",
+                        "A local account already exists for this email.",
+                    )
+
+                await connection.execute(
+                    REVOKE_PENDING_INVITATIONS_QUERY,
+                    {
+                        "normalized_email": normalized_email,
+                        "workspace_id": workspace_id,
+                    },
+                )
+                await connection.execute(
+                    INSERT_INVITATION_QUERY,
+                    {
+                        "invitation_id": new_invitation_id,
+                        "normalized_email": normalized_email,
+                        "token_hash": token.token_hash,
+                        "workspace_id": workspace_id,
+                        "workspace_role": _workspace_role(invitation["workspace_role"]),
+                        "expires_at": expires_at,
+                        "created_by": actor_id,
+                    },
+                )
+                await connection.execute(
+                    INSERT_AUTH_AUDIT_QUERY,
+                    {
+                        "event_type": "auth.invitation_regenerated",
+                        "user_id": actor_id,
+                        "session_id": None,
+                        "ip_hash": _metadata_hash(
+                            request.client.host if request.client else None,
+                            settings,
+                        ),
+                        "user_agent_hash": _metadata_hash(
+                            request.headers.get("user-agent"),
+                            settings,
+                        ),
+                        "metadata": '{"purpose":"invitation"}',
+                    },
+                )
+    except HTTPException:
+        raise
+    except IntegrityError as error:
+        raise _auth_error(
+            status.HTTP_409_CONFLICT,
+            "auth:invitation_conflict",
+            "The invitation could not be regenerated because the account state changed.",
+        ) from error
+    except (RuntimeError, SQLAlchemyError) as error:
+        raise _database_unavailable(error) from error
+
+    role = _workspace_role(invitation["workspace_role"])
+    return InvitationResponse(
+        invitationId=str(new_invitation_id),
+        email=str(invitation["normalized_email"]),
+        workspaceId=str(workspace_id),
+        role=role,
         expiresAt=expires_at,
         activationUrl=_activation_url(token.token, settings),
     )

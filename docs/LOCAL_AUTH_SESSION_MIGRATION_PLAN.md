@@ -210,7 +210,7 @@ parallelism >= 1
 
 ### 5.2 密码规则
 
-- 密码作为单因素认证时，最小长度采用 15 个字符；
+- 密码作为单因素认证时，最小长度采用 12 个字符；
 - 支持至少 64 个字符；
 - 允许空格、粘贴和密码管理器自动填充；
 - 不强制大小写、数字、符号组合；
@@ -337,6 +337,8 @@ FastAPI
 | Method | Path | 作用 |
 | --- | --- | --- |
 | `POST` | `/api/v1/admin/auth/invitations` | 创建员工邀请 |
+| `GET` | `/api/v1/admin/auth/invitations` | 查看当前工作区邀请状态（不返回 Token） |
+| `POST` | `/api/v1/admin/auth/invitations/{id}/regenerate` | 让旧链接失效并生成新链接 |
 | `POST` | `/api/v1/admin/auth/invitations/{id}/revoke` | 撤销邀请 |
 | `POST` | `/api/v1/admin/auth/users/{id}/suspend` | 暂停用户并撤销 Session |
 | `POST` | `/api/v1/admin/auth/users/{id}/restore` | 恢复用户 |
@@ -370,7 +372,7 @@ FastAPI 路由继续通过 `Annotated[AuthenticatedUser, Depends(get_current_use
 
 ### 9.1 邀请激活
 
-开发环境暂时由管理员接口返回一次性激活链接，便于本地联调；staging/production 不返回原始 Token，必须接入受控邮件投递适配器后才能启用邀请发送。
+管理员接口始终返回一次性激活链接，由管理员通过私密渠道分享；系统不发送邮件。development、staging 和 production 使用同一条手动链接流程。
 
 ```text
 管理员创建邀请
@@ -455,17 +457,17 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 1：新增本地认证基础设施
 
-当前状态：本地基础设施、浏览器认证 API，以及开发环境下的邀请/激活/修改密码/密码重置流程已完成；认证路由专用限流已接入，生产邮件投递适配仍未实现。
+当前状态：本地基础设施、浏览器认证 API，以及手动邀请链接/激活/修改密码/密码重置流程已完成；认证路由专用限流已接入。邮件投递不属于本计划，管理员负责通过受控私密渠道分享链接。
 
 - [x] 增加认证数据表和迁移：`0010_local_auth.sql`，并提供本地安全门控的 `make local-auth-status` / `make migrate-local-auth`；
-- [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 15–1024 字符策略；
+- [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 12–1024 字符策略；
 - [x] 实现 Session repository：只保存 SHA-256 Token hash，同时支持 idle/absolute expiry、touch 和撤销；
 - [x] 实现 CSRF 和严格 Origin 校验基础工具；
 - [x] 实现基础认证路由专用限流：登录、激活、邀请、密码重置和修改密码使用独立上限；本地 Session 按 Cookie 指纹分桶；
 - [ ] 增加邮箱维度冷却，并在 Cloudflare/Tunnel 代理链路确定可信的真实客户端地址；
-- [x] 实现开发环境下的邀请创建/撤销、邀请激活和修改密码接口；
+- [x] 实现手动邀请链接的创建、查询、重新生成、撤销、邀请激活和修改密码接口；
 - [x] 实现开发环境下的密码重置请求/确认接口；
-- [ ] 实现 staging/production 邮件投递适配；
+- [x] 明确所有环境使用手动链接，不接入邮件投递适配；
 - [x] 实现 CSRF、登录、登出和当前 Session 查询接口；
 - [x] 保留现有 Logto Bearer 路径，本轮未改变当前认证行为。
 
@@ -482,7 +484,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 取消 Logto 用户领取本地凭据：旧用户不迁移，直接创建新的本地账号；
 - [x] 两种方式解析后都返回同一个 `AuthenticatedUser`；
 - [x] Workspace 和权限逻辑保持不变；
-- [x] 新账号只通过本地邀请创建，不再通过 Logto bootstrap 创建（当前仅开发环境返回手工激活链接）。
+- [x] 新账号只通过本地邀请创建，不再通过 Logto bootstrap 创建；管理员在前端生成并私下分享一次性激活链接。
 
 完成条件：新建本地账号可以独立登录；`dual` 可以在切换期间作为兼容或回滚模式使用。
 
@@ -490,6 +492,8 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 - [x] 实现真实登录表单；
 - [x] 实现激活、忘记密码、重置密码和修改密码页面（开发环境）；
+- [x] 在管理员权限页面提供非技术化的邀请表单：输入邮箱和角色，生成并复制一次性激活链接；
+- [x] 在管理员权限页面显示邀请状态，并支持重新生成或撤销未使用链接；
 - [x] 所有 FastAPI 请求增加 `credentials: "include"`；
 - [x] 写请求增加 `X-CSRF-Token`；
 - [x] 认证状态改为读取 `/api/v1/auth/session` 和 `/api/v1/me`；
@@ -497,7 +501,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 403 保持现有 suspended 和 workspace pending UX；
 - 停止在生产浏览器中获取 Logto Access Token。
 
-当前状态：本地 Session 登录、Cookie 请求、CSRF 注入、邀请激活、密码重置/修改和前端会话守卫已接入；生产环境仍需邮件投递、限流和闭环验收。
+当前状态：本地 Session 登录、Cookie 请求、CSRF 注入、邀请链接生成/复制/重新生成/撤销、邀请激活、密码重置/修改和前端会话守卫已接入；生产环境仍需限流和闭环验收。
 
 完成条件：Vercel 生产域名通过 Cloudflare Tunnel API 完成登录、刷新、业务请求和登出闭环。
 
@@ -729,6 +733,9 @@ LOGTO_JWKS_URL
 - 有效邀请只能使用一次；
 - 过期、撤销、错误用途 Token 被拒绝；
 - 并发使用同一 Token 只有一次成功；
+- 管理员创建邀请后只能在当次响应中看到原始链接；刷新列表不返回 Token；
+- 重新生成邀请会撤销同邮箱的旧未使用链接；
+- production 手动链接模式与 development 使用相同的一次性消费约束；
 - 密码重置后全部旧 Session 失效；
 - 管理员无法查看用户密码；
 - 新建用户完成激活后拥有正确的 Workspace role 和 permission。
