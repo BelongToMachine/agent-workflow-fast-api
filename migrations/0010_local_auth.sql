@@ -1,8 +1,9 @@
 -- Local authentication foundations.
 --
--- This migration is additive. It keeps the existing User UUIDs and Logto
--- ExternalIdentity rows so the service can run in a later dual-auth mode
--- before local sessions become the only authentication method.
+-- This migration is additive. It does not migrate legacy Logto users or
+-- ExternalIdentity rows; those records may remain temporarily while the
+-- service is validated in dual-auth mode before local sessions become the
+-- only authentication method.
 
 CREATE TABLE IF NOT EXISTS "PasswordCredential" (
     "userId" uuid PRIMARY KEY,

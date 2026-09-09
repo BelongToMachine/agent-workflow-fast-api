@@ -2,8 +2,8 @@
 
 These endpoints are intentionally small: the browser receives only an opaque
 session cookie, while password hashes and session records stay in PostgreSQL.
-The Logto bootstrap endpoint remains available for the migration's dual-auth
-mode until the local account migration is complete.
+The Logto bootstrap endpoint remains available for the temporary dual-auth
+mode while local account provisioning is being validated.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ LOGIN_USER_QUERY = text(
         user_record."status" AS status,
         credential."passwordHash" AS password_hash
     FROM "User" AS user_record
-    LEFT JOIN "PasswordCredential" AS credential
+    INNER JOIN "PasswordCredential" AS credential
         ON credential."userId" = user_record."id"
     WHERE lower(user_record."email") = :normalized_email
     LIMIT 1

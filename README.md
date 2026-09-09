@@ -212,11 +212,13 @@ Redis fixed-window counter，可在多个 FastAPI 实例之间共享；Redis 暂
 - 配置 `AUTH_ISSUER`、`AUTH_AUDIENCE` 和 `AUTH_JWKS_URL` 后，FastAPI 会校验 JWT 签名、`kid`、issuer、audience、过期时间和 `sub`。
 - FastAPI 不接受浏览器提交的 user、role 或 workspace 身份字段；生产环境只接受经 Logto OIDC 验证的 Bearer access token。
 
-本地 Session 迁移目前可以显式启用进行本地开发验证。后端使用 `AUTH_MODE=dual`（保留
+本地 Session 认证目前可以显式启用进行本地开发验证。后端使用 `AUTH_MODE=dual`（保留
 Logto Bearer 回退）或 `AUTH_MODE=local_session`，前端使用 `VITE_AUTH_MODE=local_session`。
-前端请求会携带 HttpOnly `__Host-asianode_session` Cookie，并自动获取 CSRF Token；当前登录
-接口要求数据库中已经存在对应的 `PasswordCredential`，邀请、激活和密码重置仍在后续阶段。
-不要在没有完成账号迁移和回滚演练前把 staging/production 切换到 `local_session`。
+前端请求会携带 HttpOnly `__Host-asianode_session` Cookie，并自动获取 CSRF Token；本地开发
+已经支持管理员创建/撤销邀请、邀请激活和修改密码，开发环境响应会返回一次性激活链接。密码
+重置、生产邮件投递适配和前端激活/修改密码页面仍未完成。旧 Logto 用户不迁移，新账号从零创建。
+不要在没有完成初始账号 provisioning、邮件投递和回滚演练前把 staging/production 切换到
+`local_session`。
 
 本地开发认证使用 FastAPI `/api/v1/dev/oidc/token` 签发 5 分钟 direct token；该接口仅在
 `ENVIRONMENT=development` 时启用，生产环境会关闭。

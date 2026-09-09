@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-- 状态：阶段 0 预检部分完成；本地 Session 双轨路径已在本地开发接入，生产尚未切换
+- 状态：阶段 0 预检部分完成；本地 Session 双轨路径和开发环境下的邀请/激活/修改密码后端已接入，生产尚未切换
 - 目标前端：`asianodeagent-front`（React + Vite，部署于 Vercel）
 - 目标后端：`asianode-fastapi`（FastAPI，部署于阿里云 VPS）
 - 生产前端域名：`https://copilot.asianodeatlas.com`
@@ -370,6 +370,8 @@ FastAPI 路由继续通过 `Annotated[AuthenticatedUser, Depends(get_current_use
 
 ### 9.1 邀请激活
 
+开发环境暂时由管理员接口返回一次性激活链接，便于本地联调；staging/production 不返回原始 Token，必须接入受控邮件投递适配器后才能启用邀请发送。
+
 ```text
 管理员创建邀请
         ↓
@@ -452,14 +454,15 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 1：新增本地认证基础设施
 
-当前状态：本地基础设施和第一轮浏览器认证 API 已完成，邀请、激活和密码重置流程尚未实现。
+当前状态：本地基础设施、浏览器认证 API，以及开发环境下的邀请/激活/修改密码后端流程已完成；密码重置、生产邮件投递和前端账号生命周期页面尚未实现。
 
 - [x] 增加认证数据表和迁移：`0010_local_auth.sql`，并提供本地安全门控的 `make local-auth-status` / `make migrate-local-auth`；
 - [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 15–1024 字符策略；
 - [x] 实现 Session repository：只保存 SHA-256 Token hash，同时支持 idle/absolute expiry、touch 和撤销；
 - [x] 实现 CSRF 和严格 Origin 校验基础工具；
 - [ ] 实现认证专用限流；
-- [ ] 实现邀请、激活、修改密码和重置密码接口；
+- [x] 实现开发环境下的邀请创建/撤销、邀请激活和修改密码接口；
+- [ ] 实现密码重置接口和 staging/production 邮件投递适配；
 - [x] 实现 CSRF、登录、登出和当前 Session 查询接口；
 - [x] 保留现有 Logto Bearer 路径，本轮未改变当前认证行为。
 
@@ -476,7 +479,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 取消 Logto 用户领取本地凭据：旧用户不迁移，直接创建新的本地账号；
 - [x] 两种方式解析后都返回同一个 `AuthenticatedUser`；
 - [x] Workspace 和权限逻辑保持不变；
-- [ ] 新账号只通过本地邀请创建，不再通过 Logto bootstrap 创建。
+- [x] 新账号只通过本地邀请创建，不再通过 Logto bootstrap 创建（当前仅开发环境返回手工激活链接）。
 
 完成条件：新建本地账号可以独立登录；`dual` 可以在切换期间作为兼容或回滚模式使用。
 
@@ -622,6 +625,8 @@ SESSION_COOKIE_NAME=__Host-asianode_session
 SESSION_IDLE_TTL_SECONDS=<reviewed-value>
 SESSION_ABSOLUTE_TTL_SECONDS=<reviewed-value>
 AUTH_ALLOWED_ORIGINS=https://copilot.asianodeatlas.com
+AUTH_FRONTEND_URL=https://copilot.asianodeatlas.com
+AUTH_INVITATION_TTL_SECONDS=604800
 CSRF_HMAC_KEY=<at-least-32-random-bytes>
 PASSWORD_ARGON2_MEMORY_KIB=<benchmarked-value>
 PASSWORD_ARGON2_TIME_COST=<benchmarked-value>
