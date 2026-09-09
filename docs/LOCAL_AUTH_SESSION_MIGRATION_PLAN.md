@@ -447,6 +447,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 保留只读身份预检结果作为历史记录：当前开发库有 25 个用户、5 个外部身份、25 条 membership，发现 2 组重复邮箱和 12 条非法/空邮箱；该结果不再阻塞认证切换；
 - [x] 取消旧用户导出、联系确认和重复邮箱清理任务：因不执行用户迁移，不再作为本计划要求；
 - [x] 记录本地开发认证环境变量名（只记录名称，不记录值）：`AUTH_MODE`、`AUTH_REQUIRED`、`AUTH_ISSUER`、`AUTH_AUDIENCE`、`AUTH_JWKS_URL`、`AUTH_ALGORITHMS`；生产 Vercel/VPS 环境暂不处理；
+- [x] 建立开发环境受控 provisioning 命令，用于创建首个本地 workspace owner；生产 provisioning 仍需接入密钥管理/人工审批；
 - [ ] 验证回滚镜像和数据库恢复流程；
 - [x] 建立迁移 feature flag：`AUTH_MODE=logto|dual|local_session`，默认 `logto`，当前阶段仅完成配置校验，尚未切换认证路径。
 

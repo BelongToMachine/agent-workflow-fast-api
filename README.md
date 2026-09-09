@@ -219,6 +219,14 @@ Logto Bearer 回退）或 `AUTH_MODE=local_session`，前端使用 `VITE_AUTH_MO
 生产环境仍需配置邮件投递适配器；前端本地 Session 的激活、忘记密码、重置密码和修改密码页面已接入。
 认证路由使用独立的 `AUTH_RATE_LIMIT_REQUESTS` 限额，普通业务继续使用 `RATE_LIMIT_REQUESTS`。
 旧 Logto 用户不迁移，新账号从零创建。
+
+本地开发首次创建管理员前，先确保 `AUTH_MODE=dual` 或 `AUTH_MODE=local_session`，再运行：
+
+```bash
+make provision-local-admin EMAIL=owner@example.com NAME="Workspace Owner"
+```
+
+命令会先做 workspace 和邮箱预检，再交互式读取密码；只允许 `ENVIRONMENT=development`，不会把密码放在命令行参数中。
 不要在没有完成初始账号 provisioning、邮件投递和回滚演练前把 staging/production 切换到
 `local_session`。
 

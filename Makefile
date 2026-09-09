@@ -1,4 +1,4 @@
-.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status auth-migration-status auth-migration-preflight local-auth-status migrate-local-auth knowledge-integrity migrate-knowledge migrate-auth-identity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings grant-first-owner seed-knowledge seed-content seed-products seed-operations
+.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status auth-migration-status auth-migration-preflight local-auth-status migrate-local-auth provision-local-admin knowledge-integrity migrate-knowledge migrate-auth-identity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings grant-first-owner seed-knowledge seed-content seed-products seed-operations
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= compose.yaml
@@ -52,6 +52,9 @@ local-auth-status:
 
 migrate-local-auth:
 	uv run python -m app.db.migrate_local_auth --apply
+
+provision-local-admin:
+	uv run python -m app.db.provision_local_admin --email $(EMAIL) --name "$(NAME)" --workspace-id $(or $(WORKSPACE_ID),00000000-0000-0000-0000-000000000001) --yes
 
 knowledge-integrity:
 	uv run python -m app.db.knowledge_integrity
