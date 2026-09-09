@@ -149,6 +149,15 @@ class Settings(BaseSettings):
             "ASIANODE_AUTH_PASSWORD_RESET_TTL_SECONDS",
         ),
     )
+    auth_rate_limit_requests: int = Field(
+        default=10,
+        ge=1,
+        le=120,
+        validation_alias=AliasChoices(
+            "AUTH_RATE_LIMIT_REQUESTS",
+            "ASIANODE_AUTH_RATE_LIMIT_REQUESTS",
+        ),
+    )
     auth_required: bool = Field(
         default=False,
         validation_alias=AliasChoices("AUTH_REQUIRED", "ASIANODE_AUTH_REQUIRED"),

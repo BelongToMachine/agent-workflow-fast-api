@@ -454,13 +454,13 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 1：新增本地认证基础设施
 
-当前状态：本地基础设施、浏览器认证 API，以及开发环境下的邀请/激活/修改密码/密码重置流程已完成；生产邮件投递适配仍未实现。
+当前状态：本地基础设施、浏览器认证 API，以及开发环境下的邀请/激活/修改密码/密码重置流程已完成；认证路由专用限流已接入，生产邮件投递适配仍未实现。
 
 - [x] 增加认证数据表和迁移：`0010_local_auth.sql`，并提供本地安全门控的 `make local-auth-status` / `make migrate-local-auth`；
 - [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 15–1024 字符策略；
 - [x] 实现 Session repository：只保存 SHA-256 Token hash，同时支持 idle/absolute expiry、touch 和撤销；
 - [x] 实现 CSRF 和严格 Origin 校验基础工具；
-- [ ] 实现认证专用限流；
+- [x] 实现认证专用限流：登录、激活、邀请、密码重置和修改密码使用独立上限；本地 Session 按 Cookie 指纹分桶；
 - [x] 实现开发环境下的邀请创建/撤销、邀请激活和修改密码接口；
 - [x] 实现开发环境下的密码重置请求/确认接口；
 - [ ] 实现 staging/production 邮件投递适配；

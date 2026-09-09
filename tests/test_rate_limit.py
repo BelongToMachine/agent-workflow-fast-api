@@ -3,12 +3,14 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from redis.exceptions import RedisError
+from starlette.requests import Request
 
 from app.core.config import Settings
 from app.core.rate_limit import (
     InMemoryRateLimiter,
     RateLimitMiddleware,
     RedisRateLimiter,
+    _client_key,
     _path_limit,
 )
 from app.main import app, create_app
@@ -42,9 +44,36 @@ def test_fractional_retry_after_rounds_up() -> None:
 
 
 def test_rate_limit_is_stricter_for_expensive_routes() -> None:
+    assert _path_limit("/api/v1/auth/password-reset/request", 120) == 10
+    assert _path_limit("/api/v1/auth/change-password", 120, auth_limit=7) == 7
+    assert _path_limit("/api/v1/admin/auth/invitations", 120) == 10
     assert _path_limit("/api/v1/chat", 120) == 20
     assert _path_limit("/api/v1/knowledge-bases/a/files", 120) == 30
     assert _path_limit("/api/v1/products", 120) == 120
+
+
+def test_local_session_cookie_is_part_of_rate_limit_key() -> None:
+    first = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/auth/change-password",
+        "headers": [(b"cookie", b"__Host-asianode_session=session-a")],
+        "query_string": b"",
+        "client": ("127.0.0.1", 1234),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    })
+    second = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/auth/change-password",
+        "headers": [(b"cookie", b"__Host-asianode_session=session-b")],
+        "query_string": b"",
+        "client": ("127.0.0.1", 1234),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    })
+    assert _client_key(first) != _client_key(second)
 
 
 class FakeRedis:

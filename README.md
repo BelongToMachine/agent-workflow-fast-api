@@ -217,6 +217,7 @@ Logto Bearer 回退）或 `AUTH_MODE=local_session`，前端使用 `VITE_AUTH_MO
 前端请求会携带 HttpOnly `__Host-asianode_session` Cookie，并自动获取 CSRF Token；本地开发
 已经支持管理员创建/撤销邀请、邀请激活、密码重置和修改密码，开发环境响应会返回一次性激活/重置链接。
 生产环境仍需配置邮件投递适配器；前端本地 Session 的激活、忘记密码、重置密码和修改密码页面已接入。
+认证路由使用独立的 `AUTH_RATE_LIMIT_REQUESTS` 限额，普通业务继续使用 `RATE_LIMIT_REQUESTS`。
 旧 Logto 用户不迁移，新账号从零创建。
 不要在没有完成初始账号 provisioning、邮件投递和回滚演练前把 staging/production 切换到
 `local_session`。

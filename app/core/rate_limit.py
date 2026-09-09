@@ -14,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response
 
 from app.core.config import get_settings
+from app.core.sessions import SESSION_COOKIE_NAME
 
 
 class InMemoryRateLimiter:
@@ -78,12 +79,21 @@ def _client_key(request: Request) -> str:
     host = request.client.host if request.client else "unknown"
     authorization = request.headers.get("authorization", "")
     token_fingerprint = hashlib.sha256(authorization.encode("utf-8")).hexdigest()[:16]
-    return f"{host}:{token_fingerprint}:{request.method}:{request.url.path}"
+    session = request.cookies.get(SESSION_COOKIE_NAME, "")
+    session_fingerprint = hashlib.sha256(session.encode("utf-8")).hexdigest()[:16]
+    return f"{host}:{token_fingerprint}:{session_fingerprint}:{request.method}:{request.url.path}"
 
 
-def _path_limit(path: str, default_limit: int) -> int:
-    if path in {"/api/v1/auth/bootstrap", "/api/v1/auth/login"}:
-        return min(default_limit, 10)
+def _path_limit(path: str, default_limit: int, auth_limit: int = 10) -> int:
+    if path in {
+        "/api/v1/auth/activate",
+        "/api/v1/auth/bootstrap",
+        "/api/v1/auth/change-password",
+        "/api/v1/auth/login",
+        "/api/v1/auth/password-reset/confirm",
+        "/api/v1/auth/password-reset/request",
+    } or path.startswith("/api/v1/admin/auth/invitations"):
+        return min(default_limit, auth_limit)
     if path == "/api/v1/chat":
         return min(default_limit, 20)
     if "/files" in path:
@@ -156,7 +166,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in {"/api/v1/healthz", "/api/v1/docs", "/api/v1/openapi.json"}:
             return await call_next(request)
 
-        limit = _path_limit(request.url.path, self.limit)
+        limit = _path_limit(
+            request.url.path,
+            self.limit,
+            auth_limit=settings.auth_rate_limit_requests,
+        )
         allowed, remaining, retry_after = await self._check_limit(
             _client_key(request),
             limit=limit,
