@@ -215,8 +215,9 @@ Redis fixed-window counter，可在多个 FastAPI 实例之间共享；Redis 暂
 本地 Session 认证目前可以显式启用进行本地开发验证。后端使用 `AUTH_MODE=dual`（保留
 Logto Bearer 回退）或 `AUTH_MODE=local_session`，前端使用 `VITE_AUTH_MODE=local_session`。
 前端请求会携带 HttpOnly `__Host-asianode_session` Cookie，并自动获取 CSRF Token；本地开发
-已经支持管理员创建/撤销邀请、邀请激活和修改密码，开发环境响应会返回一次性激活链接。密码
-重置、生产邮件投递适配和前端激活/修改密码页面仍未完成。旧 Logto 用户不迁移，新账号从零创建。
+已经支持管理员创建/撤销邀请、邀请激活、密码重置和修改密码，开发环境响应会返回一次性激活/重置链接。
+生产环境仍需配置邮件投递适配器；前端本地 Session 的激活、忘记密码、重置密码和修改密码页面已接入。
+旧 Logto 用户不迁移，新账号从零创建。
 不要在没有完成初始账号 provisioning、邮件投递和回滚演练前把 staging/production 切换到
 `local_session`。
 

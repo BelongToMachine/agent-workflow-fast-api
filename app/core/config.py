@@ -140,6 +140,15 @@ class Settings(BaseSettings):
             "ASIANODE_AUTH_INVITATION_TTL_SECONDS",
         ),
     )
+    auth_password_reset_ttl_seconds: int = Field(
+        default=60 * 60,
+        ge=15 * 60,
+        le=24 * 60 * 60,
+        validation_alias=AliasChoices(
+            "AUTH_PASSWORD_RESET_TTL_SECONDS",
+            "ASIANODE_AUTH_PASSWORD_RESET_TTL_SECONDS",
+        ),
+    )
     auth_required: bool = Field(
         default=False,
         validation_alias=AliasChoices("AUTH_REQUIRED", "ASIANODE_AUTH_REQUIRED"),

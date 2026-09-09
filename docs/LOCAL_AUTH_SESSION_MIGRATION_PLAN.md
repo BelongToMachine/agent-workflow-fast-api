@@ -454,7 +454,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 1：新增本地认证基础设施
 
-当前状态：本地基础设施、浏览器认证 API，以及开发环境下的邀请/激活/修改密码后端流程已完成；密码重置、生产邮件投递和前端账号生命周期页面尚未实现。
+当前状态：本地基础设施、浏览器认证 API，以及开发环境下的邀请/激活/修改密码/密码重置流程已完成；生产邮件投递适配仍未实现。
 
 - [x] 增加认证数据表和迁移：`0010_local_auth.sql`，并提供本地安全门控的 `make local-auth-status` / `make migrate-local-auth`；
 - [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 15–1024 字符策略；
@@ -462,7 +462,8 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 实现 CSRF 和严格 Origin 校验基础工具；
 - [ ] 实现认证专用限流；
 - [x] 实现开发环境下的邀请创建/撤销、邀请激活和修改密码接口；
-- [ ] 实现密码重置接口和 staging/production 邮件投递适配；
+- [x] 实现开发环境下的密码重置请求/确认接口；
+- [ ] 实现 staging/production 邮件投递适配；
 - [x] 实现 CSRF、登录、登出和当前 Session 查询接口；
 - [x] 保留现有 Logto Bearer 路径，本轮未改变当前认证行为。
 
@@ -486,7 +487,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 ### 阶段 3：前端切换到本地 Session
 
 - [x] 实现真实登录表单；
-- 实现激活、忘记密码、重置密码和修改密码页面；
+- [x] 实现激活、忘记密码、重置密码和修改密码页面（开发环境）；
 - [x] 所有 FastAPI 请求增加 `credentials: "include"`；
 - [x] 写请求增加 `X-CSRF-Token`；
 - [x] 认证状态改为读取 `/api/v1/auth/session` 和 `/api/v1/me`；
@@ -494,7 +495,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 403 保持现有 suspended 和 workspace pending UX；
 - 停止在生产浏览器中获取 Logto Access Token。
 
-当前状态：本地 Session 登录、Cookie 请求、CSRF 注入和前端会话守卫已接入，完整账号生命周期仍在后续工作中。
+当前状态：本地 Session 登录、Cookie 请求、CSRF 注入、邀请激活、密码重置/修改和前端会话守卫已接入；生产环境仍需邮件投递、限流和闭环验收。
 
 完成条件：Vercel 生产域名通过 Cloudflare Tunnel API 完成登录、刷新、业务请求和登出闭环。
 
@@ -610,7 +611,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 - `src/App.jsx`
   - 登录表单调用真实 FastAPI API；
   - 删除公开 `/register`，保留邀请 `/activate`；
-  - 增加忘记密码、重置密码和修改密码页面；
+  - [x] 增加忘记密码、重置密码和修改密码页面（开发环境）；
   - 删除 Logto Provider 和 `/callback`。
 
 开发环境可以保留独立的测试登录入口，但必须与生产构建隔离，生产环境不得接受开发 Token。
