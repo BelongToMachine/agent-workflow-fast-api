@@ -47,6 +47,7 @@ def dev_settings():
         environment="development",
         auth_secret="code-secret",
         dev_oidc_internal_secret="bridge-secret",
+        auth_mode="dual",
     )
     app.dependency_overrides[get_settings] = lambda: settings
     yield settings

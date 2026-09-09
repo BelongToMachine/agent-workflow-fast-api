@@ -2,12 +2,12 @@
 
 ## 1. 文档状态
 
-- 状态：阶段 0 预检部分完成；本地 Session 双轨路径和开发环境下的邀请/激活/修改密码后端已接入，生产尚未切换
+- 状态：前端已固定为本地 Session；后端默认值已切换为 `local_session`，生产环境尚未重新部署
 - 目标前端：`asianodeagent-front`（React + Vite，部署于 Vercel）
 - 目标后端：`asianode-fastapi`（FastAPI，部署于阿里云 VPS）
 - 生产前端域名：`https://copilot.asianodeatlas.com`
 - 生产 API 域名：`https://api.asianodeatlas.com`
-- 当前认证提供方：Logto OIDC
+- 当前认证提供方：FastAPI 本地账号密码 + HttpOnly Session Cookie
 - 目标认证方式：本地账号密码 + FastAPI 服务端不透明 Session Cookie
 - 迁移决策（2026-09-08）：放弃现有 Logto 用户及历史身份映射，不执行用户迁移；新系统从零创建本地账号。旧账号不保证能够访问历史业务数据，旧数据的物理删除另行决定。
 
@@ -15,7 +15,7 @@
 
 ## 2. 核心结论
 
-当前系统只有一个第一方 Vite 前端和一个第一方 FastAPI，因此不建议在业务系统中自行实现完整 OIDC Provider。
+当前系统只有一个第一方 Vite 前端和一个第一方 FastAPI，因此不建议在业务系统中自行实现完整 OIDC Provider。这里的本地 Session 是服务端会话认证，不是 OIDC Provider。
 
 OIDC 是建立在 OAuth 2.0 之上的身份协议。自行实现 OIDC Provider 不只是增加账号密码表，还必须正确实现：
 
@@ -442,7 +442,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 0：生产预检与回滚准备
 
-当前状态：预检已在本地开发配置完成一部分；生产数据库备份和恢复演练尚未执行。用户迁移已经取消，因此用户映射导出、联系确认和重复邮箱清理不再是本计划任务。`AUTH_MODE` 已加入配置，默认值为 `logto`，本阶段不会改变现有 Logto 行为。
+当前状态：预检已在本地开发配置完成一部分；生产数据库备份和恢复演练尚未执行。用户迁移已经取消，因此用户映射导出、联系确认和重复邮箱清理不再是本计划任务。`AUTH_MODE` 默认值现为 `local_session`；`logto`/`dual` 仅保留为显式迁移回滚模式。
 
 - [ ] 备份 PostgreSQL；
 - [x] 记录用户迁移取消决策：旧 Logto 用户、`ExternalIdentity` 关联和历史身份映射不迁移，新账号从零创建；
@@ -451,13 +451,13 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 记录本地开发认证环境变量名（只记录名称，不记录值）：`AUTH_MODE`、`AUTH_REQUIRED`、`AUTH_ISSUER`、`AUTH_AUDIENCE`、`AUTH_JWKS_URL`、`AUTH_ALGORITHMS`；生产 Vercel/VPS 环境暂不处理；
 - [x] 建立开发环境受控 provisioning 命令，用于创建首个本地 workspace owner；生产 provisioning 仍需接入密钥管理/人工审批；
 - [ ] 验证回滚镜像和数据库恢复流程；
-- [x] 建立迁移 feature flag：`AUTH_MODE=logto|dual|local_session`，默认 `logto`，当前阶段仅完成配置校验，尚未切换认证路径。
+- [x] 建立迁移 feature flag：`AUTH_MODE=logto|dual|local_session`，默认 `local_session`；`logto`/`dual` 仅作为显式兼容模式。
 
 完成条件：数据库可恢复，首批本地账号创建方案明确，认证切换可以回滚。
 
 ### 阶段 1：新增本地认证基础设施
 
-当前状态：本地基础设施、浏览器认证 API，以及手动邀请链接/激活/修改密码/密码重置流程已完成；认证路由专用限流已接入。邮件投递不属于本计划，管理员负责通过受控私密渠道分享链接。
+当前状态：本地基础设施、浏览器认证 API，以及手动邀请链接/激活/修改密码流程已完成；密码重置前端暂时禁用，忘记密码的用户需联系管理员；认证路由专用限流已接入。邮件投递不属于本计划，管理员负责通过受控私密渠道分享链接。
 
 - [x] 增加认证数据表和迁移：`0010_local_auth.sql`，并提供本地安全门控的 `make local-auth-status` / `make migrate-local-auth`；
 - [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 12–1024 字符策略；
@@ -491,7 +491,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 ### 阶段 3：前端切换到本地 Session
 
 - [x] 实现真实登录表单；
-- [x] 实现激活、忘记密码、重置密码和修改密码页面（开发环境）；
+- [x] 实现激活和修改密码页面；忘记密码/重置密码前端暂时禁用，统一提示联系管理员；
 - [x] 在管理员权限页面提供非技术化的邀请表单：输入邮箱和角色，生成并复制一次性激活链接；
 - [x] 在管理员权限页面显示邀请状态，并支持重新生成或撤销未使用链接；
 - [x] 所有 FastAPI 请求增加 `credentials: "include"`；
@@ -499,9 +499,9 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 认证状态改为读取 `/api/v1/auth/session` 和 `/api/v1/me`；
 - [x] 401 清空前端用户缓存并跳转 `/login`；
 - [x] 403 保持现有 suspended 和 workspace pending UX；
-- 停止在生产浏览器中获取 Logto Access Token。
+- [x] 停止在浏览器中获取 Logto Access Token。
 
-当前状态：本地 Session 登录、Cookie 请求、CSRF 注入、邀请链接生成/复制/重新生成/撤销、邀请激活、密码重置/修改和前端会话守卫已接入；生产环境仍需限流和闭环验收。
+当前状态：本地 Session 登录、Cookie 请求、CSRF 注入、邀请链接生成/复制/重新生成/撤销、邀请激活、密码修改和前端会话守卫已接入；忘记密码/重置密码前端暂时禁用并提示联系管理员；生产环境仍需限流和闭环验收。
 
 完成条件：Vercel 生产域名通过 Cloudflare Tunnel API 完成登录、刷新、业务请求和登出闭环。
 
@@ -517,8 +517,8 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 5：生产切换
 
-- 将后端切换到 `AUTH_MODE=local_session`；
-- 前端移除 Logto Provider 和回调路由；
+- [x] 将代码默认认证模式切换到 `AUTH_MODE=local_session`（VPS/Vercel 环境变量仍需单独确认）；
+- [x] 前端移除 Logto Provider、开发 OIDC 控制台、认证模式切换器和回调路由；
 - 在切换前通过受控 provisioning 或邀请流程创建首批本地管理员和员工账号；
 - 生产 Smoke Test；
 - 观察 401、403、429、登录失败和 Session 错误指标；
@@ -528,11 +528,11 @@ Argon2id 验证（未知用户执行 dummy hash）
 
 ### 阶段 6：Logto 清理
 
-回滚窗口结束后再执行：
+前端侧的清理项已在本次代码收敛中完成；后端 Logto Bearer/JWKS 兼容路径仍保留，待生产回滚窗口结束后再删除：
 
-- 删除前端 Logto SDK；
-- 删除前端 Logto 配置、Token bridge 和浏览器缓存清理代码；
-- 删除 `/callback`；
+- [x] 删除前端 Logto SDK；
+- [x] 删除前端 Logto 配置、Token bridge、浏览器缓存清理代码和开发 OIDC 控制台；
+- [x] 删除前端 `/callback` 路由；
 - 删除 `/auth/bootstrap`；
 - 删除后端 JWKS、issuer、audience 和外部 principal 验证逻辑；
 - 删除 VPS 和 Vercel 的 `VITE_LOGTO_*`、`AUTH_ISSUER`、`AUTH_AUDIENCE`、`AUTH_JWKS_URL`；
@@ -617,7 +617,7 @@ Argon2id 验证（未知用户执行 dummy hash）
 - `src/App.jsx`
   - 登录表单调用真实 FastAPI API；
   - 删除公开 `/register`，保留邀请 `/activate`；
-  - [x] 增加忘记密码、重置密码和修改密码页面（开发环境）；
+  - [x] 增加修改密码页面（开发环境）；忘记密码/重置密码前端暂时禁用并提示联系管理员；
   - 删除 Logto Provider 和 `/callback`。
 
 开发环境可以保留独立的测试登录入口，但必须与生产构建隔离，生产环境不得接受开发 Token。

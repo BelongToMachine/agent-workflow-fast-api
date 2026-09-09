@@ -120,7 +120,7 @@ async def _provision(
         print("Refusing local-admin provisioning outside ENVIRONMENT=development.")
         return 1
     if settings.auth_mode not in {"dual", "local_session"}:
-        print("Set AUTH_MODE=dual or AUTH_MODE=local_session before provisioning.")
+        print("Set AUTH_MODE=local_session before provisioning.")
         return 1
 
     normalized_email = normalize_email(email)

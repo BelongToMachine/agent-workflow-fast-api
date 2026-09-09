@@ -16,6 +16,7 @@ def test_missing_bearer_token_uses_a_structured_error_contract() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
         environment="production",
         auth_required=True,
+        auth_mode="logto",
     )
     try:
         response = client.get("/api/v1/me")

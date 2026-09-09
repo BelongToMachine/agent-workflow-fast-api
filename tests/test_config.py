@@ -37,10 +37,10 @@ def test_single_workspace_mode_is_enabled_by_default() -> None:
     assert settings.single_workspace_mode is True
 
 
-def test_auth_mode_defaults_to_logto_during_migration() -> None:
+def test_auth_mode_defaults_to_local_session() -> None:
     settings = Settings()
 
-    assert settings.auth_mode == "logto"
+    assert settings.auth_mode == "local_session"
 
 
 @pytest.mark.parametrize("auth_mode", ["logto", "dual", "local_session"])
@@ -65,6 +65,7 @@ def test_session_timeout_defaults_are_bounded_for_browser_sessions() -> None:
 
 def test_production_runtime_settings_reject_missing_identity_configuration() -> None:
     settings = _production_settings(
+        auth_mode="logto",
         auth_issuer=None,
         auth_audience=None,
         auth_secret=None,
@@ -74,8 +75,8 @@ def test_production_runtime_settings_reject_missing_identity_configuration() -> 
         validate_runtime_settings(settings)
 
     message = str(error.value)
-    assert "AUTH_ISSUER is required" in message
-    assert "AUTH_AUDIENCE is required" in message
+    assert "AUTH_ISSUER is required for Logto/dual mode" in message
+    assert "AUTH_AUDIENCE is required for Logto/dual mode" in message
     assert "AUTH_SECRET must be at least 32 characters" in message
 
 
@@ -93,8 +94,19 @@ def test_production_runtime_settings_reject_insecure_cors_and_disabled_rate_limi
 
 
 def test_app_factory_fails_before_starting_with_unsafe_production_settings(monkeypatch) -> None:
-    settings = _production_settings(auth_issuer=None)
+    settings = _production_settings(auth_mode="logto", auth_issuer=None)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
     with pytest.raises(SettingsConfigurationError, match="AUTH_ISSUER"):
         create_app()
+
+
+def test_local_session_production_does_not_require_logto_configuration() -> None:
+    settings = _production_settings(
+        auth_mode="local_session",
+        auth_issuer=None,
+        auth_audience=None,
+        auth_algorithms="",
+    )
+
+    validate_runtime_settings(settings)

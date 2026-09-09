@@ -94,7 +94,7 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 - 知识库授权列表：`GET http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants?workspace_id={workspace_id}`
 - 知识库授权新增/更新：`PUT http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants?workspace_id={workspace_id}`
 - 知识库授权删除：`DELETE http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants/{grant_id}?workspace_id={workspace_id}`
-- 本地 Mock OIDC consent：`POST http://127.0.0.1:8000/api/v1/dev/oidc/consent`
+- 旧本地 Mock OIDC consent：`POST http://127.0.0.1:8000/api/v1/dev/oidc/consent`（仅后端迁移兼容，浏览器端已停用）
 - 聊天接口：`POST http://127.0.0.1:8000/api/v1/chat`
 - Chat Stream 恢复：`GET http://127.0.0.1:8000/api/v1/chat/{chat_id}/stream?workspace_id={workspace_id}`
 - 独立 Agent 查询：`POST http://127.0.0.1:8000/api/v1/agents/query?workspace_id={workspace_id}`
@@ -204,46 +204,24 @@ Redis fixed-window counter，可在多个 FastAPI 实例之间共享；Redis 暂
 
 ## 当前认证行为
 
-商品、内容和聊天接口都经过统一的 Bearer Token 依赖：
+商品、内容和聊天接口都经过统一的 FastAPI 本地 Session 依赖：
 
-- `development` 环境且 `AUTH_REQUIRED=false` 时，未携带 Token 会使用明确标记的 `development-user`，方便本地开发；聊天和 history 会落到本地数据库中的开发用户与默认 workspace。
-- 开发 direct token 的 subject 会在 FastAPI 内部映射为稳定的本地 UUID，并按 workspace 创建开发用户/member 记录；前端不需要传可信的 user id。
-- `staging` 和 `production` 环境默认要求 Token；即使没有显式设置 `AUTH_REQUIRED` 也不会允许匿名访问。
-- 配置 `AUTH_ISSUER`、`AUTH_AUDIENCE` 和 `AUTH_JWKS_URL` 后，FastAPI 会校验 JWT 签名、`kid`、issuer、audience、过期时间和 `sub`。
-- FastAPI 不接受浏览器提交的 user、role 或 workspace 身份字段；生产环境只接受经 Logto OIDC 验证的 Bearer access token。
-
-本地 Session 认证目前可以显式启用进行本地开发验证。后端使用 `AUTH_MODE=dual`（保留
-Logto Bearer 回退）或 `AUTH_MODE=local_session`，前端使用 `VITE_AUTH_MODE=local_session`。
-前端请求会携带 HttpOnly `__Host-asianode_session` Cookie，并自动获取 CSRF Token；本地开发
-已经支持管理员创建/撤销邀请、邀请激活、密码重置和修改密码，开发环境响应会返回一次性激活/重置链接。
-生产环境仍需配置邮件投递适配器；前端本地 Session 的激活、忘记密码、重置密码和修改密码页面已接入。
+- 所有环境的浏览器端认证都使用 FastAPI 本地账号、HttpOnly `__Host-asianode_session` Cookie 和 CSRF Token。
+- `AUTH_MODE=local_session` 是默认模式；`AUTH_MODE=dual` 或 `AUTH_MODE=logto` 仅作为显式迁移回滚选项。
+- 本地账号密码使用 Argon2id 校验；管理员通过一次性邀请链接创建员工账号，用户可以在登录后修改密码。
+- FastAPI 不接受浏览器提交的 user、role 或 workspace 身份字段，最终权限始终由服务端的 User、WorkspaceMember 和 permission override 决定。
 认证路由使用独立的 `AUTH_RATE_LIMIT_REQUESTS` 限额，普通业务继续使用 `RATE_LIMIT_REQUESTS`。
 旧 Logto 用户不迁移，新账号从零创建。
 
-本地开发首次创建管理员前，先确保 `AUTH_MODE=dual` 或 `AUTH_MODE=local_session`，再运行：
+本地开发首次创建管理员前，确保 `AUTH_MODE=local_session`，再运行：
 
 ```bash
 make provision-local-admin EMAIL=owner@example.com NAME="Workspace Owner"
 ```
 
 命令会先做 workspace 和邮箱预检，再交互式读取密码；只允许 `ENVIRONMENT=development`，不会把密码放在命令行参数中。
-不要在没有完成初始账号 provisioning、邮件投递和回滚演练前把 staging/production 切换到
-`local_session`。
-
-本地开发认证使用 FastAPI `/api/v1/dev/oidc/token` 签发 5 分钟 direct token；该接口仅在
-`ENVIRONMENT=development` 时启用，生产环境会关闭。
-
-如果要使用单独的开发 OIDC 内部密钥，在 `asianodeagent-front/.env.local` 和 `asianode-fastapi/.env.local` 中同时设置：
-
-```env
-DEV_OIDC_INTERNAL_SECRET=your-local-development-secret
-```
-
-未设置时，本地会回退到 `AUTH_SECRET`；生产/staging 环境会直接关闭该 dev endpoint。
-
-FastAPI 不再接受 NextAuth bridge 或 `x-asianode-auth-*` header。成员管理和知识库授权接口
-统一要求 Bearer access token，并由 FastAPI 根据本地 User、WorkspaceMember 和 permission
-override 完成最终授权。
+旧的 `/api/v1/dev/oidc/*` 接口和 `DEV_OIDC_INTERNAL_SECRET` 仅为后端迁移回滚保留，前端不再
+调用它们，也不会在浏览器中保存或发送 direct token。
 
 聊天历史和 AI SDK 的 chat stream 恢复在 `USE_FASTAPI_BACKEND=1` 时也通过 Next.js BFF 转发到 FastAPI。FastAPI 会同时
 校验 `chat.read`/`chat.delete`、当前用户和 workspace；分页 cursor 只能引用当前用户在

@@ -149,6 +149,7 @@ def test_real_access_token_is_resolved_to_local_identity(monkeypatch) -> None:
     settings = Settings(
         environment="production",
         auth_required=True,
+        auth_mode="logto",
         auth_issuer="https://tenant.logto.app/oidc",
         auth_audience="https://api.asianode.example.com",
     )
@@ -188,6 +189,7 @@ def test_uninitialized_real_access_token_returns_structured_forbidden(monkeypatc
     settings = Settings(
         environment="production",
         auth_required=True,
+        auth_mode="logto",
         auth_issuer="https://tenant.logto.app/oidc",
         auth_audience="https://api.asianode.example.com",
     )

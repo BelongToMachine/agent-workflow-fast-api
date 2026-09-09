@@ -94,7 +94,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CORS_ORIGINS", "ASIANODE_CORS_ORIGINS"),
     )
     auth_mode: Literal["logto", "dual", "local_session"] = Field(
-        default="logto",
+        default="local_session",
         validation_alias=AliasChoices("AUTH_MODE", "ASIANODE_AUTH_MODE"),
     )
     session_idle_timeout_seconds: int = Field(
@@ -424,16 +424,17 @@ def validate_runtime_settings(settings: Settings) -> None:
     errors: list[str] = []
     if settings.debug:
         errors.append("DEBUG must be false")
-    if not settings.auth_issuer:
-        errors.append("AUTH_ISSUER is required")
-    elif not settings.auth_issuer.lower().startswith("https://"):
-        errors.append("AUTH_ISSUER must use HTTPS")
-    if not settings.auth_audience or not settings.auth_audience.strip():
-        errors.append("AUTH_AUDIENCE is required")
+    if settings.auth_mode in {"logto", "dual"}:
+        if not settings.auth_issuer:
+            errors.append("AUTH_ISSUER is required for Logto/dual mode")
+        elif not settings.auth_issuer.lower().startswith("https://"):
+            errors.append("AUTH_ISSUER must use HTTPS")
+        if not settings.auth_audience or not settings.auth_audience.strip():
+            errors.append("AUTH_AUDIENCE is required for Logto/dual mode")
     if not settings.auth_secret or len(settings.auth_secret) < 32:
         errors.append("AUTH_SECRET must be at least 32 characters")
-    if not settings.auth_algorithms.strip():
-        errors.append("AUTH_ALGORITHMS must not be empty")
+    if settings.auth_mode in {"logto", "dual"} and not settings.auth_algorithms.strip():
+        errors.append("AUTH_ALGORITHMS must not be empty for Logto/dual mode")
 
     origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
     if not origins or "*" in origins:
