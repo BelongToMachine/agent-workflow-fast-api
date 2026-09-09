@@ -30,6 +30,12 @@ import { KnowledgeBaseGrants } from "./components/settings/knowledgeBaseGrants";
 import { MemberPermissions } from "./components/settings/memberPermissions";
 import { FastApiConnectionTest } from "./components/fastapiConnectionTest";
 import { DevOidcConsole } from "./components/auth/devOidcConsole";
+import {
+  LocalActivationPage,
+  LocalChangePasswordPage,
+  LocalPasswordResetPage,
+  LocalPasswordResetRequestPage,
+} from "./components/auth/localAccountPages";
 import { Link, useLocationSearch, usePathname, useRouter } from "./lib/router";
 
 function AuthGuard({ children }) {
@@ -38,8 +44,11 @@ function AuthGuard({ children }) {
 
   const isPublicAuthRoute =
     pathname === "/callback" ||
+    pathname === "/activate" ||
+    pathname === "/forgot-password" ||
     pathname === "/login" ||
     pathname === "/register" ||
+    pathname === "/reset-password" ||
     pathname === "/dev/oidc";
 
   if (!import.meta.env.DEV && !isLogtoConfigured && !isLocalSessionAuthMode) {
@@ -176,6 +185,14 @@ function ChatLayout() {
             <Route
               element={<SettingsPage title="FastAPI connection"><FastApiConnectionTest /></SettingsPage>}
               path="fastapi-test"
+            />
+            <Route
+              element={
+                <SettingsPage title="Change password">
+                  <LocalChangePasswordPage />
+                </SettingsPage>
+              }
+              path="settings/password"
             />
             <Route element={<Navigate replace to="/" />} path="*" />
           </Routes>
@@ -582,6 +599,12 @@ function LocalSessionAuthPage({ mode }) {
               >
                 {isSubmitting ? "Signing in…" : "Sign in"}
               </button>
+              <Link
+                className="self-end text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                href="/forgot-password"
+              >
+                Forgot password?
+              </Link>
             </form>
           ) : null}
           {isLogin ? (
@@ -655,6 +678,9 @@ function App() {
             path="/dev/oidc"
           />
           <Route element={<LogtoCallbackPage />} path="/callback" />
+          <Route element={<LocalActivationPage />} path="/activate" />
+          <Route element={<LocalPasswordResetRequestPage />} path="/forgot-password" />
+          <Route element={<LocalPasswordResetPage />} path="/reset-password" />
           <Route element={<WorkspaceAccessPendingPage />} path="/access-pending" />
           <Route element={<AccountSuspendedPage />} path="/account-suspended" />
           <Route element={<ForbiddenPage />} path="/forbidden" />
