@@ -461,7 +461,8 @@ Argon2id 验证（未知用户执行 dummy hash）
 - [x] 引入 Argon2id 库：使用 `pwdlib[argon2]`，执行 NFC 规范化和 15–1024 字符策略；
 - [x] 实现 Session repository：只保存 SHA-256 Token hash，同时支持 idle/absolute expiry、touch 和撤销；
 - [x] 实现 CSRF 和严格 Origin 校验基础工具；
-- [x] 实现认证专用限流：登录、激活、邀请、密码重置和修改密码使用独立上限；本地 Session 按 Cookie 指纹分桶；
+- [x] 实现基础认证路由专用限流：登录、激活、邀请、密码重置和修改密码使用独立上限；本地 Session 按 Cookie 指纹分桶；
+- [ ] 增加邮箱维度冷却，并在 Cloudflare/Tunnel 代理链路确定可信的真实客户端地址；
 - [x] 实现开发环境下的邀请创建/撤销、邀请激活和修改密码接口；
 - [x] 实现开发环境下的密码重置请求/确认接口；
 - [ ] 实现 staging/production 邮件投递适配；
