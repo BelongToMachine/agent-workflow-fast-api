@@ -80,8 +80,8 @@ export function LocalActivationPage() {
       setErrorMessage("The passwords do not match.");
       return;
     }
-    if (password.length < 15) {
-      setErrorMessage("Use at least 15 characters for your password.");
+    if (password.length < 12) {
+      setErrorMessage("Use at least 12 characters for your password.");
       return;
     }
 
@@ -123,7 +123,7 @@ export function LocalActivationPage() {
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            minLength={15}
+            minLength={12}
             onChange={(event) => setPassword(event.target.value)}
             required
             type="password"
@@ -135,7 +135,7 @@ export function LocalActivationPage() {
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            minLength={15}
+            minLength={12}
             onChange={(event) => setConfirmation(event.target.value)}
             required
             type="password"
@@ -182,8 +182,8 @@ export function LocalChangePasswordPage() {
       setErrorMessage("The passwords do not match.");
       return;
     }
-    if (newPassword.length < 15) {
-      setErrorMessage("Use at least 15 characters for your password.");
+    if (newPassword.length < 12) {
+      setErrorMessage("Use at least 12 characters for your password.");
       return;
     }
 
@@ -210,7 +210,7 @@ export function LocalChangePasswordPage() {
     <LocalAccountShell eyebrow="Account security">
       <h1 className="mt-3 text-2xl font-semibold tracking-tight">Change password</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Use a new password with at least 15 characters.
+        Use a new password with at least 12 characters.
       </p>
       <form className="mt-8 flex flex-col gap-4" onSubmit={handleSubmit}>
         <FormMessage error>{errorMessage}</FormMessage>
@@ -231,7 +231,7 @@ export function LocalChangePasswordPage() {
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            minLength={15}
+            minLength={12}
             onChange={(event) => setNewPassword(event.target.value)}
             required
             type="password"
@@ -243,7 +243,7 @@ export function LocalChangePasswordPage() {
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            minLength={15}
+            minLength={12}
             onChange={(event) => setConfirmation(event.target.value)}
             required
             type="password"
@@ -370,8 +370,8 @@ export function LocalPasswordResetPage() {
       setErrorMessage("The passwords do not match.");
       return;
     }
-    if (newPassword.length < 15) {
-      setErrorMessage("Use at least 15 characters for your password.");
+    if (newPassword.length < 12) {
+      setErrorMessage("Use at least 12 characters for your password.");
       return;
     }
 
@@ -395,7 +395,7 @@ export function LocalPasswordResetPage() {
     <LocalAccountShell eyebrow="Account recovery">
       <h1 className="mt-3 text-2xl font-semibold tracking-tight">Reset password</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Choose a new password with at least 15 characters.
+        Choose a new password with at least 12 characters.
       </p>
       <form className="mt-8 flex flex-col gap-4" onSubmit={handleSubmit}>
         <FormMessage error>{errorMessage}</FormMessage>
@@ -404,7 +404,7 @@ export function LocalPasswordResetPage() {
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            minLength={15}
+            minLength={12}
             onChange={(event) => setNewPassword(event.target.value)}
             required
             type="password"
@@ -416,7 +416,7 @@ export function LocalPasswordResetPage() {
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            minLength={15}
+            minLength={12}
             onChange={(event) => setConfirmation(event.target.value)}
             required
             type="password"
