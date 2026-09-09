@@ -28,9 +28,15 @@ def test_password_hashes_use_argon2id_and_reject_mismatches() -> None:
     assert verify_password("a different password with enough length", password_hash) is False
 
 
-def test_password_policy_requires_at_least_fifteen_characters() -> None:
+def test_password_policy_requires_at_least_twelve_characters() -> None:
     with pytest.raises(PasswordPolicyError, match=str(MIN_PASSWORD_LENGTH)):
         hash_password("too short")
+
+
+def test_password_policy_accepts_twelve_characters() -> None:
+    password_hash = hash_password("a" * MIN_PASSWORD_LENGTH)
+
+    assert verify_password("a" * MIN_PASSWORD_LENGTH, password_hash) is True
 
 
 def test_verify_and_update_returns_no_replacement_for_current_parameters() -> None:

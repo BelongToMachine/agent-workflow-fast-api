@@ -5,7 +5,7 @@ from functools import lru_cache
 
 from pwdlib import PasswordHash
 
-MIN_PASSWORD_LENGTH = 15
+MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 1024
 
 
