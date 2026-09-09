@@ -28,6 +28,8 @@ export const backendQueryKeys = {
     ["backend", "user", identity, "members"] as const,
   accessCandidates: (identity: string) =>
     ["backend", "user", identity, "access-candidates"] as const,
+  invitations: (identity: string) =>
+    ["backend", "user", identity, "invitations"] as const,
   models: (identity: string) =>
     ["backend", "user", identity, "models"] as const,
 };

@@ -3,7 +3,10 @@ import { apiFetch } from "./directClient";
 export type BackendErrorPayload = {
   cause?: string;
   code?: string;
-  detail?: string | { msg?: string }[];
+  detail?:
+    | string
+    | { msg?: string }[]
+    | { code?: string; message?: string };
   message?: string;
   requestId?: string;
 };
@@ -19,7 +22,9 @@ export class BackendRequestError extends Error {
           .map((item) => item.msg)
           .filter(Boolean)
           .join(", ")
-      : payload?.detail;
+      : typeof payload?.detail === "object"
+        ? payload.detail.message
+        : payload?.detail;
     super(
       payload?.cause ??
         payload?.message ??
