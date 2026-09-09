@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Toaster } from "sonner";
 import { AppSidebar } from "./components/chat/appSidebar";
 import { ChatPage } from "./components/chat/chatPage";
@@ -11,16 +11,6 @@ import {
   ApplicationAuthProvider,
   useApplicationAuth,
 } from "./lib/auth/applicationAuth";
-import { useHandleSignInCallback, useLogto } from "@logto/react";
-import {
-  authMode,
-  canSwitchAuthMode,
-  isLogtoAuthMode,
-  isLogtoConfigured,
-  isLocalSessionAuthMode,
-  setAuthMode,
-} from "./lib/auth/logtoConfig";
-import { LogtoAppProvider } from "./lib/auth/logto";
 import { LocalAuthRequestError, signInWithLocalSession } from "./lib/auth/localSession";
 import { ThemeProvider } from "./components/themeProvider";
 import { TooltipProvider } from "./components/ui/tooltip";
@@ -29,35 +19,22 @@ import { KnowledgeBaseFiles } from "./components/settings/knowledgeBaseFiles";
 import { KnowledgeBaseGrants } from "./components/settings/knowledgeBaseGrants";
 import { MemberPermissions } from "./components/settings/memberPermissions";
 import { FastApiConnectionTest } from "./components/fastapiConnectionTest";
-import { DevOidcConsole } from "./components/auth/devOidcConsole";
 import {
   LocalActivationPage,
   LocalChangePasswordPage,
-  LocalPasswordResetPage,
-  LocalPasswordResetRequestPage,
 } from "./components/auth/localAccountPages";
-import { Link, useLocationSearch, usePathname, useRouter } from "./lib/router";
+import { Link, usePathname, useRouter } from "./lib/router";
 
 function AuthGuard({ children }) {
   const { status } = useSession();
   const pathname = usePathname();
 
   const isPublicAuthRoute =
-    pathname === "/callback" ||
     pathname === "/activate" ||
     pathname === "/forgot-password" ||
     pathname === "/login" ||
     pathname === "/register" ||
-    pathname === "/reset-password" ||
-    pathname === "/dev/oidc";
-
-  if (!import.meta.env.DEV && !isLogtoConfigured && !isLocalSessionAuthMode) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-sm text-destructive">
-        Sign-in is not configured for this deployment.
-      </div>
-    );
-  }
+    pathname === "/reset-password";
 
   if (isPublicAuthRoute) {
     return children;
@@ -72,7 +49,7 @@ function AuthGuard({ children }) {
   }
 
   if (status === "unauthenticated") {
-    return <Navigate replace to={isLogtoAuthMode || isLocalSessionAuthMode ? "/login" : "/dev/oidc"} />;
+    return <Navigate replace to="/login" />;
   }
 
   return children;
@@ -97,7 +74,7 @@ function ChatLayout() {
   }
 
   if (authStatus === "unauthenticated") {
-    return <Navigate replace to={isLogtoAuthMode || isLocalSessionAuthMode ? "/login" : "/dev/oidc"} />;
+    return <Navigate replace to="/login" />;
   }
 
   if (authStatus === "suspended") {
@@ -238,6 +215,25 @@ function AccountSuspendedPage() {
   );
 }
 
+function PasswordHelpPage() {
+  return (
+    <div className="flex min-h-dvh w-full items-center justify-center bg-background px-6 text-center">
+      <div className="max-w-md">
+        <h1 className="font-semibold text-xl">需要重置密码？</h1>
+        <p className="mt-2 text-muted-foreground text-sm leading-6">
+          如果忘记密码，请联系管理员。
+        </p>
+        <Link
+          className="mt-5 inline-flex rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+          href="/login"
+        >
+          返回登录
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function ForbiddenPage() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center">
@@ -293,217 +289,8 @@ function SettingsPage({ children, title }) {
   );
 }
 
-function LogtoCallbackPage() {
-  if (!isLogtoAuthMode) {
-    return <Navigate replace to={import.meta.env.DEV ? "/dev/oidc" : "/"} />;
-  }
-
-  return <ConfiguredLogtoCallbackPage />;
-}
-
-function ConfiguredLogtoCallbackPage() {
-  const router = useRouter();
-  const { refreshCurrentUser } = useApplicationAuth();
-  const { error, isAuthenticated, isLoading } = useHandleSignInCallback();
-  const [isBootstrapping, setIsBootstrapping] = useState(false);
-
-  useEffect(() => {
-    if (isLoading || !isAuthenticated) {
-      return;
-    }
-
-    let isActive = true;
-    setIsBootstrapping(true);
-    void refreshCurrentUser().finally(() => {
-      if (isActive) {
-        router.replace("/");
-      }
-    });
-
-    return () => {
-      isActive = false;
-    };
-  }, [isAuthenticated, isLoading, refreshCurrentUser, router]);
-
-  if (error) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-sm text-destructive">
-        Sign-in failed: {error.message}
-      </div>
-    );
-  }
-
-  if (!isLoading && !isAuthenticated) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-sm text-muted-foreground">
-        Sign-in was not completed. Please return to the login page.
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-sm text-muted-foreground">
-      {isBootstrapping ? "Setting up your account…" : "Completing sign-in…"}
-    </div>
-  );
-}
-
-function LogtoAuthPage({ mode }) {
-  const { error: logtoError, isLoading: isLogtoLoading, signIn } = useLogto();
-  const search = useLocationSearch();
-  const isRegister = mode === "register";
-  const isSessionExpired =
-    new URLSearchParams(search).get("reason") === "session_expired";
-  const [isStartingSignIn, setIsStartingSignIn] = useState(false);
-  const [signInError, setSignInError] = useState(false);
-
-  useEffect(() => {
-    if (logtoError) {
-      setIsStartingSignIn(false);
-      setSignInError(true);
-    }
-  }, [logtoError]);
-
-  function startSignIn(options = {}) {
-    setSignInError(false);
-    setIsStartingSignIn(true);
-    void signIn({
-      ...options,
-      postRedirectUri: `${window.location.origin}/`,
-      redirectUri: `${window.location.origin}/callback`,
-    });
-  }
-
-  function handleLogtoSignIn() {
-    startSignIn({
-      firstScreen: isRegister ? "register" : "sign_in",
-    });
-  }
-
-  const isSignInDisabled = isStartingSignIn || isLogtoLoading;
-
-  return (
-    <div className="flex min-h-dvh w-full bg-sidebar">
-      <div className="flex w-full flex-col bg-background p-8 md:p-16 xl:w-[600px] xl:shrink-0 xl:rounded-r-2xl xl:border-r xl:border-border/40">
-        <Link
-          className="flex w-fit items-center text-[13px] text-muted-foreground hover:text-foreground"
-          href="/"
-        >
-          ← Back
-        </Link>
-        <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {isRegister ? "Create account" : "Welcome back"}
-            </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {isRegister
-                ? "Create your account to get started."
-                : "Sign in to continue to your account."}
-            </p>
-          </div>
-          {isSessionExpired ? (
-            <div
-              aria-live="polite"
-              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-800 text-sm dark:text-amber-200"
-              role="status"
-            >
-              Your login session expired. Please sign in again to continue.
-            </div>
-          ) : null}
-          {signInError ? (
-            <div
-              aria-live="polite"
-              className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive text-sm"
-              role="alert"
-            >
-              We couldn&apos;t start sign-in. Please try again or use email.
-            </div>
-          ) : null}
-          <div className="flex flex-col gap-3">
-            <button
-              className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isSignInDisabled}
-              onClick={handleLogtoSignIn}
-              type="button"
-            >
-              Sign in or sign up
-            </button>
-          </div>
-          <p className="text-center text-xs leading-5 text-muted-foreground">
-            Use your email or a social account to continue.
-          </p>
-        </div>
-      </div>
-      <div className="hidden flex-1 overflow-hidden pl-12 pt-8 xl:block">
-        <Preview />
-      </div>
-    </div>
-  );
-}
-
 function AuthPage({ mode }) {
-  const router = useRouter();
-
-  if (isLogtoAuthMode) {
-    return <LogtoAuthPage mode={mode} />;
-  }
-
-  if (isLocalSessionAuthMode) {
-    return <LocalSessionAuthPage mode={mode} />;
-  }
-
-  const isLogin = mode === "login";
-
-  function handleSubmit(event) {
-    event.preventDefault();
-    router.push("/");
-  }
-
-  return (
-    <div className="flex min-h-dvh w-full bg-sidebar">
-      <div className="flex w-full flex-col bg-background p-8 md:p-16 xl:w-[600px] xl:shrink-0 xl:rounded-r-2xl xl:border-r xl:border-border/40">
-        <Link
-          className="flex w-fit items-center text-[13px] text-muted-foreground hover:text-foreground"
-          href="/"
-        >
-          ← Back
-        </Link>
-        <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {isLogin ? "Welcome back" : "Create account"}
-            </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {isLogin ? "Sign in to your account to continue" : "Get started for free"}
-            </p>
-          </div>
-          <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-            <label className="flex flex-col gap-2 text-sm font-medium">
-              Email
-              <input className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring" name="email" required type="email" />
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-medium">
-              Password
-              <input className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring" minLength={6} name="password" required type="password" />
-            </label>
-            <button className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90" type="submit">
-              {isLogin ? "Sign in" : "Sign up"}
-            </button>
-          </form>
-          <p className="text-center text-[13px] text-muted-foreground">
-            {isLogin ? "No account? " : "Have an account? "}
-            <Link className="text-foreground underline-offset-4 hover:underline" href={isLogin ? "/register" : "/login"}>
-              {isLogin ? "Sign up" : "Sign in"}
-            </Link>
-          </p>
-        </div>
-      </div>
-      <div className="hidden flex-1 overflow-hidden pl-12 pt-8 xl:block">
-        <Preview />
-      </div>
-    </div>
-  );
+  return <LocalSessionAuthPage mode={mode} />;
 }
 
 function LocalSessionAuthPage({ mode }) {
@@ -585,7 +372,7 @@ function LocalSessionAuthPage({ mode }) {
                 <input
                   autoComplete="current-password"
                   className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  minLength={15}
+                  minLength={12}
                   onChange={(event) => setPassword(event.target.value)}
                   required
                   type="password"
@@ -599,12 +386,9 @@ function LocalSessionAuthPage({ mode }) {
               >
                 {isSubmitting ? "Signing in…" : "Sign in"}
               </button>
-              <Link
-                className="self-end text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                href="/forgot-password"
-              >
-                Forgot password?
-              </Link>
+              <p className="text-center text-[13px] text-muted-foreground">
+                如果忘记密码，请联系管理员。
+              </p>
             </form>
           ) : null}
           {isLogin ? (
@@ -629,58 +413,14 @@ function LocalSessionAuthPage({ mode }) {
   );
 }
 
-function AuthModeSwitcher() {
-  if (!canSwitchAuthMode) {
-    return null;
-  }
-
-  const nextMode = authMode === "development" ? "preview" : "development";
-
-  return (
-    <div className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-lg border border-border/60 bg-background/95 p-2 text-xs shadow-lg backdrop-blur">
-      <span className="text-muted-foreground">
-        当前：
-        {authMode === "development"
-          ? "开发认证"
-          : authMode === "local_session"
-            ? "本地 Session"
-            : "Preview / Logto"}
-      </span>
-      <button
-        className="rounded-md border border-border px-2.5 py-1.5 font-medium text-foreground transition-colors hover:bg-muted"
-        onClick={() => setAuthMode(nextMode)}
-        type="button"
-      >
-        切换到{nextMode === "development" ? "开发" : "Preview"}
-      </button>
-      {!isLogtoConfigured && nextMode === "preview" ? (
-        <span className="text-amber-600 dark:text-amber-400">
-          需配置 Logto
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
 function App() {
   return (
     <BrowserRouter>
       <AuthGuard>
         <Routes>
-          <Route
-            element={
-              import.meta.env.DEV ? (
-                <DevOidcConsole />
-              ) : (
-                <Navigate replace to="/" />
-              )
-            }
-            path="/dev/oidc"
-          />
-          <Route element={<LogtoCallbackPage />} path="/callback" />
           <Route element={<LocalActivationPage />} path="/activate" />
-          <Route element={<LocalPasswordResetRequestPage />} path="/forgot-password" />
-          <Route element={<LocalPasswordResetPage />} path="/reset-password" />
+          <Route element={<PasswordHelpPage />} path="/forgot-password" />
+          <Route element={<PasswordHelpPage />} path="/reset-password" />
           <Route element={<WorkspaceAccessPendingPage />} path="/access-pending" />
           <Route element={<AccountSuspendedPage />} path="/account-suspended" />
           <Route element={<ForbiddenPage />} path="/forbidden" />
@@ -695,19 +435,16 @@ function App() {
 
 export default function AppRoot() {
   return (
-    <LogtoAppProvider>
-      <BackendQueryProvider>
-        <AuthProvider>
-          <ApplicationAuthProvider>
-            <AuthModeSwitcher />
-            <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-              <TooltipProvider>
-                <App />
-              </TooltipProvider>
-            </ThemeProvider>
-          </ApplicationAuthProvider>
-        </AuthProvider>
-      </BackendQueryProvider>
-    </LogtoAppProvider>
+    <BackendQueryProvider>
+      <AuthProvider>
+        <ApplicationAuthProvider>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            <TooltipProvider>
+              <App />
+            </TooltipProvider>
+          </ThemeProvider>
+        </ApplicationAuthProvider>
+      </AuthProvider>
+    </BackendQueryProvider>
   );
 }

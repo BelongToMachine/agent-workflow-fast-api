@@ -1,13 +1,9 @@
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
 import { Preview } from "../chat/preview";
-import { isLocalSessionAuthMode } from "../../lib/auth/logtoConfig";
 import {
   activateLocalInvitation,
   changeLocalPassword,
   LocalAuthRequestError,
-  requestLocalPasswordReset,
-  resetLocalPassword,
 } from "../../lib/auth/localSession";
 import { useSession } from "../../lib/auth";
 import { Link, useLocationSearch, useRouter } from "../../lib/router";
@@ -170,10 +166,6 @@ export function LocalChangePasswordPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isLocalSessionAuthMode) {
-    return <Navigate replace to="/login" />;
-  }
-
   async function handleSubmit(event) {
     event.preventDefault();
     setErrorMessage("");
@@ -267,175 +259,6 @@ export function LocalChangePasswordPage() {
           </button>
         </div>
       </form>
-    </LocalAccountShell>
-  );
-}
-
-export function LocalPasswordResetRequestPage() {
-  const [email, setEmail] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [infoMessage, setInfoMessage] = useState("");
-  const [resetUrl, setResetUrl] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-    setErrorMessage("");
-    setInfoMessage("");
-    setResetUrl("");
-    setIsSubmitting(true);
-    try {
-      const result = await requestLocalPasswordReset(email);
-      setInfoMessage(
-        "If an active local account uses this email, a password reset link has been created."
-      );
-      if (result.resetUrl) {
-        setResetUrl(result.resetUrl);
-      }
-    } catch (error) {
-      setErrorMessage(
-        error instanceof LocalAuthRequestError && error.status === 503
-          ? "Password reset email delivery is not configured yet."
-          : "Unable to request a password reset right now."
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <LocalAccountShell eyebrow="Account recovery">
-      <h1 className="mt-3 text-2xl font-semibold tracking-tight">Forgot password?</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Enter your workspace email to request a password reset link.
-      </p>
-      <form className="mt-8 flex flex-col gap-4" onSubmit={handleSubmit}>
-        <FormMessage error>{errorMessage}</FormMessage>
-        <FormMessage>{infoMessage}</FormMessage>
-        {resetUrl ? (
-          <a
-            className="break-all rounded-lg border border-border bg-muted px-4 py-3 text-sm underline-offset-4 hover:underline"
-            href={resetUrl}
-          >
-            Open development reset link
-          </a>
-        ) : null}
-        <label className="flex flex-col gap-2 text-sm font-medium">
-          Email
-          <input
-            autoComplete="email"
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            onChange={(event) => setEmail(event.target.value)}
-            required
-            type="email"
-            value={email}
-          />
-        </label>
-        <button
-          className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isSubmitting}
-          type="submit"
-        >
-          {isSubmitting ? "Requesting…" : "Request reset link"}
-        </button>
-      </form>
-      <p className="mt-5 text-center text-[13px] text-muted-foreground">
-        Remembered your password?{" "}
-        <Link className="text-foreground underline-offset-4 hover:underline" href="/login">
-          Sign in
-        </Link>
-      </p>
-    </LocalAccountShell>
-  );
-}
-
-export function LocalPasswordResetPage() {
-  const router = useRouter();
-  const { update } = useSession();
-  const search = useLocationSearch();
-  const token = new URLSearchParams(search).get("token") ?? "";
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmation, setConfirmation] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-    setErrorMessage("");
-    if (!token) {
-      setErrorMessage("This reset link is missing its token.");
-      return;
-    }
-    if (newPassword !== confirmation) {
-      setErrorMessage("The passwords do not match.");
-      return;
-    }
-    if (newPassword.length < 12) {
-      setErrorMessage("Use at least 12 characters for your password.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await resetLocalPassword(token, newPassword);
-      await update();
-      router.replace("/");
-    } catch (error) {
-      setErrorMessage(
-        error instanceof LocalAuthRequestError && error.status === 400
-          ? error.message
-          : "This reset link is invalid or could not be used."
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <LocalAccountShell eyebrow="Account recovery">
-      <h1 className="mt-3 text-2xl font-semibold tracking-tight">Reset password</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Choose a new password with at least 12 characters.
-      </p>
-      <form className="mt-8 flex flex-col gap-4" onSubmit={handleSubmit}>
-        <FormMessage error>{errorMessage}</FormMessage>
-        <label className="flex flex-col gap-2 text-sm font-medium">
-          New password
-          <input
-            autoComplete="new-password"
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            minLength={12}
-            onChange={(event) => setNewPassword(event.target.value)}
-            required
-            type="password"
-            value={newPassword}
-          />
-        </label>
-        <label className="flex flex-col gap-2 text-sm font-medium">
-          Confirm new password
-          <input
-            autoComplete="new-password"
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            minLength={12}
-            onChange={(event) => setConfirmation(event.target.value)}
-            required
-            type="password"
-            value={confirmation}
-          />
-        </label>
-        <button
-          className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isSubmitting || !token}
-          type="submit"
-        >
-          {isSubmitting ? "Saving…" : "Reset password"}
-        </button>
-      </form>
-      <p className="mt-5 text-center text-[13px] text-muted-foreground">
-        <Link className="text-foreground underline-offset-4 hover:underline" href="/login">
-          Back to sign in
-        </Link>
-      </p>
     </LocalAccountShell>
   );
 }

@@ -1,14 +1,8 @@
-import {
-  isLocalSessionAuthMode,
-  isLogtoAuthMode,
-} from "../auth/logtoConfig";
-
 const apiMode = process.env.NEXT_PUBLIC_API_MODE || "fastapi-proxy";
 const isProduction = import.meta.env.PROD;
 
 export const isFastApiDirectMode =
-  (!isProduction && apiMode === "fastapi-direct") ||
-  (isProduction && (isLogtoAuthMode || isLocalSessionAuthMode));
+  isProduction || (!isProduction && apiMode === "fastapi-direct");
 
 export const isFastApiProxyMode =
   !isProduction && apiMode === "fastapi-proxy";

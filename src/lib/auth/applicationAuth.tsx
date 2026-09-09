@@ -18,11 +18,7 @@ import {
 } from "../backend/request";
 import { useBackendQuery } from "../backend/reactQuery";
 import type { Permission, WorkspaceRole } from "../permissions";
-import { type User, useSession } from "../auth";
-import {
-  isLocalSessionAuthMode,
-  isLogtoAuthMode,
-} from "./logtoConfig";
+import { useSession } from "../auth";
 
 export type WorkspaceMembership = {
   membershipId: string;
@@ -60,7 +56,6 @@ type ApplicationAuthContextValue = {
   currentUser: CurrentUserResponse | null;
   error: BackendRequestError | null;
   hasPermission: (permission: Permission) => boolean;
-  logtoUser: User | null;
   refreshCurrentUser: () => Promise<void>;
   signOut: () => Promise<void>;
   status: ApplicationAuthStatus;
@@ -68,32 +63,6 @@ type ApplicationAuthContextValue = {
 
 const ApplicationAuthContext =
   createContext<ApplicationAuthContextValue | null>(null);
-
-function developmentMembership(user: User): WorkspaceMembership {
-  return {
-    membershipId: "development-membership",
-    overrides: [],
-    permissions: user.permissions ?? [],
-    role: user.role ?? "viewer",
-    status: "active",
-    workspaceId: user.workspaceId ?? fastApiWorkspaceId,
-    workspaceName: "Development workspace",
-  };
-}
-
-function developmentCurrentUser(user: User): CurrentUserResponse {
-  return {
-    accessState: "ready",
-    email: user.email ?? null,
-    image: user.image ?? null,
-    isDevelopment: true,
-    isGuest: false,
-    memberships: [developmentMembership(user)],
-    name: user.name ?? null,
-    status: "active",
-    userId: user.id ?? "development-user",
-  };
-}
 
 function errorCode(error: BackendRequestError | null) {
   return error?.payload?.code ?? null;
@@ -113,23 +82,12 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
     "pending_workspace" | "suspended" | null
   >(null);
 
-  const bootstrapQuery = useBackendQuery<CurrentUserResponse>({
-    enabled: isLogtoAuthMode && sessionStatus === "authenticated",
-    init: { method: "POST" },
-    path: "/api/v1/auth/bootstrap",
-    queryKey: ["backend", "user", identity, "auth-bootstrap"],
-    retry: false,
-  });
   const currentUserQuery = useBackendQuery<CurrentUserResponse>({
-    enabled:
-      (isLogtoAuthMode || isLocalSessionAuthMode) &&
-      sessionStatus === "authenticated" &&
-      (isLocalSessionAuthMode || bootstrapQuery.isSuccess),
+    enabled: sessionStatus === "authenticated",
     path: "/api/v1/me",
     queryKey: ["backend", "user", identity, "current-user"],
     retry: false,
   });
-  const { refetch: refetchBootstrap } = bootstrapQuery;
   const { refetch: refetchCurrentUser } = currentUserQuery;
 
   const currentUser = useMemo<CurrentUserResponse | null>(() => {
@@ -137,21 +95,13 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
-    if (!isLogtoAuthMode && !isLocalSessionAuthMode) {
-      return developmentCurrentUser(session.user);
-    }
-
-    return currentUserQuery.data ?? bootstrapQuery.data ?? null;
-  }, [bootstrapQuery.data, currentUserQuery.data, session]);
+    return currentUserQuery.data ?? null;
+  }, [currentUserQuery.data, session]);
 
   const activeMembership = useMemo(
     () => {
       if (!currentUser) {
         return null;
-      }
-
-      if (!isLogtoAuthMode && !isLocalSessionAuthMode) {
-        return currentUser.memberships[0] ?? null;
       }
 
       // The MVP has one configured workspace. Do not silently select an
@@ -166,7 +116,6 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
   );
 
   const backendError =
-    (bootstrapQuery.error as BackendRequestError | null) ??
     (currentUserQuery.error as BackendRequestError | null);
 
   useEffect(() => {
@@ -211,10 +160,6 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
     if (blockedStatus) {
       return blockedStatus;
     }
-    if (!isLogtoAuthMode && !isLocalSessionAuthMode) {
-      return "authenticated";
-    }
-
     const code = errorCode(backendError);
     if (code === "user:suspended") {
       return "suspended";
@@ -225,7 +170,7 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
     if (backendError) {
       return backendError.status === 401 ? "unauthenticated" : "error";
     }
-    if (bootstrapQuery.isLoading || currentUserQuery.isLoading || !currentUser) {
+    if (currentUserQuery.isLoading || !currentUser) {
       return "initializing";
     }
     if (currentUser.status === "suspended") {
@@ -237,28 +182,14 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
   }, [
     backendError,
     blockedStatus,
-    bootstrapQuery.isLoading,
     currentUser,
     currentUserQuery.isLoading,
     sessionStatus,
   ]);
 
   const refreshCurrentUser = useCallback(async () => {
-    if (!isLogtoAuthMode && !isLocalSessionAuthMode) {
-      return;
-    }
-
-    if (isLocalSessionAuthMode) {
-      await refetchCurrentUser({ throwOnError: false });
-      return;
-    }
-
-    const bootstrapResult = await refetchBootstrap({ throwOnError: false });
-    if (bootstrapResult.error) {
-      return;
-    }
     await refetchCurrentUser({ throwOnError: false });
-  }, [refetchBootstrap, refetchCurrentUser]);
+  }, [refetchCurrentUser]);
 
   const signOut = useCallback(async () => {
     queryClient.removeQueries({ queryKey: ["backend"] });
@@ -277,7 +208,6 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
       currentUser,
       error: backendError,
       hasPermission,
-      logtoUser: session?.user ?? null,
       refreshCurrentUser,
       signOut,
       status,
@@ -288,7 +218,6 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
       currentUser,
       hasPermission,
       refreshCurrentUser,
-      session?.user,
       signOut,
       status,
     ]

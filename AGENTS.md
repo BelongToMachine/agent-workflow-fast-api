@@ -32,21 +32,21 @@ FastAPI 后端位于同级目录 [`../asianode-fastapi`](../asianode-fastapi)，
 
 - 浏览器端普通请求使用 `requestBackend`（`src/lib/backend/request.ts`）；React Query 请求使用
   `useBackendQuery`、`useBackendInfiniteQuery` 和 `useBackendMutation`。
-- `src/lib/backend/directClient.ts` 的 `apiFetch` 负责 Bearer token、workspace query 参数、
-  Vite `/api` proxy 和可选的 FastAPI direct mode，并把现有的 `/api/*` 调用映射到 FastAPI 的
+- `src/lib/backend/directClient.ts` 的 `apiFetch` 负责 HttpOnly Session Cookie、CSRF、workspace
+  query 参数、Vite `/api` proxy 和可选的 FastAPI direct mode，并把现有的 `/api/*` 调用映射到 FastAPI 的
   `/api/v1/*` 路由。
 - 新增请求前先确认 FastAPI 的实际 route、method、payload 和 response；优先复用请求层和已有的
   legacy path mapping，不要在组件里重复实现鉴权头、workspace 参数或错误解析。
 - FastAPI 变化需要同步更新前端类型、请求路径、流式数据类型和错误处理；不能通过前端伪造身份字段
   绕过后端权限。
-- `src/components/fastapiConnectionTest.tsx` 和开发 OIDC 页面中的直接 `fetch` 属于诊断/开发特例。
+- `src/components/fastapiConnectionTest.tsx` 中的直接 `fetch` 属于诊断特例。
   业务请求不要复制这种模式。
 
 ### 认证与权限
 
-- `src/lib/auth.tsx` 提供当前浏览器会话状态；本地开发可通过 `/dev/oidc` 获取短期 direct token。
-- `/dev/oidc` 只应在开发环境使用。生产环境不能依赖开发 token、sessionStorage 中的身份信息或
-  前端解码结果来做授权。
+- `src/lib/auth.tsx` 提供当前浏览器会话状态；所有环境统一使用 FastAPI 的本地账号和 HttpOnly
+  Session Cookie。
+- 前端不再提供开发 OIDC 页面、direct token 或认证模式切换器；授权始终以 FastAPI 返回的结果为准。
 - 前端的条件渲染和设置页入口只是 UX 层提示，不能视为安全边界；成员、知识库、聊天、文档等权限
   必须以 FastAPI 返回的结果为准。
 - `src/lib/auth/authorization.ts`、`src/lib/auth/nextauthBridge.ts`、`src/lib/auth/devOidc.ts`

@@ -5,95 +5,10 @@ import {
   isFastApiProxyMode,
   isSingleWorkspaceMode,
 } from "./mode";
-import {
-  getLogtoAccessToken,
-} from "../auth/logtoToken";
-import {
-  isLocalSessionAuthMode,
-  isLogtoAuthMode,
-} from "../auth/logtoConfig";
 import { getLocalCsrfToken } from "../auth/localSession";
-
-const DIRECT_TOKEN_STORAGE_KEY = "asianode.fastapi.direct-token";
-
-export type DirectToken = {
-  accessToken: string;
-  expiresAt: number;
-  workspaceId: string;
-};
-
-let memoryToken: DirectToken | null = null;
 
 function getBasePath() {
   return (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
-}
-
-function getStoredToken() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  if (memoryToken) {
-    if (memoryToken.expiresAt > Date.now() + 30_000) {
-      return memoryToken;
-    }
-    memoryToken = null;
-  }
-
-  try {
-    const raw = window.sessionStorage.getItem(DIRECT_TOKEN_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-
-    const parsed = JSON.parse(raw) as DirectToken;
-    if (
-      !parsed.accessToken ||
-      !parsed.workspaceId ||
-      !Number.isFinite(parsed.expiresAt) ||
-      parsed.expiresAt <= Date.now() + 30_000
-    ) {
-      window.sessionStorage.removeItem(DIRECT_TOKEN_STORAGE_KEY);
-      return null;
-    }
-
-    memoryToken = parsed;
-    return parsed;
-  } catch {
-    window.sessionStorage.removeItem(DIRECT_TOKEN_STORAGE_KEY);
-    return null;
-  }
-}
-
-export function setStoredDirectToken(token: DirectToken) {
-  memoryToken = token;
-  if (typeof window !== "undefined") {
-    window.sessionStorage.setItem(
-      DIRECT_TOKEN_STORAGE_KEY,
-      JSON.stringify(token)
-    );
-    window.dispatchEvent(new Event("asianode-auth-change"));
-  }
-}
-
-export function clearStoredDirectToken() {
-  memoryToken = null;
-  if (typeof window !== "undefined") {
-    window.sessionStorage.removeItem(DIRECT_TOKEN_STORAGE_KEY);
-    window.dispatchEvent(new Event("asianode-auth-change"));
-  }
-}
-
-export function getStoredDirectToken() {
-  return getStoredToken();
-}
-
-async function getApiAccessToken() {
-  if (isLogtoAuthMode) {
-    return getLogtoAccessToken();
-  }
-
-  return getStoredToken()?.accessToken ?? null;
 }
 
 function getInputUrl(input: RequestInfo | URL) {
@@ -112,7 +27,7 @@ function pathWithoutBasePath(pathname: string) {
   return pathname;
 }
 
-function appendWorkspaceId(url: URL, token: DirectToken | null) {
+function appendWorkspaceId(url: URL) {
   const path = url.pathname;
   const isWorkspaceScoped =
     path.startsWith("/api/v1/chat") ||
@@ -130,15 +45,12 @@ function appendWorkspaceId(url: URL, token: DirectToken | null) {
     return;
   }
 
-  // In Logto mode the backend is intentionally single-workspace for the MVP.
-  // Override legacy caller-supplied values so the browser cannot accidentally
-  // switch business context before a real workspace selector exists.
-  const workspaceId =
-    isSingleWorkspaceMode && (isLogtoAuthMode || isLocalSessionAuthMode)
-      ? fastApiWorkspaceId
-      : url.searchParams.get("workspace_id") ||
-        token?.workspaceId ||
-        (isFastApiProxyMode ? fastApiWorkspaceId : null);
+  // The browser currently targets one configured workspace. Override legacy
+  // caller-supplied values so it cannot accidentally switch business context.
+  const workspaceId = isSingleWorkspaceMode
+    ? fastApiWorkspaceId
+    : url.searchParams.get("workspace_id") ||
+      (isFastApiProxyMode ? fastApiWorkspaceId : null);
   if (workspaceId) {
     url.searchParams.set("workspace_id", workspaceId);
   }
@@ -146,8 +58,7 @@ function appendWorkspaceId(url: URL, token: DirectToken | null) {
 
 function mapLegacyApiPath(
   input: RequestInfo | URL,
-  method: string,
-  token: DirectToken | null
+  method: string
 ) {
   const source = getInputUrl(input);
   const path = pathWithoutBasePath(source.pathname);
@@ -214,16 +125,15 @@ function mapLegacyApiPath(
 
   const target = new URL(targetPath, "http://vite-fastapi-proxy.local");
   target.search = query.toString();
-  appendWorkspaceId(target, token);
+  appendWorkspaceId(target);
   return `${target.pathname}${target.search}`;
 }
 
 function mapLegacyApiUrl(
   input: RequestInfo | URL,
-  method: string,
-  token: DirectToken | null
+  method: string
 ) {
-  return new URL(mapLegacyApiPath(input, method, token), fastApiBrowserBaseUrl);
+  return new URL(mapLegacyApiPath(input, method), fastApiBrowserBaseUrl);
 }
 
 export async function apiFetch(
@@ -237,27 +147,15 @@ export async function apiFetch(
   const requestHeaders = new Headers(
     init?.headers ?? (input instanceof Request ? input.headers : undefined)
   );
-  if (
-    isLocalSessionAuthMode &&
-    ["DELETE", "PATCH", "POST", "PUT"].includes(method) &&
-    !requestHeaders.has("X-CSRF-Token")
-  ) {
+  if (["DELETE", "PATCH", "POST", "PUT"].includes(method) && !requestHeaders.has("X-CSRF-Token")) {
     requestHeaders.set("X-CSRF-Token", await getLocalCsrfToken());
   }
 
   if (isFastApiProxyMode && typeof window !== "undefined") {
-    const token = isLogtoAuthMode ? null : getStoredToken();
-    const accessToken = await getApiAccessToken();
-    const headers = requestHeaders;
-
-    if (accessToken && !headers.has("authorization")) {
-      headers.set("authorization", `Bearer ${accessToken}`);
-    }
-
-    return fetch(mapLegacyApiPath(input, method, token), {
+    return fetch(mapLegacyApiPath(input, method), {
       ...init,
       credentials: init?.credentials ?? "include",
-      headers,
+      headers: requestHeaders,
     });
   }
 
@@ -265,18 +163,11 @@ export async function apiFetch(
     return fetch(input, init);
   }
 
-  const storedToken = isLogtoAuthMode ? null : getStoredToken();
-  const accessToken = await getApiAccessToken();
-  const target = mapLegacyApiUrl(input, method, storedToken);
-  const headers = requestHeaders;
-
-  if (accessToken && !headers.has("authorization")) {
-    headers.set("authorization", `Bearer ${accessToken}`);
-  }
+  const target = mapLegacyApiUrl(input, method);
 
   return fetch(target, {
     ...init,
     credentials: init?.credentials ?? "include",
-    headers,
+    headers: requestHeaders,
   });
 }
