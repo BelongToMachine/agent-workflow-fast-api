@@ -197,6 +197,16 @@ textarea:focus-visible {
   outline: none;
 }
 
+@layer base {
+  /* Keep native and headless buttons consistent with the Button primitive.
+     Components with an explicit cursor utility (for example, resize handles)
+     keep their specialized interaction cursor. */
+  :where(button:not(:disabled):not([aria-disabled="true"])),
+  :where([role="button"]:not([aria-disabled="true"])) {
+    cursor: pointer;
+  }
+}
+
 @utility text-balance {
   text-wrap: balance;
 }

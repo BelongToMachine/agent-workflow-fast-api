@@ -133,7 +133,7 @@ function PureDocumentToolCall({
 
   return (
     <button
-      className="cursor pointer flex w-fit flex-row items-start justify-between gap-3 rounded-xl border px-3 py-2"
+      className="cursor-pointer flex w-fit flex-row items-start justify-between gap-3 rounded-xl border px-3 py-2"
       onClick={handleClick}
       type="button"
     >
