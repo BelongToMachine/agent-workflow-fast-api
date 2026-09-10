@@ -25,6 +25,102 @@ import {
 } from "./components/auth/localAccountPages";
 import { Link, usePathname, useRouter } from "./lib/router";
 
+function isKnownRoute(pathname) {
+  if (
+    pathname === "/" ||
+    pathname === "/activate" ||
+    pathname === "/access-pending" ||
+    pathname === "/account-suspended" ||
+    pathname === "/fastapi-test" ||
+    pathname === "/forbidden" ||
+    pathname === "/forgot-password" ||
+    pathname === "/login" ||
+    pathname === "/register" ||
+    pathname === "/reset-password" ||
+    pathname === "/settings/knowledge-bases" ||
+    pathname === "/settings/knowledge-bases/files" ||
+    pathname === "/settings/members" ||
+    pathname === "/settings/password"
+  ) {
+    return true;
+  }
+
+  return /^\/chat\/[^/]+$/.test(pathname);
+}
+
+function NotFoundPage() {
+  const router = useRouter();
+
+  return (
+    <main
+      aria-labelledby="not-found-title"
+      className="relative isolate flex min-h-dvh items-center overflow-hidden bg-background px-6 py-12 text-foreground"
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-48 -top-48 h-[34rem] w-[34rem] rounded-full border border-border/60"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-56 -left-48 h-[28rem] w-[28rem] rounded-full border border-border/40"
+      />
+      <div className="relative mx-auto grid w-full max-w-5xl items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)] lg:gap-20">
+        <section className="max-w-xl">
+          <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-foreground" />
+            Asianode Agent
+          </div>
+          <p className="mt-12 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+            Error / 404
+          </p>
+          <h1
+            className="mt-4 max-w-lg text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl"
+            id="not-found-title"
+          >
+            这条路走不通。
+          </h1>
+          <p className="mt-5 max-w-md text-sm leading-7 text-muted-foreground sm:text-base">
+            你访问的页面不存在，或者链接已经失效。回到工作区继续操作吧。
+          </p>
+          <div className="mt-9 flex flex-wrap items-center gap-3">
+            <Link
+              className="inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+              href="/"
+            >
+              返回工作区
+            </Link>
+            <button
+              className="inline-flex h-10 items-center rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-muted"
+              onClick={() => router.back()}
+              type="button"
+            >
+              返回上一页
+            </button>
+          </div>
+        </section>
+
+        <section
+          aria-hidden="true"
+          className="relative min-h-[18rem] overflow-hidden rounded-[2rem] border border-border/60 bg-card/50 px-8 py-10 shadow-[var(--shadow-card)] sm:min-h-[22rem]"
+        >
+          <div className="absolute inset-x-8 top-8 flex items-center justify-between border-b border-border/60 pb-3 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            <span>Route status</span>
+            <span>Missing</span>
+          </div>
+          <div className="absolute inset-x-8 bottom-8 flex items-end justify-between gap-6">
+            <span className="text-[clamp(9rem,22vw,15rem)] font-semibold leading-[0.72] tracking-[-0.12em] text-foreground/[0.07]">
+              404
+            </span>
+            <span className="mb-1 max-w-[7rem] text-right font-mono text-[10px] leading-5 text-muted-foreground">
+              The requested route could not be resolved.
+            </span>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 function AuthGuard({ children }) {
   const { status } = useSession();
   const pathname = usePathname();
@@ -49,6 +145,9 @@ function AuthGuard({ children }) {
   }
 
   if (status === "unauthenticated") {
+    if (!isKnownRoute(pathname)) {
+      return <NotFoundPage />;
+    }
     return <Navigate replace to="/login" />;
   }
 
@@ -171,7 +270,7 @@ function ChatLayout() {
               }
               path="settings/password"
             />
-            <Route element={<Navigate replace to="/" />} path="*" />
+            <Route element={<NotFoundPage />} path="*" />
           </Routes>
         </SidebarInset>
       </SidebarProvider>
