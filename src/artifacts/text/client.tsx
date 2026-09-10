@@ -13,6 +13,7 @@ import {
 import { Editor } from "@/components/chat/textEditor";
 import { requestBackend } from "@/lib/backend/request";
 import type { Suggestion } from "@/lib/db/schema";
+import { i18n } from "@/lib/i18n";
 
 type TextArtifactMetadata = {
   suggestions: Suggestion[];
@@ -32,7 +33,7 @@ async function getDirectSuggestions(documentId: string) {
 export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
   actions: [
     {
-      description: "View changes",
+      description: "artifacts.viewChanges",
       icon: <ClockRewind size={18} />,
       isDisabled: ({ currentVersionIndex }) => {
         if (currentVersionIndex === 0) {
@@ -46,7 +47,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
       },
     },
     {
-      description: "View Previous version",
+      description: "artifacts.viewPreviousVersion",
       icon: <UndoIcon size={18} />,
       isDisabled: ({ currentVersionIndex }) => {
         if (currentVersionIndex === 0) {
@@ -60,7 +61,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
       },
     },
     {
-      description: "View Next version",
+      description: "artifacts.viewNextVersion",
       icon: <RedoIcon size={18} />,
       isDisabled: ({ isCurrentVersion }) => {
         if (isCurrentVersion) {
@@ -74,11 +75,11 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
       },
     },
     {
-      description: "Copy to clipboard",
+      description: "artifacts.copyToClipboard",
       icon: <CopyIcon size={18} />,
       onClick: ({ content }) => {
         navigator.clipboard.writeText(content);
-        toast.success("Copied to clipboard!");
+        toast.success(i18n.t("common.copied"));
       },
     },
   ],
@@ -128,7 +129,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
       </div>
     );
   },
-  description: "Useful for text content, like drafting essays and emails.",
+  description: "artifacts.textDescription",
   initialize: async ({ documentId, setMetadata }) => {
     const suggestions = await getDirectSuggestions(documentId);
 
@@ -160,7 +161,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
   },
   toolbar: [
     {
-      description: "Add final polish",
+      description: "artifacts.addFinalPolish",
       icon: <PenIcon />,
       onClick: ({ sendMessage }) => {
         sendMessage({
@@ -175,7 +176,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
       },
     },
     {
-      description: "Request suggestions",
+      description: "artifacts.requestSuggestions",
       icon: <MessageIcon />,
       onClick: ({ sendMessage }) => {
         sendMessage({

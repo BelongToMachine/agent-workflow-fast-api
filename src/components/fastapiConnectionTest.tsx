@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   fastApiBrowserBaseUrl,
   isFastApiDirectMode,
@@ -13,6 +14,7 @@ type ConnectionState =
   | { status: "error"; message: string; payload?: unknown };
 
 export function FastApiConnectionTest() {
+  const { t } = useTranslation();
   const [connection, setConnection] = useState<ConnectionState>({
     status: "checking",
   });
@@ -32,8 +34,8 @@ export function FastApiConnectionTest() {
       if (!response.ok) {
         setConnection({
           message: isFastApiDirectMode
-            ? "浏览器无法连接到 FastAPI。"
-            : "Vite 反代无法连接到 FastAPI。",
+            ? t("settings.browserCannotConnect")
+            : t("settings.proxyCannotConnect"),
           payload,
           status: "error",
         });
@@ -43,18 +45,18 @@ export function FastApiConnectionTest() {
       const isFastApi = isFastApiDirectMode || isFastApiProxyMode;
       setConnection({
         message: isFastApiDirectMode
-          ? "浏览器 → FastAPI 直连成功。"
-          : "Vite → FastAPI 反代连接成功。",
+          ? t("settings.directConnectionSuccess")
+          : t("settings.proxyConnectionSuccess"),
         payload,
         status: isFastApi ? "success" : "error",
       });
     } catch {
       setConnection({
-        message: "联调请求失败，请确认 Vite 和 FastAPI 都已启动。",
+        message: t("settings.integrationRequestFailed"),
         status: "error",
       });
     }
-  }, []);
+  }, [t]);
 
   const handleCheckConnection = useCallback(() => {
     checkConnection().catch(() => undefined);
@@ -69,12 +71,12 @@ export function FastApiConnectionTest() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background p-6">
       <section className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-sm">
-        <p className="text-sm text-muted-foreground">Backend migration</p>
+        <p className="text-sm text-muted-foreground">{t("settings.backendMigration")}</p>
         <h1 className="mt-2 text-2xl font-semibold text-foreground">
-          React / FastAPI 联调测试
+          {t("settings.connectionTestTitle")}
         </h1>
         <p className="mt-3 text-sm text-muted-foreground">
-          这个页面会通过 Vite 反代检查 FastAPI，不会绕过前端请求链路。
+          {t("settings.connectionTestDescription")}
         </p>
 
         <div
@@ -88,7 +90,7 @@ export function FastApiConnectionTest() {
           }`}
         >
           {connection.status === "checking"
-            ? "正在检查连接..."
+            ? t("settings.checkingConnection")
             : connection.message}
         </div>
 
@@ -104,7 +106,7 @@ export function FastApiConnectionTest() {
           onClick={handleCheckConnection}
           type="button"
         >
-          重新测试
+          {t("settings.retest")}
         </button>
       </section>
     </main>

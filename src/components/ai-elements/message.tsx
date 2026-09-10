@@ -26,6 +26,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { useTranslation } from "react-i18next";
 import { useStreamdownPlugins } from "./useStreamdownPlugins";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -255,10 +256,11 @@ export const MessageBranchPrevious = ({
   ...props
 }: MessageBranchPreviousProps) => {
   const { goToPrevious, totalBranches } = useMessageBranch();
+  const { t } = useTranslation();
 
   return (
     <Button
-      aria-label="Previous branch"
+      aria-label={t("ui.previousBranch")}
       disabled={totalBranches <= 1}
       onClick={goToPrevious}
       size="icon-sm"
@@ -278,10 +280,11 @@ export const MessageBranchNext = ({
   ...props
 }: MessageBranchNextProps) => {
   const { goToNext, totalBranches } = useMessageBranch();
+  const { t } = useTranslation();
 
   return (
     <Button
-      aria-label="Next branch"
+      aria-label={t("ui.nextBranch")}
       disabled={totalBranches <= 1}
       onClick={goToNext}
       size="icon-sm"
@@ -310,7 +313,10 @@ export const MessageBranchPage = ({
       )}
       {...props}
     >
-      {currentBranch + 1} of {totalBranches}
+      {t("common.versionOf", {
+        current: currentBranch + 1,
+        total: totalBranches,
+      })}
     </ButtonGroupText>
   );
 };

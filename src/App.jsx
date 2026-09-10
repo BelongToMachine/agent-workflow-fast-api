@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { AppSidebar } from "./components/chat/appSidebar";
 import { ChatPage } from "./components/chat/chatPage";
@@ -14,6 +15,7 @@ import {
 import { LocalAuthRequestError, signInWithLocalSession } from "./lib/auth/localSession";
 import { ThemeProvider } from "./components/themeProvider";
 import { TooltipProvider } from "./components/ui/tooltip";
+import { LoadingState } from "./components/ui/loadingState";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
 import { KnowledgeBaseFiles } from "./components/settings/knowledgeBaseFiles";
 import { KnowledgeBaseGrants } from "./components/settings/knowledgeBaseGrants";
@@ -50,6 +52,7 @@ function isKnownRoute(pathname) {
 
 function NotFoundPage() {
   const router = useRouter();
+  const { t } = useTranslation();
 
   return (
     <main
@@ -68,33 +71,33 @@ function NotFoundPage() {
         <section className="max-w-xl">
           <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
             <span aria-hidden="true" className="h-2 w-2 rounded-full bg-foreground" />
-            Asianode Agent
+            {t("app.name")}
           </div>
           <p className="mt-12 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            Error / 404
+            {t("app.error404")}
           </p>
           <h1
             className="mt-4 max-w-lg text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl"
             id="not-found-title"
           >
-            这条路走不通。
+            {t("app.notFoundTitle")}
           </h1>
           <p className="mt-5 max-w-md text-sm leading-7 text-muted-foreground sm:text-base">
-            你访问的页面不存在，或者链接已经失效。回到工作区继续操作吧。
+            {t("app.notFoundDescription")}
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link
               className="inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
               href="/"
             >
-              返回工作区
+              {t("common.backToWorkspace")}
             </Link>
             <button
               className="inline-flex h-10 items-center rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-muted"
               onClick={() => router.back()}
               type="button"
             >
-              返回上一页
+              {t("common.previousPage")}
             </button>
           </div>
         </section>
@@ -104,15 +107,15 @@ function NotFoundPage() {
           className="relative min-h-[18rem] overflow-hidden rounded-[2rem] border border-border/60 bg-card/50 px-8 py-10 shadow-[var(--shadow-card)] sm:min-h-[22rem]"
         >
           <div className="absolute inset-x-8 top-8 flex items-center justify-between border-b border-border/60 pb-3 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            <span>Route status</span>
-            <span>Missing</span>
+            <span>{t("app.routeStatus")}</span>
+            <span>{t("app.missing")}</span>
           </div>
           <div className="absolute inset-x-8 bottom-8 flex items-end justify-between gap-6">
             <span className="text-[clamp(9rem,22vw,15rem)] font-semibold leading-[0.72] tracking-[-0.12em] text-foreground/[0.07]">
               404
             </span>
             <span className="mb-1 max-w-[7rem] text-right font-mono text-[10px] leading-5 text-muted-foreground">
-              The requested route could not be resolved.
+              {t("app.requestedRouteMissing")}
             </span>
           </div>
         </section>
@@ -124,6 +127,7 @@ function NotFoundPage() {
 function AuthGuard({ children }) {
   const { status } = useSession();
   const pathname = usePathname();
+  const { t } = useTranslation();
 
   const isPublicAuthRoute =
     pathname === "/activate" ||
@@ -137,11 +141,7 @@ function AuthGuard({ children }) {
   }
 
   if (status === "loading") {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
-        Checking authentication status…
-      </div>
-    );
+    return <LoadingState message={t("app.loadingAuth")} />;
   }
 
   if (status === "unauthenticated") {
@@ -155,6 +155,7 @@ function AuthGuard({ children }) {
 }
 
 function ChatLayout() {
+  const { t } = useTranslation();
   const { data } = useSession();
   const {
     error: accessError,
@@ -165,11 +166,7 @@ function ChatLayout() {
   const user = data?.user;
 
   if (authStatus === "loading" || authStatus === "initializing") {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-sm text-muted-foreground">
-        Loading workspace access…
-      </div>
-    );
+    return <LoadingState message={t("app.loadingAccess")} />;
   }
 
   if (authStatus === "unauthenticated") {
@@ -188,16 +185,16 @@ function ChatLayout() {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center">
         <div className="max-w-md">
-          <h1 className="font-semibold text-xl">Unable to load workspace access</h1>
+          <h1 className="font-semibold text-xl">{t("app.unableToLoadAccess")}</h1>
           <p className="mt-2 text-muted-foreground text-sm leading-6">
-            Your account is signed in, but workspace access could not be loaded.
+            {t("app.accessLoadDescription")}
           </p>
           <button
             className="mt-5 rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
             onClick={() => void refreshCurrentUser()}
             type="button"
           >
-            Try again
+            {t("app.retry")}
           </button>
         </div>
       </div>
@@ -231,7 +228,7 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="members.read">
-                  <SettingsPage title="Workspace permissions">
+                  <SettingsPage titleKey="settings.workspacePermissions">
                     <MemberPermissions />
                   </SettingsPage>
                 </PermissionRoute>
@@ -241,7 +238,7 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="knowledge.manage">
-                  <SettingsPage title="Knowledge base access">
+                  <SettingsPage titleKey="settings.knowledgeBaseAccess">
                     <KnowledgeBaseGrants />
                   </SettingsPage>
                 </PermissionRoute>
@@ -251,7 +248,7 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="knowledge.manage">
-                  <SettingsPage title="Knowledge base files">
+                  <SettingsPage titleKey="settings.knowledgeBaseFiles">
                     <KnowledgeBaseFiles />
                   </SettingsPage>
                 </PermissionRoute>
@@ -259,12 +256,12 @@ function ChatLayout() {
               path="settings/knowledge-bases/files"
             />
             <Route
-              element={<SettingsPage title="FastAPI connection"><FastApiConnectionTest /></SettingsPage>}
+              element={<SettingsPage titleKey="settings.fastApiConnection"><FastApiConnectionTest /></SettingsPage>}
               path="fastapi-test"
             />
             <Route
               element={
-                <SettingsPage title="Change password">
+                <SettingsPage titleKey="auth.changePassword">
                   <LocalChangePasswordPage />
                 </SettingsPage>
               }
@@ -279,13 +276,13 @@ function ChatLayout() {
 }
 
 function WorkspaceAccessPendingPage() {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center">
       <div className="max-w-md">
-        <h1 className="font-semibold text-xl">Account created</h1>
+        <h1 className="font-semibold text-xl">{t("app.accountCreated")}</h1>
         <p className="mt-2 text-muted-foreground text-sm leading-6">
-          Your account is signed in, but it has not been added to a workspace yet.
-          Ask a workspace administrator to grant access, then refresh this page.
+          {t("app.accountCreatedDescription")}
         </p>
       </div>
     </div>
@@ -294,20 +291,21 @@ function WorkspaceAccessPendingPage() {
 
 function AccountSuspendedPage() {
   const { signOut } = useApplicationAuth();
+  const { t } = useTranslation();
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center">
       <div className="max-w-md">
-        <h1 className="font-semibold text-xl">Account suspended</h1>
+        <h1 className="font-semibold text-xl">{t("app.accountSuspended")}</h1>
         <p className="mt-2 text-muted-foreground text-sm leading-6">
-          This account cannot access the workspace. Contact a workspace administrator if you believe this is a mistake.
+          {t("app.accountSuspendedDescription")}
         </p>
         <button
           className="mt-5 rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
           onClick={() => void signOut()}
           type="button"
         >
-          Sign out
+          {t("sidebar.signOut")}
         </button>
       </div>
     </div>
@@ -315,18 +313,19 @@ function AccountSuspendedPage() {
 }
 
 function PasswordHelpPage() {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-dvh w-full items-center justify-center bg-background px-6 text-center">
       <div className="max-w-md">
-        <h1 className="font-semibold text-xl">需要重置密码？</h1>
+        <h1 className="font-semibold text-xl">{t("auth.noPasswordReset")}</h1>
         <p className="mt-2 text-muted-foreground text-sm leading-6">
-          如果忘记密码，请联系管理员。
+          {t("auth.contactAdmin")}
         </p>
         <Link
           className="mt-5 inline-flex rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
           href="/login"
         >
-          返回登录
+          {t("auth.backToSignIn")}
         </Link>
       </div>
     </div>
@@ -334,12 +333,13 @@ function PasswordHelpPage() {
 }
 
 function ForbiddenPage() {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center">
       <div className="max-w-md">
-        <h1 className="font-semibold text-xl">Permission required</h1>
+        <h1 className="font-semibold text-xl">{t("app.permissionRequired")}</h1>
         <p className="mt-2 text-muted-foreground text-sm leading-6">
-          Your account does not have permission to open this workspace area.
+          {t("app.permissionRequiredDescription")}
         </p>
       </div>
     </div>
@@ -348,13 +348,10 @@ function ForbiddenPage() {
 
 function PermissionRoute({ children, permission }) {
   const { hasPermission, status } = useApplicationAuth();
+  const { t } = useTranslation();
 
   if (status === "loading" || status === "initializing") {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
-        Loading workspace access…
-      </div>
-    );
+    return <LoadingState message={t("app.loadingAccess")} />;
   }
 
   if (status === "suspended") {
@@ -372,14 +369,15 @@ function PermissionRoute({ children, permission }) {
   return children;
 }
 
-function SettingsPage({ children, title }) {
+function SettingsPage({ children, titleKey }) {
+  const { t } = useTranslation();
   return (
     <main className="min-h-dvh overflow-y-auto bg-background px-4 py-8 md:px-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t(titleKey)}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage workspace configuration and access.
+            {t("settings.manageDescription")}
           </p>
         </div>
         {children}
@@ -395,6 +393,7 @@ function AuthPage({ mode }) {
 function LocalSessionAuthPage({ mode }) {
   const router = useRouter();
   const { update } = useSession();
+  const { t } = useTranslation();
   const isLogin = mode === "login";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -416,8 +415,8 @@ function LocalSessionAuthPage({ mode }) {
     } catch (error) {
       setErrorMessage(
         error instanceof LocalAuthRequestError && error.status === 401
-          ? "Email or password is incorrect."
-          : "Unable to sign in right now. Please try again."
+          ? t("auth.emailOrPasswordIncorrect")
+          : t("auth.unableToSignIn")
       );
     } finally {
       setIsSubmitting(false);
@@ -431,17 +430,17 @@ function LocalSessionAuthPage({ mode }) {
           className="flex w-fit items-center text-[13px] text-muted-foreground hover:text-foreground"
           href="/"
         >
-          ← Back
+          ← {t("common.back")}
         </Link>
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              {isLogin ? "Welcome back" : "Invitation required"}
+              {isLogin ? t("auth.welcomeBack") : t("auth.invitationRequired")}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {isLogin
-                ? "Sign in with your organization account."
-                : "New accounts are created by an administrator invitation."}
+                ? t("auth.signInOrganization")
+                : t("auth.invitationOnly")}
             </p>
           </div>
           {errorMessage ? (
@@ -456,7 +455,7 @@ function LocalSessionAuthPage({ mode }) {
           {isLogin ? (
             <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
               <label className="flex flex-col gap-2 text-sm font-medium">
-                Email
+                {t("auth.email")}
                 <input
                   autoComplete="email"
                   className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -467,7 +466,7 @@ function LocalSessionAuthPage({ mode }) {
                 />
               </label>
               <label className="flex flex-col gap-2 text-sm font-medium">
-                Password
+                {t("auth.password")}
                 <input
                   autoComplete="current-password"
                   className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -483,16 +482,16 @@ function LocalSessionAuthPage({ mode }) {
                 disabled={isSubmitting}
                 type="submit"
               >
-                {isSubmitting ? "Signing in…" : "Sign in"}
+                {isSubmitting ? t("auth.signingIn") : t("auth.signIn")}
               </button>
               <p className="text-center text-[13px] text-muted-foreground">
-                如果忘记密码，请联系管理员。
+                {t("auth.forgotPassword")}
               </p>
             </form>
           ) : null}
           {isLogin ? (
             <p className="text-center text-[13px] text-muted-foreground">
-              Need access? Contact your workspace administrator.
+              {t("auth.needAccess")}
             </p>
           ) : (
             <button
@@ -500,7 +499,7 @@ function LocalSessionAuthPage({ mode }) {
               onClick={() => router.replace("/login")}
               type="button"
             >
-              Back to sign in
+              {t("auth.backToSignIn")}
             </button>
           )}
         </div>

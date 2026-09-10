@@ -1,5 +1,6 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { formatDistance } from "date-fns";
+import { zhCN } from "date-fns/locale";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   type Dispatch,
@@ -12,6 +13,7 @@ import {
 } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { useWindowSize } from "usehooks-ts";
+import { useTranslation } from "react-i18next";
 import { codeArtifact } from "@/artifacts/code/client";
 import { imageArtifact } from "@/artifacts/image/client";
 import { sheetArtifact } from "@/artifacts/sheet/client";
@@ -84,6 +86,7 @@ function PureArtifact({
   selectedModelId: string;
 }) {
   const { artifact, setArtifact, metadata, setMetadata } = useArtifact();
+  const { t, i18n } = useTranslation();
 
   const {
     data: documents,
@@ -329,18 +332,27 @@ function PureArtifact({
                 {isContentDirty ? (
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <div className="size-1.5 animate-pulse rounded-full bg-amber-500" />
-                    Saving...
+                    {t("artifacts.saving")}
                   </div>
                 ) : document ? (
                   <div className="text-xs text-muted-foreground">
-                    {`Updated ${formatDistance(new Date(document.createdAt), new Date(), { addSuffix: true })}`}
+                    {t("artifacts.updatedRelative", {
+                      value: formatDistance(
+                        new Date(document.createdAt),
+                        new Date(),
+                        {
+                          addSuffix: true,
+                          locale: i18n.language === "zh" ? zhCN : undefined,
+                        }
+                      ),
+                    })}
                   </div>
                 ) : artifact.status === "streaming" ? (
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <div className="animate-spin">
                       <LoaderIcon size={12} />
                     </div>
-                    Generating...
+                    {t("artifacts.generating")}
                   </div>
                 ) : (
                   <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/10" />

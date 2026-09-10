@@ -18,6 +18,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -68,6 +69,7 @@ type GrantsResponse = {
 };
 
 export function KnowledgeBaseGrants() {
+  const { t } = useTranslation();
   const { hasPermission } = useCurrentUserAccess();
   const canManageKnowledgeBases = hasPermission("knowledge.manage");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -170,7 +172,7 @@ export function KnowledgeBaseGrants() {
       }
       const displayName = newKnowledgeBaseName.trim();
       if (!displayName) {
-        setError("Enter a name for the new knowledge base.");
+        setError(t("settings.enterNewKnowledgeBaseName"));
         return;
       }
 
@@ -187,19 +189,19 @@ export function KnowledgeBaseGrants() {
         setKnowledgeBases((current) => [createdKnowledgeBase, ...current]);
         setSelectedKnowledgeBaseId(createdKnowledgeBase.knowledgeBaseId);
         setNewKnowledgeBaseName("");
-        toast.success("Knowledge base created");
+        toast.success(t("settings.knowledgeBaseCreated"));
       } catch (createError) {
         const message =
           createError instanceof Error
             ? createError.message
-            : "Unable to create this knowledge base.";
+            : t("settings.unableToCreateKnowledgeBase");
         setError(message);
         toast.error(message);
       } finally {
         setIsCreatingKnowledgeBase(false);
       }
     },
-    [canManageKnowledgeBases, newKnowledgeBaseName]
+    [canManageKnowledgeBases, newKnowledgeBaseName, t]
   );
 
   const renameKnowledgeBase = useCallback(
@@ -210,7 +212,7 @@ export function KnowledgeBaseGrants() {
       }
       const displayName = editedKnowledgeBaseName.trim();
       if (!selectedKnowledgeBaseId || !displayName) {
-        setError("Enter a name for this knowledge base.");
+        setError(t("settings.enterKnowledgeBaseName"));
         return;
       }
 
@@ -236,12 +238,12 @@ export function KnowledgeBaseGrants() {
           )
         );
         setEditedKnowledgeBaseName(updatedKnowledgeBase.displayName);
-        toast.success("Knowledge base renamed");
+        toast.success(t("settings.knowledgeBaseRenamed"));
       } catch (updateError) {
         const message =
           updateError instanceof Error
             ? updateError.message
-            : "Unable to rename this knowledge base.";
+            : t("settings.unableToRenameKnowledgeBase");
         setError(message);
         toast.error(message);
       } finally {
@@ -253,6 +255,7 @@ export function KnowledgeBaseGrants() {
       editedKnowledgeBaseName,
       selectedKnowledgeBase,
       selectedKnowledgeBaseId,
+      t,
     ]
   );
 
@@ -281,18 +284,18 @@ export function KnowledgeBaseGrants() {
         current.filter(({ knowledgeBaseId: id }) => id !== knowledgeBaseId)
       );
       setPendingKnowledgeBaseDelete(null);
-      toast.success("Knowledge base deleted");
+      toast.success(t("settings.knowledgeBaseDeleted"));
     } catch (deleteError) {
       const message =
         deleteError instanceof Error
           ? deleteError.message
-          : "Unable to delete this knowledge base.";
+          : t("settings.unableToDeleteKnowledgeBase");
       setError(message);
       toast.error(message);
     } finally {
       setDeletingKnowledgeBaseId(null);
     }
-  }, [canManageKnowledgeBases, knowledgeBases, pendingKnowledgeBaseDelete]);
+  }, [canManageKnowledgeBases, knowledgeBases, pendingKnowledgeBaseDelete, t]);
 
   const requestKnowledgeBaseDelete = useCallback(() => {
     if (selectedKnowledgeBase && canManageKnowledgeBases) {
@@ -344,7 +347,7 @@ export function KnowledgeBaseGrants() {
       }
       const normalizedSubjectId = subjectId.trim();
       if (!selectedKnowledgeBaseId || !normalizedSubjectId) {
-        setError("Choose a knowledge base and enter a user or role ID.");
+        setError(t("settings.chooseKnowledgeBaseAndId"));
         return;
       }
 
@@ -378,12 +381,12 @@ export function KnowledgeBaseGrants() {
           });
         }
         setSubjectId("");
-        toast.success("Knowledge base access updated");
+        toast.success(t("settings.knowledgeBaseAccessUpdated"));
       } catch (saveError) {
         const message =
           saveError instanceof Error
             ? saveError.message
-            : "Unable to save this grant.";
+            : t("settings.unableToSaveGrant");
         setError(message);
         toast.error(message);
       } finally {
@@ -396,6 +399,7 @@ export function KnowledgeBaseGrants() {
       selectedKnowledgeBaseId,
       subjectId,
       subjectType,
+      t,
     ]
   );
 
@@ -413,18 +417,18 @@ export function KnowledgeBaseGrants() {
       setGrants((current) =>
         current.filter(({ grantId: id }) => id !== grantId)
       );
-      toast.success("Knowledge base access removed");
+      toast.success(t("settings.knowledgeBaseAccessRemoved"));
     } catch (deleteError) {
       const message =
         deleteError instanceof Error
           ? deleteError.message
-          : "Unable to remove this grant.";
+          : t("settings.unableToRemoveGrant");
       setError(message);
       toast.error(message);
     } finally {
       setDeletingGrantId(null);
     }
-  }, [canManageKnowledgeBases]);
+  }, [canManageKnowledgeBases, t]);
 
   const handleDeleteClick = useCallback(
     async (event: MouseEvent<HTMLButtonElement>) => {
@@ -451,52 +455,49 @@ export function KnowledgeBaseGrants() {
           <div>
             <div className="mb-3 flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.18em]">
               <ShieldCheckIcon className="size-4 text-primary" />
-              Knowledge access
+              {t("settings.knowledgeAccess")}
             </div>
             <h1 className="font-semibold text-3xl tracking-tight md:text-4xl">
-              Knowledge base grants
+              {t("settings.knowledgeGrants")}
             </h1>
             <p className="mt-2 max-w-xl text-muted-foreground text-sm leading-6">
-              Give a specific user or workspace role read or manage access to a
-              knowledge base. FastAPI enforces these grants on every list and
-              search request.
+              {t("settings.knowledgeGrantDescription")}
             </p>
           </div>
           <Badge className="w-fit gap-1.5 px-3 py-1.5" variant="outline">
             <KeyRoundIcon className="size-3.5" />
-            {grants.length} active grants
+            {t("settings.activeGrants", { count: grants.length })}
           </Badge>
         </header>
 
         {!canManageKnowledgeBases ? (
           <p className="mb-5 rounded-xl border border-border/70 bg-muted/30 px-4 py-3 text-muted-foreground text-sm">
-            You can view knowledge-base access here, but managing bases and
-            grants requires manage permission.
+            {t("settings.viewKnowledgeAccess")}
           </p>
         ) : null}
 
         <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
           <section className="rounded-2xl border border-border/70 bg-card/50 p-2 shadow-sm">
             <div className="px-3 py-3 text-muted-foreground text-xs uppercase tracking-[0.14em]">
-              Knowledge bases · {knowledgeBases.length}
+              {t("settings.knowledgeBasesCount", { count: knowledgeBases.length })}
             </div>
             <form
               className="flex gap-2 border-b border-border/70 px-2 pb-3"
               onSubmit={createKnowledgeBase}
             >
               <Label className="sr-only" htmlFor="new-knowledge-base-name">
-                New knowledge base name
+                {t("settings.newKnowledgeBase")}
               </Label>
               <Input
                 className="min-w-0"
                 id="new-knowledge-base-name"
                 onChange={handleNewKnowledgeBaseNameChange}
-                placeholder="New knowledge base"
+                placeholder={t("settings.newKnowledgeBase")}
                 disabled={!canManageKnowledgeBases}
                 value={newKnowledgeBaseName}
               />
               <Button
-                aria-label="Create knowledge base"
+                aria-label={t("settings.createKnowledgeBase")}
                 disabled={!canManageKnowledgeBases || isCreatingKnowledgeBase}
                 size="icon-sm"
                 type="submit"
@@ -506,7 +507,7 @@ export function KnowledgeBaseGrants() {
             </form>
             {knowledgeBases.length === 0 ? (
               <p className="px-3 py-6 text-muted-foreground text-sm">
-                No knowledge bases are available yet.
+                {t("settings.noKnowledgeBases")}
               </p>
             ) : (
               <div className="space-y-1">
@@ -539,7 +540,10 @@ export function KnowledgeBaseGrants() {
                           {knowledgeBase.displayName}
                         </span>
                         <span className="block text-muted-foreground text-xs">
-                          {count} {count === 1 ? "grant" : "grants"}
+                          {t("settings.grantCount", {
+                            count,
+                            label: count === 1 ? t("common.grant") : t("common.grants"),
+                          })}
                         </span>
                       </span>
                     </button>
@@ -563,8 +567,7 @@ export function KnowledgeBaseGrants() {
                           {selectedKnowledgeBase.displayName}
                         </h2>
                         <p className="mt-1 text-muted-foreground text-sm">
-                          Only matching user and role grants can read this
-                          restricted source.
+                          {t("settings.restrictedSource")}
                         </p>
                       </div>
                     </div>
@@ -587,7 +590,9 @@ export function KnowledgeBaseGrants() {
                         type="submit"
                       >
                         <SaveIcon />
-                        {isUpdatingKnowledgeBase ? "Saving" : "Save name"}
+                        {isUpdatingKnowledgeBase
+                          ? t("common.saving")
+                          : t("settings.saveName")}
                       </Button>
                       <Button
                         disabled={
@@ -599,7 +604,7 @@ export function KnowledgeBaseGrants() {
                         variant="destructive"
                       >
                         <Trash2Icon />
-                        Delete
+                        {t("common.delete")}
                       </Button>
                     </form>
                   </div>
@@ -610,7 +615,9 @@ export function KnowledgeBaseGrants() {
                   onSubmit={saveGrant}
                 >
                   <div className="grid gap-2">
-                    <Label htmlFor="grant-subject-type">Subject type</Label>
+                    <Label htmlFor="grant-subject-type">
+                      {t("settings.subjectType")}
+                    </Label>
                     <Select
                       disabled={!canManageKnowledgeBases}
                       onValueChange={handleSubjectTypeChange}
@@ -620,27 +627,33 @@ export function KnowledgeBaseGrants() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="role">Role</SelectItem>
-                        <SelectItem value="user">User ID</SelectItem>
+                        <SelectItem value="role">{t("settings.role")}</SelectItem>
+                        <SelectItem value="user">{t("settings.userId")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="grant-subject-id">
-                      {subjectType === "role" ? "Role ID" : "User ID"}
+                      {subjectType === "role"
+                        ? t("settings.roleId")
+                        : t("settings.userId")}
                     </Label>
                     <Input
                       id="grant-subject-id"
                       onChange={handleSubjectIdChange}
                       disabled={!canManageKnowledgeBases}
                       placeholder={
-                        subjectType === "role" ? "contractor" : "user UUID"
+                        subjectType === "role"
+                          ? t("settings.rolePlaceholder")
+                          : t("settings.userUuid")
                       }
                       value={subjectId}
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="grant-access-level">Access</Label>
+                    <Label htmlFor="grant-access-level">
+                      {t("settings.accessLevel")}
+                    </Label>
                     <Select
                       disabled={!canManageKnowledgeBases}
                       onValueChange={handleAccessLevelChange}
@@ -650,8 +663,8 @@ export function KnowledgeBaseGrants() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="read">Read</SelectItem>
-                        <SelectItem value="manage">Manage</SelectItem>
+                        <SelectItem value="read">{t("settings.read")}</SelectItem>
+                        <SelectItem value="manage">{t("settings.manage")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -660,19 +673,18 @@ export function KnowledgeBaseGrants() {
                     type="submit"
                   >
                     <PlusIcon />
-                    {isSaving ? "Saving" : "Grant access"}
+                    {isSaving ? t("common.saving") : t("settings.grantAccess")}
                   </Button>
                 </form>
 
                 <div className="p-5 md:p-7">
                   <div className="mb-4 flex items-center gap-2 font-medium text-sm">
                     <UsersRoundIcon className="size-4 text-primary" />
-                    Current grants
+                    {t("settings.currentGrants")}
                   </div>
                   {selectedGrants.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-border/80 px-4 py-8 text-center text-muted-foreground text-sm">
-                      No explicit grants. Workspace-level members can still use
-                      this knowledge base.
+                      {t("settings.noExplicitGrants")}
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -683,19 +695,23 @@ export function KnowledgeBaseGrants() {
                         >
                           <div className="flex min-w-0 items-center gap-3">
                             <Badge variant="secondary">
-                              {grant.subjectType === "role" ? "Role" : "User"}
+                              {grant.subjectType === "role"
+                                ? t("settings.role")
+                                : t("settings.user")}
                             </Badge>
                             <span className="truncate font-medium text-sm">
                               {grant.subjectId}
                             </span>
                             <Badge variant="outline">
                               {grant.accessLevel === "manage"
-                                ? "Manage"
-                                : "Read"}
+                                ? t("settings.manage")
+                                : t("settings.read")}
                             </Badge>
                           </div>
                           <Button
-                            aria-label={`Remove ${grant.subjectId} grant`}
+                            aria-label={t("settings.removeGrant", {
+                              subject: grant.subjectId,
+                            })}
                             data-grant-id={grant.grantId}
                             disabled={
                               !canManageKnowledgeBases ||
@@ -719,7 +735,9 @@ export function KnowledgeBaseGrants() {
                 ) : null}
               </>
             ) : (
-              <EmptyState message="Select a knowledge base to manage access." />
+                <EmptyState
+                  message={t("settings.selectKnowledgeBaseToManageAccess")}
+                />
             )}
           </section>
         </div>
@@ -731,25 +749,29 @@ export function KnowledgeBaseGrants() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this knowledge base?</AlertDialogTitle>
+            <AlertDialogTitle>{t("settings.deleteKnowledgeBaseTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingKnowledgeBaseDelete
-                ? `${pendingKnowledgeBaseDelete.displayName}, its grants, files, and processed chunks will be permanently removed.`
-                : "The knowledge base and its related data will be permanently removed."}
+                ? t("settings.deleteKnowledgeBaseDescriptionWithName", {
+                    name: pendingKnowledgeBaseDelete.displayName,
+                  })
+                : t("settings.deleteKnowledgeBaseDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={!canManageKnowledgeBases || deletingKnowledgeBaseId !== null}
             >
-              Cancel
+              {t("common.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={!canManageKnowledgeBases || deletingKnowledgeBaseId !== null}
               onClick={handleConfirmKnowledgeBaseDelete}
               variant="destructive"
             >
-              {deletingKnowledgeBaseId ? "Deleting" : "Delete knowledge base"}
+              {deletingKnowledgeBaseId
+                ? t("common.deleting")
+                : t("settings.deleteKnowledgeBase")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

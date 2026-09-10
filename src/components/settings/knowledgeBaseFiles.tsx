@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -72,28 +73,31 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(value: string) {
+function formatDate(value: string, language: string, unknownDate: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return "Unknown date";
+    return unknownDate;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
 }
 
-function statusLabel(status: string) {
+function statusLabel(
+  status: string,
+  t: (key: string) => string
+) {
   if (status === "ready") {
-    return "Ready";
+    return t("settings.ready");
   }
   if (status === "processing") {
-    return "Processing";
+    return t("settings.processing");
   }
   if (status === "failed") {
-    return "Failed";
+    return t("settings.failed");
   }
-  return "Queued";
+  return t("settings.queued");
 }
 
 function statusVariant(status: string): "default" | "destructive" | "outline" {
@@ -107,6 +111,7 @@ function statusVariant(status: string): "default" | "destructive" | "outline" {
 }
 
 export function KnowledgeBaseFiles() {
+  const { t, i18n } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState("");
@@ -153,13 +158,13 @@ export function KnowledgeBaseFiles() {
       setError(
         loadError instanceof Error
           ? loadError.message
-          : "Unable to load knowledge files."
+          : t("settings.unableToLoadKnowledgeFiles")
       );
       setFiles([]);
     } finally {
       setIsFilesLoading(false);
     }
-  }, [selectedKnowledgeBaseId]);
+  }, [selectedKnowledgeBaseId, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,7 +184,7 @@ export function KnowledgeBaseFiles() {
           setError(
             loadError instanceof Error
               ? loadError.message
-              : "Unable to load knowledge bases."
+              : t("settings.unableToLoadKnowledgeBases")
           );
         }
       })
@@ -192,7 +197,7 @@ export function KnowledgeBaseFiles() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    }, [t]);
 
   useEffect(() => {
     loadFiles().then(undefined, () => undefined);
@@ -244,19 +249,19 @@ export function KnowledgeBaseFiles() {
         );
         setFeatureDisabled(false);
         setFiles((current) => [data.file, ...current]);
-        toast.success("File uploaded and queued for processing");
+        toast.success(t("settings.fileUploaded"));
       } catch (uploadError) {
         const message =
           uploadError instanceof Error
             ? uploadError.message
-            : "Unable to upload this file.";
+            : t("settings.unableToUploadFile");
         setError(message);
         toast.error(message);
       } finally {
         setIsUploading(false);
       }
     },
-    [selectedKnowledgeBaseId]
+    [selectedKnowledgeBaseId, t]
   );
 
   const deleteFile = useCallback(async () => {
@@ -274,18 +279,18 @@ export function KnowledgeBaseFiles() {
       );
       setFiles((current) => current.filter(({ fileId: id }) => id !== fileId));
       setPendingDelete(null);
-      toast.success("Knowledge file deleted");
+      toast.success(t("settings.knowledgeFileDeleted"));
     } catch (deleteError) {
       const message =
         deleteError instanceof Error
           ? deleteError.message
-          : "Unable to delete this file.";
+          : t("settings.unableToDeleteFile");
       setError(message);
       toast.error(message);
     } finally {
       setDeletingFileId(null);
     }
-  }, [pendingDelete, selectedKnowledgeBaseId]);
+  }, [pendingDelete, selectedKnowledgeBaseId, t]);
 
   const handleConfirmDelete = useCallback(
     async (event: MouseEvent<HTMLButtonElement>) => {
@@ -311,31 +316,34 @@ export function KnowledgeBaseFiles() {
             <div>
               <div className="mb-3 flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.18em]">
                 <FileArchiveIcon className="size-4 text-primary" />
-                Knowledge ingestion
+                {t("settings.knowledgeIngestion")}
               </div>
               <h1 className="font-semibold text-3xl tracking-tight md:text-4xl">
-                Knowledge base files
+                {t("settings.knowledgeBaseFiles")}
               </h1>
               <p className="mt-2 max-w-xl text-muted-foreground text-sm leading-6">
-                Upload PDF, Excel, CSV, JSON, Markdown, or text files. FastAPI
-                stores and processes each file inside its selected knowledge
-                base.
+                {t("settings.ingestionDescription")}
               </p>
             </div>
             <Badge className="w-fit gap-1.5 px-3 py-1.5" variant="outline">
               <FileTextIcon className="size-3.5" />
-              {files.length} {files.length === 1 ? "file" : "files"}
+              {t("settings.fileCount", {
+                count: files.length,
+                label: files.length === 1 ? t("common.file") : t("common.files"),
+              })}
             </Badge>
           </header>
 
           <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
             <section className="rounded-2xl border border-border/70 bg-card/50 p-2 shadow-sm">
               <div className="px-3 py-3 text-muted-foreground text-xs uppercase tracking-[0.14em]">
-                Knowledge bases · {knowledgeBases.length}
+                {t("settings.knowledgeBasesCount", {
+                  count: knowledgeBases.length,
+                })}
               </div>
               {knowledgeBases.length === 0 ? (
                 <p className="px-3 py-6 text-muted-foreground text-sm">
-                  No knowledge bases are available yet.
+                  {t("settings.noKnowledgeBases")}
                 </p>
               ) : (
                 <div className="space-y-1">
@@ -365,8 +373,14 @@ export function KnowledgeBaseFiles() {
                           </span>
                           <span className="block text-muted-foreground text-xs">
                             {isSelected
-                              ? `${files.length} ${files.length === 1 ? "file" : "files"}`
-                              : "Select to manage files"}
+                              ? t("settings.fileCount", {
+                                  count: files.length,
+                                  label:
+                                    files.length === 1
+                                      ? t("common.file")
+                                      : t("common.files"),
+                                })
+                              : t("settings.selectToManageFiles")}
                           </span>
                         </span>
                       </button>
@@ -389,14 +403,13 @@ export function KnowledgeBaseFiles() {
                           {selectedKnowledgeBase.displayName}
                         </h2>
                         <p className="mt-1 text-muted-foreground text-sm">
-                          Files are parsed, chunked, and optionally embedded by
-                          FastAPI in the background.
+                          {t("settings.filesParsedDescription")}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
-                        aria-label="Refresh knowledge files"
+                        aria-label={t("settings.refreshKnowledgeFiles")}
                         disabled={isFilesLoading}
                         onClick={refreshFiles}
                         size="icon-sm"
@@ -413,7 +426,9 @@ export function KnowledgeBaseFiles() {
                           ) : (
                             <FileUpIcon />
                           )}
-                          {isUploading ? "Uploading" : "Upload file"}
+                          {isUploading
+                            ? t("settings.uploading")
+                            : t("settings.uploadFile")}
                         </label>
                       </Button>
                       <input
@@ -431,9 +446,7 @@ export function KnowledgeBaseFiles() {
                     <div className="flex gap-3 border-b border-amber-500/20 bg-amber-500/5 px-5 py-4 text-sm md:px-7">
                       <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
                       <p className="text-muted-foreground leading-6">
-                        Knowledge ingestion is not enabled yet. Apply the
-                        FastAPI knowledge migration in a local database and
-                        enable the ingestion feature flag before uploading.
+                        {t("settings.ingestionDisabled")}
                       </p>
                     </div>
                   ) : null}
@@ -445,10 +458,10 @@ export function KnowledgeBaseFiles() {
                       <div className="rounded-xl border border-dashed border-border/80 px-4 py-12 text-center">
                         <FileArchiveIcon className="mx-auto size-8 text-muted-foreground" />
                         <p className="mt-3 font-medium text-sm">
-                          No files in this knowledge base
+                          {t("settings.noFilesInKnowledgeBase")}
                         </p>
                         <p className="mt-1 text-muted-foreground text-sm">
-                          Upload a supported document to start ingestion.
+                          {t("settings.uploadSupportedDocument")}
                         </p>
                       </div>
                     ) : (
@@ -484,23 +497,27 @@ export function KnowledgeBaseFiles() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this knowledge file?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("settings.deleteKnowledgeFileTitle")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingDelete
                 ? `${pendingDelete.originalName} and its processed chunks will be permanently removed.`
-                : "The file and its processed chunks will be permanently removed."}
+                : t("settings.deleteKnowledgeFileDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deletingFileId !== null}>
-              Cancel
+              {t("common.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={deletingFileId !== null}
               onClick={handleConfirmDelete}
               variant="destructive"
             >
-              {deletingFileId ? "Deleting" : "Delete file"}
+              {deletingFileId
+                ? t("common.deleting")
+                : t("settings.deleteFile")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -518,6 +535,7 @@ function FileRow({
   file: KnowledgeFile;
   onDelete: (file: KnowledgeFile) => void;
 }) {
+  const { t, i18n } = useTranslation();
   const isProcessing =
     file.status === "processing" || file.status === "pending";
   const handleDelete = useCallback(() => {
@@ -539,7 +557,8 @@ function FileRow({
         <div className="min-w-0">
           <p className="truncate font-medium text-sm">{file.originalName}</p>
           <p className="mt-1 text-muted-foreground text-xs">
-            {formatBytes(file.byteSize)} · Uploaded {formatDate(file.createdAt)}
+            {formatBytes(file.byteSize)} · {t("common.uploaded")}{" "}
+            {formatDate(file.createdAt, i18n.language, t("common.unknownDate"))}
           </p>
           {file.errorMessage ? (
             <p className="mt-1 text-destructive text-xs">{file.errorMessage}</p>
@@ -549,10 +568,12 @@ function FileRow({
       <div className="flex items-center gap-2 self-end sm:self-auto">
         <Badge variant={statusVariant(file.status)}>
           {isProcessing ? <LoaderCircleIcon className="animate-spin" /> : null}
-          {statusLabel(file.status)}
+          {statusLabel(file.status, t)}
         </Badge>
         <Button
-          aria-label={`Delete ${file.originalName}`}
+          aria-label={t("settings.deleteFileAria", {
+            name: file.originalName,
+          })}
           disabled={deleting}
           onClick={handleDelete}
           size="icon-sm"

@@ -4,25 +4,27 @@ import { PanelLeftIcon } from "lucide-react";
 import { memo } from "react";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "@/components/ui/sidebar";
-import { VisibilitySelector, type VisibilityType } from "./visibilitySelector";
+import type { VisibilityType } from "./visibilitySelector";
 
 function PureChatHeader({
-  chatId,
-  selectedVisibilityType,
-  isReadonly,
+  chatId: _chatId,
+  selectedVisibilityType: _selectedVisibilityType,
+  isReadonly: _isReadonly,
 }: {
   chatId: string;
   selectedVisibilityType: VisibilityType;
   isReadonly: boolean;
 }) {
-  const { state, toggleSidebar, isMobile } = useSidebar();
+  const { toggleSidebar, isMobile } = useSidebar();
 
-  if (state === "collapsed" && !isMobile) {
+  // Keep the mobile sidebar control, but do not reserve a desktop header row
+  // while the chat visibility selector is temporarily disabled.
+  if (!isMobile) {
     return null;
   }
 
   return (
-    <header className="sticky top-0 flex h-14 items-center gap-2 bg-sidebar px-3">
+    <header className="flex h-14 shrink-0 items-center gap-2 bg-sidebar px-3">
       <Button
         className="md:hidden"
         onClick={toggleSidebar}
@@ -32,12 +34,15 @@ function PureChatHeader({
         <PanelLeftIcon className="size-4" />
       </Button>
 
-      {!isReadonly && (
-        <VisibilitySelector
-          chatId={chatId}
-          selectedVisibilityType={selectedVisibilityType}
-        />
-      )}
+      {/*
+        Temporarily disabled until chat visibility is needed again.
+        {!isReadonly && (
+          <VisibilitySelector
+            chatId={chatId}
+            selectedVisibilityType={selectedVisibilityType}
+          />
+        )}
+      */}
     </header>
   );
 }

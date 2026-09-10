@@ -2,11 +2,12 @@ import { toast } from "sonner";
 import { Artifact } from "@/components/chat/createArtifact";
 import { CopyIcon, RedoIcon, UndoIcon } from "@/components/chat/icons";
 import { ImageEditor } from "@/components/chat/imageEditor";
+import { i18n } from "@/lib/i18n";
 
 export const imageArtifact = new Artifact({
   actions: [
     {
-      description: "View Previous version",
+      description: "artifacts.viewPreviousVersion",
       icon: <UndoIcon size={18} />,
       isDisabled: ({ currentVersionIndex }) => {
         if (currentVersionIndex === 0) {
@@ -20,7 +21,7 @@ export const imageArtifact = new Artifact({
       },
     },
     {
-      description: "View Next version",
+      description: "artifacts.viewNextVersion",
       icon: <RedoIcon size={18} />,
       isDisabled: ({ isCurrentVersion }) => {
         if (isCurrentVersion) {
@@ -34,7 +35,7 @@ export const imageArtifact = new Artifact({
       },
     },
     {
-      description: "Copy image to clipboard",
+      description: "artifacts.copyImageToClipboard",
       icon: <CopyIcon size={18} />,
       onClick: ({ content }) => {
         const img = new Image();
@@ -55,12 +56,12 @@ export const imageArtifact = new Artifact({
           }, "image/png");
         };
 
-        toast.success("Copied image to clipboard!");
+        toast.success(i18n.t("common.copiedImage"));
       },
     },
   ],
   content: ImageEditor,
-  description: "Useful for image generation",
+  description: "artifacts.imageDescription",
   kind: "image",
   onStreamPart: ({ streamPart, setArtifact }) => {
     if (streamPart.type === "data-imageDelta") {

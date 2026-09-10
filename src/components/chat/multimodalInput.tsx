@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "@/lib/router";
 import { useTheme } from "next-themes";
+import { useTranslation } from "react-i18next";
 import {
   type ChangeEvent,
   type Dispatch,
@@ -52,14 +53,13 @@ import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn, getNewChatPath } from "@/lib/utils";
 import {
   PromptInput,
-  PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
 } from "../ai-elements/promptInput";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import { PaperclipIcon, StopIcon } from "./icons";
+import { BotIcon, StopIcon } from "./icons";
 import { PreviewAttachment } from "./previewAttachment";
 import {
   type SlashCommand,
@@ -121,11 +121,17 @@ function PureMultimodalInput({
 }) {
   const router = useRouter();
   const { setTheme, resolvedTheme } = useTheme();
+  const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
   const hasAutoFocused = useRef(false);
   useEffect(() => {
-    if (!hasAutoFocused.current && width) {
+    // Do not auto-focus on touch devices: mobile browsers open the keyboard
+    // as soon as the chat mounts, which steals the user's viewport.
+    const isDesktopPointer = window.matchMedia(
+      "(hover: hover) and (pointer: fine)"
+    ).matches;
+    if (!hasAutoFocused.current && width && isDesktopPointer) {
       const timer = setTimeout(() => {
         textareaRef.current?.focus();
         hasAutoFocused.current = true;
@@ -185,7 +191,7 @@ function PureMultimodalInput({
           setMessages(() => []);
           break;
         case "rename":
-          toast("Rename is available from the sidebar chat menu.");
+          toast(t("chat.renameAvailable"));
           break;
         case "model": {
           const modelBtn = document.querySelector<HTMLButtonElement>(
@@ -198,24 +204,24 @@ function PureMultimodalInput({
           setTheme(resolvedTheme === "dark" ? "light" : "dark");
           break;
         case "delete":
-          toast("Delete this chat?", {
+          toast(t("sidebar.deleteChatTitle"), {
             action: {
-              label: "Delete",
+              label: t("common.delete"),
               onClick: () => {
                 requestBackend(
                   `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat?id=${chatId}`,
                   { method: "DELETE" }
                 ).catch(() => undefined);
                 router.push(getNewChatPath());
-                toast.success("Chat deleted");
+                toast.success(t("sidebar.chatDeleted"));
               },
             },
           });
           break;
         case "purge":
-          toast("Delete all chats?", {
+          toast(t("sidebar.deleteAllTitle"), {
             action: {
-              label: "Delete all",
+              label: t("common.deleteAll"),
               onClick: () => {
                 requestBackend(
                   `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/history`,
@@ -224,7 +230,7 @@ function PureMultimodalInput({
                   }
                 ).catch(() => undefined);
                 router.push(getNewChatPath());
-                toast.success("All chats deleted");
+                toast.success(t("sidebar.allChatsDeleted"));
               },
             },
           });
@@ -233,7 +239,7 @@ function PureMultimodalInput({
           break;
       }
     },
-    [chatId, resolvedTheme, router, setInput, setMessages, setTheme]
+    [chatId, resolvedTheme, router, setInput, setMessages, setTheme, t]
   );
 
   const submitForm = useCallback(() => {
@@ -298,9 +304,9 @@ function PureMultimodalInput({
         url,
       };
     } catch {
-      toast.error("Failed to upload file, please try again!");
+      toast.error(t("chat.failedUploadFile"));
     }
-  }, []);
+  }, [t]);
 
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -320,12 +326,12 @@ function PureMultimodalInput({
           ...successfullyUploadedAttachments,
         ]);
       } catch {
-        toast.error("Failed to upload files");
+        toast.error(t("chat.failedUploadFiles"));
       } finally {
         setUploadQueue([]);
       }
     },
-    [setAttachments, uploadFile]
+    [setAttachments, t, uploadFile]
   );
 
   const handlePaste = useCallback(
@@ -345,7 +351,7 @@ function PureMultimodalInput({
 
       event.preventDefault();
 
-      setUploadQueue((prev) => [...prev, "Pasted image"]);
+      setUploadQueue((prev) => [...prev, t("chat.pastedImage")]);
 
       try {
         const uploadPromises = imageItems
@@ -366,12 +372,12 @@ function PureMultimodalInput({
           ...(successfullyUploadedAttachments as Attachment[]),
         ]);
       } catch {
-        toast.error("Failed to upload pasted image(s)");
+        toast.error(t("chat.failedPasteImages"));
       } finally {
         setUploadQueue([]);
       }
     },
-    [setAttachments, uploadFile]
+    [setAttachments, t, uploadFile]
   );
 
   useEffect(() => {
@@ -411,9 +417,9 @@ function PureMultimodalInput({
     if (status === "ready" || status === "error") {
       submitForm();
     } else {
-      toast.error("Please wait for the model to finish its response!");
+      toast.error(t("chat.pleaseWait"));
     }
-  }, [attachments.length, handleSlashSelect, input, status, submitForm]);
+  }, [attachments.length, handleSlashSelect, input, status, submitForm, t]);
 
   const handleTextareaKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -463,13 +469,13 @@ function PureMultimodalInput({
     <div className={cn("relative flex w-full flex-col gap-4", className)}>
       {editingMessage && onCancelEdit ? (
         <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-          <span>Editing message</span>
+          <span>{t("chat.editingMessage")}</span>
           <button
             className="rounded px-1.5 py-0.5 text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
             onMouseDown={handleCancelEditMouseDown}
             type="button"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
         </div>
       ) : null}
@@ -507,7 +513,7 @@ function PureMultimodalInput({
       </div>
 
       <PromptInput
-        className="[&>div]:rounded-2xl [&>div]:border [&>div]:border-border/30 [&>div]:bg-card/70 [&>div]:shadow-[var(--shadow-composer)] [&>div]:transition-shadow [&>div]:duration-300 [&>div]:focus-within:shadow-[var(--shadow-composer-focus)]"
+        className="[&>div]:h-auto [&>div]:items-stretch [&>div]:flex-col [&>div]:rounded-[2rem] [&>div]:border [&>div]:border-border/30 [&>div]:bg-card/70 [&>div]:shadow-[var(--shadow-composer)] [&>div]:transition-shadow [&>div]:duration-300 [&>div]:focus-within:!border-border/30 [&>div]:focus-within:!shadow-none [&>div]:focus-within:!ring-0"
         onSubmit={handlePromptSubmit}
       >
         {(attachments.length > 0 || uploadQueue.length > 0) && (
@@ -537,49 +543,49 @@ function PureMultimodalInput({
             ))}
           </div>
         )}
-        <PromptInputTextarea
-          className="min-h-24 text-[13px] leading-relaxed px-4 pt-3.5 pb-1.5 placeholder:text-muted-foreground/35"
-          data-testid="multimodal-input"
-          onChange={handleInput}
-          onKeyDown={handleTextareaKeyDown}
-          placeholder={
-            editingMessage ? "Edit your message..." : "Ask anything..."
-          }
-          ref={textareaRef}
-          value={input}
-        />
-        <PromptInputFooter className="px-3 pb-3">
-          <PromptInputTools>
-            <AttachmentsButton
-              fileInputRef={fileInputRef}
-              selectedModelId={selectedModelId}
-              status={status}
-            />
-            <ModelSelectorCompact
-              onModelChange={onModelChange}
-              selectedModelId={selectedModelId}
-            />
-          </PromptInputTools>
+        <div className="flex min-w-0 w-full items-center">
+          <PromptInputTextarea
+            className="min-h-16 max-h-48 min-w-0 flex-1 self-stretch overflow-y-auto px-4 py-5 text-base leading-normal placeholder:text-foreground/45 md:text-[15px]"
+            data-testid="multimodal-input"
+            enterKeyHint="send"
+            onChange={handleInput}
+            onKeyDown={handleTextareaKeyDown}
+            placeholder={
+              editingMessage ? t("chat.editMessage") : t("chat.askAnything")
+            }
+            ref={textareaRef}
+            rows={1}
+            value={input}
+          />
+          <div className="flex shrink-0 items-center gap-2 px-3">
+            <PromptInputTools className="ml-auto">
+              {/* Temporarily disabled until attachment selection is supported. */}
+              <ModelSelectorCompact
+                onModelChange={onModelChange}
+                selectedModelId={selectedModelId}
+              />
+            </PromptInputTools>
 
-          {status === "submitted" ? (
-            <StopButton setMessages={setMessages} stop={stop} />
-          ) : (
-            <PromptInputSubmit
-              className={cn(
-                "h-7 w-7 rounded-xl transition-all duration-200",
-                input.trim()
-                  ? "bg-foreground text-background hover:opacity-85 active:scale-95"
-                  : "bg-muted text-muted-foreground/25 cursor-not-allowed"
-              )}
-              data-testid="send-button"
-              disabled={!input.trim() || uploadQueue.length > 0}
-              status={status}
-              variant="secondary"
-            >
-              <ArrowUpIcon className="size-4" />
-            </PromptInputSubmit>
-          )}
-        </PromptInputFooter>
+            {status === "submitted" ? (
+              <StopButton setMessages={setMessages} stop={stop} />
+            ) : (
+              <PromptInputSubmit
+                className={cn(
+                  "size-11 rounded-2xl transition-all duration-200 md:size-7 md:rounded-xl",
+                  input.trim()
+                    ? "bg-foreground text-background hover:opacity-85 active:scale-95"
+                    : "bg-muted text-muted-foreground/25 cursor-not-allowed"
+                )}
+                data-testid="send-button"
+                disabled={!input.trim() || uploadQueue.length > 0}
+                status={status}
+                variant="secondary"
+              >
+                <ArrowUpIcon className="size-4" />
+              </PromptInputSubmit>
+            )}
+          </div>
+        </div>
       </PromptInput>
     </div>
   );
@@ -640,53 +646,6 @@ function PureAttachmentPreviewItem({
 
 const AttachmentPreviewItem = memo(PureAttachmentPreviewItem);
 
-function PureAttachmentsButton({
-  fileInputRef,
-  status,
-  selectedModelId,
-}: {
-  fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
-  status: UseChatHelpers<ChatMessage>["status"];
-  selectedModelId: string;
-}) {
-  const identity = useBackendIdentity();
-  const { data: modelsResponse } = useBackendQuery<ModelsResponse>({
-    path: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/models`,
-    queryKey: backendQueryKeys.models(identity),
-    staleTime: 3_600_000,
-  });
-
-  const caps: Record<string, ModelCapabilities> | undefined =
-    modelsResponse?.capabilities ?? modelsResponse;
-  const hasVision = caps?.[selectedModelId]?.vision ?? false;
-  const handleClick = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      fileInputRef.current?.click();
-    },
-    [fileInputRef]
-  );
-
-  return (
-    <Button
-      className={cn(
-        "h-7 w-7 rounded-lg border border-border/40 p-1 transition-colors",
-        hasVision
-          ? "text-foreground hover:border-border hover:text-foreground"
-          : "text-muted-foreground/30 cursor-not-allowed"
-      )}
-      data-testid="attachments-button"
-      disabled={status !== "ready" || !hasVision}
-      onClick={handleClick}
-      variant="ghost"
-    >
-      <PaperclipIcon size={14} style={{ height: 14, width: 14 }} />
-    </Button>
-  );
-}
-
-const AttachmentsButton = memo(PureAttachmentsButton);
-
 function ModelSelectorOption({
   capabilities,
   curated,
@@ -702,6 +661,7 @@ function ModelSelectorOption({
   selectedModelId: string;
   setOpen: Dispatch<SetStateAction<boolean>>;
 }) {
+  const { t } = useTranslation();
   const [logoProvider] = model.id.split("/");
   const maybeWithTooltip = (icon: ReactNode, label: string) => {
     if (!curated) {
@@ -753,19 +713,19 @@ function ModelSelectorOption({
         {capabilities?.[model.id]?.tools
           ? maybeWithTooltip(
               <WrenchIcon className="size-3.5" />,
-              "Supports tool use"
+              t("tools.supportsToolUse")
             )
           : null}
         {capabilities?.[model.id]?.vision
           ? maybeWithTooltip(
               <EyeIcon className="size-3.5" />,
-              "Supports vision"
+              t("tools.supportsVision")
             )
           : null}
         {capabilities?.[model.id]?.reasoning
           ? maybeWithTooltip(
               <BrainIcon className="size-3.5" />,
-              "Supports reasoning"
+              t("tools.supportsReasoning")
             )
           : null}
         {!curated && <LockIcon className="size-3 text-muted-foreground/50" />}
@@ -783,7 +743,7 @@ function ModelSelectorOption({
         <div className="w-full cursor-not-allowed">{option}</div>
       </TooltipTrigger>
       <TooltipContent side="right" sideOffset={8}>
-        This model is not enabled for this deployment.
+        {t("tools.disabledDeployment")}
       </TooltipContent>
     </Tooltip>
   );
@@ -797,6 +757,7 @@ function PureModelSelectorCompact({
   onModelChange?: (modelId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const { t } = useTranslation();
   const identity = useBackendIdentity();
   const { data: modelsData } = useBackendQuery<ModelsResponse>({
     path: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/models`,
@@ -813,22 +774,22 @@ function PureModelSelectorCompact({
     activeModels.find((m: ChatModel) => m.id === selectedModelId) ??
     activeModels.find((m: ChatModel) => m.id === DEFAULT_CHAT_MODEL) ??
     activeModels[0];
-  const [provider] = selectedModel.id.split("/");
-
   return (
     <ModelSelector onOpenChange={setOpen} open={open}>
       <ModelSelectorTrigger asChild>
         <Button
-          className="h-7 max-w-[200px] justify-between gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          aria-label={t("chat.selectModel")}
+          className="h-7 max-w-[200px] justify-between gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground active:translate-y-0"
           data-testid="model-selector"
+          title={t("chat.selectModel")}
           variant="ghost"
         >
-          {provider ? <ModelSelectorLogo provider={provider} /> : null}
-          <ModelSelectorName>{selectedModel.name}</ModelSelectorName>
+          <BotIcon />
+          <ModelSelectorName>{t("chat.model")}</ModelSelectorName>
         </Button>
       </ModelSelectorTrigger>
       <ModelSelectorContent commandDefaultValue={selectedModel.id}>
-        <ModelSelectorInput placeholder="Search models..." />
+        <ModelSelectorInput placeholder={t("chat.searchModels")} />
         <ModelSelectorList>
           {(() => {
             const curatedIds = new Set(chatModels.map((m) => m.id));
@@ -892,7 +853,7 @@ function PureModelSelectorCompact({
               <ModelSelectorGroup
                 heading={
                   key === "_available"
-                    ? "Available"
+                    ? t("chat.available")
                     : (providerNames[key] ?? key)
                 }
                 key={key}

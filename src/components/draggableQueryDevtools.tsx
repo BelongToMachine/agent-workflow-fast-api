@@ -1,4 +1,5 @@
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 
 type Point = {
@@ -44,6 +45,7 @@ function readStoredPoint(): Point {
 }
 
 export function DraggableQueryDevtools() {
+  const { t } = useTranslation();
   const [point, setPoint] = useState<Point>(readStoredPoint);
   const [isDragging, setIsDragging] = useState(false);
   const dragState = useRef<{
@@ -106,7 +108,7 @@ export function DraggableQueryDevtools() {
       }}
     >
       <div
-        aria-label="Drag TanStack Query Devtools"
+        aria-label={t("ui.dragQueryDevtools")}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -127,7 +129,7 @@ export function DraggableQueryDevtools() {
           width: HANDLE_SIZE,
         }}
         tabIndex={0}
-        title="Drag TanStack Query Devtools"
+        title={t("ui.dragQueryDevtools")}
       >
         ⠿
       </div>

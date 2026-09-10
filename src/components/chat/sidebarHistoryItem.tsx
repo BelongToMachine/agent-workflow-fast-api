@@ -1,15 +1,12 @@
 import { Link } from "@/lib/router";
+import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 import { memo, useCallback } from "react";
-import { useChatVisibility } from "@/hooks/useChatVisibility";
 import type { ChatHistoryEntry } from "@/lib/backend/chatHistoryCache";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuPortal,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "../ui/dropdownMenu";
 import {
@@ -18,13 +15,10 @@ import {
   SidebarMenuItem,
 } from "../ui/sidebar";
 import {
-  CheckCircleFillIcon,
-  GlobeIcon,
-  LockIcon,
   MoreHorizontalIcon,
-  ShareIcon,
   TrashIcon,
 } from "./icons";
+import { sidebarSelectedMenuItemClassName } from "./sidebarStyles";
 
 const PureChatItem = ({
   chat,
@@ -37,21 +31,10 @@ const PureChatItem = ({
   onDelete: (chatId: string) => void;
   setOpenMobile: (open: boolean) => void;
 }) => {
-  const { visibilityType, setVisibilityType } = useChatVisibility({
-    chatId: chat.id,
-    initialVisibilityType: chat.visibility,
-  });
+  const { t } = useTranslation();
   const closeMobile = useCallback(() => {
     setOpenMobile(false);
   }, [setOpenMobile]);
-
-  const handleSetPrivate = useCallback(() => {
-    setVisibilityType("private");
-  }, [setVisibilityType]);
-
-  const handleSetPublic = useCallback(() => {
-    setVisibilityType("public");
-  }, [setVisibilityType]);
 
   const handleDelete = useCallback(() => {
     onDelete(chat.id);
@@ -61,7 +44,10 @@ const PureChatItem = ({
     <SidebarMenuItem>
       <SidebarMenuButton
         asChild
-        className="h-8 rounded-none text-[13px] text-sidebar-foreground/50 transition-all duration-150 hover:bg-transparent hover:text-sidebar-foreground data-active:bg-transparent data-active:font-normal data-active:text-sidebar-foreground/50 data-[active=true]:text-sidebar-foreground data-[active=true]:font-medium data-[active=true]:border-b data-[active=true]:border-dashed data-[active=true]:border-sidebar-foreground/50"
+        className={cn(
+          sidebarSelectedMenuItemClassName,
+          !isActive && "border-transparent text-sidebar-foreground/50"
+        )}
         isActive={isActive}
       >
         <Link href={`/chat/${chat.id}`} onClick={closeMobile}>
@@ -76,47 +62,29 @@ const PureChatItem = ({
             showOnHover={!isActive}
           >
             <MoreHorizontalIcon />
-            <span className="sr-only">More</span>
+            <span className="sr-only">{t("sidebar.more")}</span>
           </SidebarMenuAction>
         </DropdownMenuTrigger>
 
         <DropdownMenuContent align="end" side="bottom">
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="cursor-pointer">
-              <ShareIcon />
-              <span>Share</span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuSubContent>
-                <DropdownMenuItem
-                  className="cursor-pointer flex-row justify-between"
-                  onClick={handleSetPrivate}
-                >
-                  <div className="flex flex-row items-center gap-2">
-                    <LockIcon size={12} />
-                    <span>Private</span>
-                  </div>
-                  {visibilityType === "private" ? (
-                    <CheckCircleFillIcon />
-                  ) : null}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer flex-row justify-between"
-                  onClick={handleSetPublic}
-                >
-                  <div className="flex flex-row items-center gap-2">
-                    <GlobeIcon />
-                    <span>Public</span>
-                  </div>
-                  {visibilityType === "public" ? <CheckCircleFillIcon /> : null}
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuPortal>
-          </DropdownMenuSub>
+          {/*
+            Temporarily disabled until chat visibility is needed again.
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="cursor-pointer">
+                <ShareIcon />
+                <span>Share</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuSubContent>
+                  Private/Public options
+                </DropdownMenuSubContent>
+              </DropdownMenuPortal>
+            </DropdownMenuSub>
+          */}
 
           <DropdownMenuItem onSelect={handleDelete} variant="destructive">
             <TrashIcon />
-            <span>Delete</span>
+            <span>{t("common.delete")}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

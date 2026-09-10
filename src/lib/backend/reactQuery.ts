@@ -10,7 +10,11 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth";
-import { type BackendRequestError, requestBackend } from "./request";
+import {
+  type BackendRequestError,
+  type BackendRequestOptions,
+  requestBackend,
+} from "./request";
 
 export function useBackendIdentity(fallbackIdentity?: string) {
   const { data: session } = useSession();
@@ -36,6 +40,7 @@ type BackendQueryOptions<TData> = {
   init?: RequestInit;
   path: RequestInfo | URL;
   queryKey: QueryKey;
+  requestOptions?: BackendRequestOptions;
 } & Omit<
   UseQueryOptions<TData, BackendRequestError, TData, QueryKey>,
   "queryFn" | "queryKey"
@@ -45,6 +50,7 @@ export function useBackendQuery<TData>({
   init,
   path,
   queryKey,
+  requestOptions,
   ...options
 }: BackendQueryOptions<TData>) {
   return useQuery<TData, BackendRequestError, TData, QueryKey>({
@@ -53,7 +59,7 @@ export function useBackendQuery<TData>({
       requestBackend<TData>(path, {
         ...init,
         signal,
-      }),
+      }, requestOptions),
     queryKey,
   });
 }

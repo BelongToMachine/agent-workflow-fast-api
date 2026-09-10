@@ -1,4 +1,5 @@
 import { memo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useCopyToClipboard } from "usehooks-ts";
 import type { ChatMessage } from "@/lib/types";
@@ -17,6 +18,7 @@ export function PureMessageActions({
   isLoading: boolean;
   onEdit?: () => void;
 }) {
+  const { t } = useTranslation();
   const [_, copyToClipboard] = useCopyToClipboard();
 
   const textFromParts = message.parts
@@ -27,13 +29,13 @@ export function PureMessageActions({
 
   const handleCopy = useCallback(async () => {
     if (!textFromParts) {
-      toast.error("There's no text to copy!");
+      toast.error(t("chat.noTextToCopy"));
       return;
     }
 
     await copyToClipboard(textFromParts);
-    toast.success("Copied to clipboard!");
-  }, [copyToClipboard, textFromParts]);
+    toast.success(t("common.copied"));
+  }, [copyToClipboard, t, textFromParts]);
 
   if (isLoading) {
     return null;
@@ -48,7 +50,7 @@ export function PureMessageActions({
               className="size-7 text-muted-foreground/50 hover:text-foreground"
               data-testid="message-edit-button"
               onClick={onEdit}
-              tooltip="Edit"
+              tooltip={t("common.edit")}
             >
               <PencilEditIcon />
             </Action>
@@ -56,7 +58,7 @@ export function PureMessageActions({
           <Action
             className="size-7 text-muted-foreground/50 hover:text-foreground"
             onClick={handleCopy}
-            tooltip="Copy"
+            tooltip={t("common.copy")}
           >
             <CopyIcon />
           </Action>
@@ -70,7 +72,7 @@ export function PureMessageActions({
       <Action
         className="text-muted-foreground/50 hover:text-foreground"
         onClick={handleCopy}
-        tooltip="Copy"
+        tooltip={t("common.copy")}
       >
         <CopyIcon />
       </Action>

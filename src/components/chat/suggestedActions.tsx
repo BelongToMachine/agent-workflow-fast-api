@@ -3,7 +3,8 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { motion } from "framer-motion";
 import { memo, useCallback } from "react";
-import { suggestions } from "@/lib/constants";
+import { useTranslation } from "react-i18next";
+import { suggestionKeys } from "@/lib/constants";
 import type { ChatMessage } from "@/lib/types";
 import { Suggestion } from "../ai-elements/suggestion";
 import type { VisibilityType } from "./visibilitySelector";
@@ -15,7 +16,8 @@ type SuggestedActionsProps = {
 };
 
 function PureSuggestedActions({ chatId, sendMessage }: SuggestedActionsProps) {
-  const suggestedActions = suggestions;
+  const { t } = useTranslation();
+  const suggestedActions = suggestionKeys.map((key) => t(key));
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
       window.history.pushState(
@@ -33,7 +35,7 @@ function PureSuggestedActions({ chatId, sendMessage }: SuggestedActionsProps) {
 
   return (
     <div
-      className="flex w-full gap-2.5 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible"
+      className="new-chat-content-shift flex w-full gap-2.5 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible"
       data-testid="suggested-actions"
       style={{
         msOverflowStyle: "none",

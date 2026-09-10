@@ -1,4 +1,5 @@
 import { memo, type ReactNode, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
@@ -34,17 +35,18 @@ function ArtifactActionButton({
   isActive: boolean;
   setIsLoading: (isLoading: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const handleClick = useCallback(async () => {
     setIsLoading(true);
 
     try {
       await Promise.resolve(action.onClick(actionContext));
     } catch {
-      toast.error("Failed to execute action");
+      toast.error(t("artifacts.actionFailed"));
     } finally {
       setIsLoading(false);
     }
-  }, [action, actionContext, setIsLoading]);
+  }, [action, actionContext, setIsLoading, t]);
 
   return (
     <Tooltip>
@@ -67,7 +69,7 @@ function ArtifactActionButton({
         </button>
       </TooltipTrigger>
       <TooltipContent side="left" sideOffset={8}>
-        {action.description}
+        {t(action.description)}
       </TooltipContent>
     </Tooltip>
   );

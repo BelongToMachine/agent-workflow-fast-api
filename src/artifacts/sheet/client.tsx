@@ -9,13 +9,14 @@ import {
   UndoIcon,
 } from "@/components/chat/icons";
 import { SpreadsheetEditor } from "@/components/chat/sheetEditor";
+import { i18n } from "@/lib/i18n";
 
 type Metadata = Record<string, never>;
 
 export const sheetArtifact = new Artifact<"sheet", Metadata>({
   actions: [
     {
-      description: "View Previous version",
+      description: "artifacts.viewPreviousVersion",
       icon: <UndoIcon size={18} />,
       isDisabled: ({ currentVersionIndex }) => {
         if (currentVersionIndex === 0) {
@@ -29,7 +30,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
       },
     },
     {
-      description: "View Next version",
+      description: "artifacts.viewNextVersion",
       icon: <RedoIcon size={18} />,
       isDisabled: ({ isCurrentVersion }) => {
         if (isCurrentVersion) {
@@ -43,7 +44,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
       },
     },
     {
-      description: "Copy as .csv",
+      description: "artifacts.copyAsCsv",
       icon: <CopyIcon />,
       onClick: ({ content }) => {
         const parsed = parse<string[]>(content, { skipEmptyLines: true });
@@ -55,7 +56,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
         const cleanedCsv = unparse(nonEmptyRows);
 
         navigator.clipboard.writeText(cleanedCsv);
-        toast.success("Copied csv to clipboard!");
+        toast.success(i18n.t("common.copiedCsv"));
       },
     },
   ],
@@ -68,7 +69,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
       status={status}
     />
   ),
-  description: "Useful for working with spreadsheets",
+  description: "artifacts.sheetDescription",
   initialize: () => null,
   kind: "sheet",
   onStreamPart: ({ setArtifact, streamPart }) => {
@@ -83,7 +84,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
   },
   toolbar: [
     {
-      description: "Format and clean data",
+      description: "artifacts.formatData",
       icon: <SparklesIcon />,
       onClick: ({ sendMessage }) => {
         sendMessage({
@@ -95,7 +96,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
       },
     },
     {
-      description: "Analyze and visualize data",
+      description: "artifacts.analyzeData",
       icon: <LineChartIcon />,
       onClick: ({ sendMessage }) => {
         sendMessage({

@@ -1,5 +1,6 @@
 "use client";
 import type { UseChatHelpers } from "@ai-sdk/react";
+import { useTranslation } from "react-i18next";
 import type { SourceCitation } from "@/lib/knowledgeCitation";
 import type { ChatMessage } from "@/lib/types";
 import { cn, hasToolControlSyntax, sanitizeText } from "@/lib/utils";
@@ -13,14 +14,14 @@ import {
   ToolOutput,
 } from "../ai-elements/tool";
 import { useDataStream } from "./dataStreamProvider";
-import { SparklesIcon } from "./icons";
 import { MessageActions } from "./messageActions";
 import { MessageReasoning } from "./messageReasoning";
 import { PreviewAttachment } from "./previewAttachment";
 
 function WaitingText() {
   const { waitingStatus } = useDataStream();
-  const waitingText = waitingStatus?.message ?? "Waiting...";
+  const { t } = useTranslation();
+  const waitingText = waitingStatus?.message ?? t("chat.waiting");
 
   return (
     <div className="flex min-h-[calc(13px*1.65)] min-w-0 items-center text-[13px] leading-[1.65]">
@@ -46,6 +47,7 @@ function SourceCitationLine({
   row?: number | null;
   sheet?: string | null;
 }) {
+  const { t } = useTranslation();
   const resolvedFileName = citation?.fileName ?? fileName;
   const resolvedSheet = citation?.sheet ?? sheet;
   const resolvedRow = citation?.row ?? row;
@@ -53,10 +55,10 @@ function SourceCitationLine({
     resolvedSheet,
     resolvedRow === undefined || resolvedRow === null
       ? null
-      : `第 ${resolvedRow} 行`,
+      : t("chat.row", { value: resolvedRow }),
     citation?.page === undefined || citation.page === null
       ? null
-      : `第 ${citation.page} 页`,
+      : t("chat.page", { value: citation.page }),
     citation?.section,
   ].filter(Boolean);
 
@@ -66,7 +68,7 @@ function SourceCitationLine({
 
   return (
     <div className="mt-2 border-border/50 border-t pt-2 text-muted-foreground text-xs">
-      来源：{resolvedFileName ?? "文件名未知"}
+      {t("chat.source")}：{resolvedFileName ?? t("chat.unknownFileName")}
       {location.length > 0 ? ` · ${location.join(" · ")}` : ""}
     </div>
   );
@@ -91,6 +93,7 @@ const PurePreviewMessage = ({
   requiresScrollPadding: boolean;
   onEdit?: (message: ChatMessage) => void;
 }) => {
+  const { t } = useTranslation();
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
   );
@@ -191,7 +194,7 @@ const PurePreviewMessage = ({
             data-testid="message-tool-recovery"
             key={key}
           >
-            本次工具调用未完成，请重新发送问题。
+            {t("chat.toolRecovery")}
           </MessageContent>
         );
       }
@@ -264,7 +267,7 @@ const PurePreviewMessage = ({
         >
           <ToolHeader
             state={state}
-            title={`Search products${toolCallCount > 1 ? ` · ${toolCallCount} steps` : ""}`}
+            title={t("chat.searchProducts")}
             toolName="searchProductsTool"
             type="dynamic-tool"
           />
@@ -273,7 +276,9 @@ const PurePreviewMessage = ({
             {state === "output-available" && output && (
               <div className="space-y-3">
                 <div className="text-muted-foreground text-xs">
-                  {output.products?.length ?? 0} products found
+                  {t("chat.productsFound", {
+                    count: output.products?.length ?? 0,
+                  })}
                   {output.source ? ` · ${output.source}` : ""}
                 </div>
                 <div className="grid gap-2">
@@ -302,7 +307,9 @@ const PurePreviewMessage = ({
                         <span>{product.productId}</span>
                         <span>{product.supplierName}</span>
                         <span>MOQ {product.moqUnits ?? "—"}</span>
-                        <span>{product.leadTimeDays ?? "—"} days</span>
+                        <span>
+                          {product.leadTimeDays ?? "—"} {t("common.days")}
+                        </span>
                         {!!product.operationStatus && (
                           <span>{product.operationStatus}</span>
                         )}
@@ -310,7 +317,9 @@ const PurePreviewMessage = ({
                           <span>{product.logisticsTerm}</span>
                         )}
                         {!!product.hasDocuments && (
-                          <span>{product.documentCount ?? 0} docs</span>
+                          <span>
+                            {product.documentCount ?? 0} {t("common.docs")}
+                          </span>
                         )}
                       </div>
                       <SourceCitationLine
@@ -379,7 +388,7 @@ const PurePreviewMessage = ({
         >
           <ToolHeader
             state={state}
-            title={`Search content operations${toolCallCount > 1 ? ` · ${toolCallCount} steps` : ""}`}
+            title={t("chat.searchContentOperations")}
             toolName="searchContentTool"
             type="dynamic-tool"
           />
@@ -388,7 +397,9 @@ const PurePreviewMessage = ({
             {state === "output-available" && output && (
               <div className="space-y-3">
                 <div className="text-muted-foreground text-xs">
-                  {output.records?.length ?? 0} content records found
+                  {t("chat.contentRecordsFound", {
+                    count: output.records?.length ?? 0,
+                  })}
                   {output.source ? ` · ${output.source}` : ""}
                 </div>
                 <div className="grid gap-2">
@@ -398,7 +409,9 @@ const PurePreviewMessage = ({
                       key={`${record.sourceSheet}-${record.sourceRow}`}
                     >
                       <div className="font-medium">
-                        {record.product ?? record.targetTopic ?? "未命名内容"}
+                        {record.product ??
+                          record.targetTopic ??
+                          t("chat.unnamedContent")}
                       </div>
                       {!!record.copyText && (
                         <div className="mt-1 line-clamp-3 text-muted-foreground text-xs">
@@ -479,16 +492,9 @@ const PurePreviewMessage = ({
     >
       <div
         className={cn(
-          isUser ? "flex flex-col items-end gap-2" : "flex items-start gap-3"
+          isUser ? "flex flex-col items-end gap-2" : "flex items-start"
         )}
       >
-        {isAssistant && (
-          <div className="flex h-[calc(13px*1.65)] shrink-0 items-center">
-            <div className="flex size-7 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground ring-1 ring-border/50">
-              <SparklesIcon size={13} />
-            </div>
-          </div>
-        )}
         {isAssistant ? (
           <div className="flex min-w-0 flex-1 flex-col gap-2">{content}</div>
         ) : (
@@ -507,13 +513,7 @@ export const ThinkingMessage = () => (
     data-role="assistant"
     data-testid="message-assistant-loading"
   >
-    <div className="flex items-start gap-3">
-      <div className="flex h-[calc(13px*1.65)] shrink-0 items-center">
-        <div className="flex size-7 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground ring-1 ring-border/50">
-          <SparklesIcon size={13} />
-        </div>
-      </div>
-
+    <div className="flex items-start">
       <WaitingText />
     </div>
   </div>

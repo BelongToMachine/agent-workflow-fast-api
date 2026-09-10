@@ -1,14 +1,18 @@
 import { motion } from "framer-motion";
+import { useTranslation } from "react-i18next";
 
-export const Greeting = () => (
-  <div className="flex flex-col items-center px-4" key="overview">
+export const Greeting = () => {
+  const { t } = useTranslation();
+
+  return (
+  <div className="new-chat-content-shift flex flex-col items-center px-4" key="overview">
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       className="text-center font-semibold text-2xl tracking-tight text-foreground md:text-3xl"
       initial={{ opacity: 0, y: 10 }}
       transition={{ delay: 0.35, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
     >
-      Find suppliers, compare quotes, and draft bilingual messages.
+      {t("chat.greetingTitle")}
     </motion.div>
     <motion.div
       animate={{ opacity: 1, y: 0 }}
@@ -16,7 +20,8 @@ export const Greeting = () => (
       initial={{ opacity: 0, y: 10 }}
       transition={{ delay: 0.5, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
     >
-      Start with a seller request, product requirement, or supplier question.
+      {t("chat.greetingDescription")}
     </motion.div>
   </div>
-);
+  );
+};

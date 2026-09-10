@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -28,21 +29,21 @@ export type VisibilityType = "private" | "public";
 
 const visibilities: Array<{
   id: VisibilityType;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
   icon: ReactNode;
 }> = [
   {
-    description: "Only you can access this chat",
+    descriptionKey: "visibility.privateDescription",
     icon: <LockIcon />,
     id: "private",
-    label: "Private",
+    labelKey: "visibility.private",
   },
   {
-    description: "Anyone with the link can access this chat",
+    descriptionKey: "visibility.publicDescription",
     icon: <GlobeIcon />,
     id: "public",
-    label: "Public",
+    labelKey: "visibility.public",
   },
 ];
 
@@ -57,6 +58,7 @@ function VisibilitySelectorItem({
   visibility: (typeof visibilities)[number];
   visibilityType: VisibilityType;
 }) {
+  const { t } = useTranslation();
   const handleSelect = useCallback(() => {
     setVisibilityType(visibility.id);
     setOpen(false);
@@ -70,10 +72,10 @@ function VisibilitySelectorItem({
       onSelect={handleSelect}
     >
       <div className="flex flex-col items-start gap-1">
-        {visibility.label}
-        {visibility.description ? (
+        {t(visibility.labelKey)}
+        {visibility.descriptionKey ? (
           <div className="text-muted-foreground text-xs">
-            {visibility.description}
+            {t(visibility.descriptionKey)}
           </div>
         ) : null}
       </div>
@@ -120,7 +122,9 @@ export function VisibilitySelector({
           variant="outline"
         >
           {selectedVisibility?.icon}
-          <span className="md:sr-only">{selectedVisibility?.label}</span>
+          <span className="md:sr-only">
+            {selectedVisibility ? t(selectedVisibility.labelKey) : null}
+          </span>
           <ChevronDownIcon />
         </Button>
       </DropdownMenuTrigger>

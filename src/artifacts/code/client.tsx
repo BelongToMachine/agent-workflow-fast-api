@@ -10,6 +10,7 @@ import {
   UndoIcon,
 } from "@/components/chat/icons";
 import { generateUUID } from "@/lib/utils";
+import { i18n } from "@/lib/i18n";
 import {
   CodeArtifactContent,
   type CodeArtifactMetadata,
@@ -64,9 +65,9 @@ function detectRequiredHandlers(code: string): string[] {
 export const codeArtifact = new Artifact<"code", CodeArtifactMetadata>({
   actions: [
     {
-      description: "Execute code",
+      description: "artifacts.executeCode",
       icon: <PlayIcon size={18} />,
-      label: "Run",
+      label: "artifacts.run",
       onClick: async ({ content, setMetadata }) => {
         const runId = generateUUID();
         const outputContent: ConsoleOutputContent[] = [];
@@ -173,7 +174,7 @@ export const codeArtifact = new Artifact<"code", CodeArtifactMetadata>({
       },
     },
     {
-      description: "View Previous version",
+      description: "artifacts.viewPreviousVersion",
       icon: <UndoIcon size={18} />,
       isDisabled: ({ currentVersionIndex }) => {
         if (currentVersionIndex === 0) {
@@ -187,7 +188,7 @@ export const codeArtifact = new Artifact<"code", CodeArtifactMetadata>({
       },
     },
     {
-      description: "View Next version",
+      description: "artifacts.viewNextVersion",
       icon: <RedoIcon size={18} />,
       isDisabled: ({ isCurrentVersion }) => {
         if (isCurrentVersion) {
@@ -201,17 +202,16 @@ export const codeArtifact = new Artifact<"code", CodeArtifactMetadata>({
       },
     },
     {
-      description: "Copy code to clipboard",
+      description: "artifacts.copyCodeToClipboard",
       icon: <CopyIcon size={18} />,
       onClick: ({ content }) => {
         navigator.clipboard.writeText(content);
-        toast.success("Copied to clipboard!");
+        toast.success(i18n.t("common.copied"));
       },
     },
   ],
   content: CodeArtifactContent,
-  description:
-    "Useful for code generation; Code execution is only available for python code.",
+  description: "artifacts.codeDescription",
   initialize: ({ setMetadata }) => {
     setMetadata({
       outputs: [],
@@ -235,7 +235,7 @@ export const codeArtifact = new Artifact<"code", CodeArtifactMetadata>({
   },
   toolbar: [
     {
-      description: "Add comments",
+      description: "artifacts.addComments",
       icon: <MessageIcon />,
       onClick: ({ sendMessage }) => {
         sendMessage({
@@ -250,7 +250,7 @@ export const codeArtifact = new Artifact<"code", CodeArtifactMetadata>({
       },
     },
     {
-      description: "Add logs",
+      description: "artifacts.addLogs",
       icon: <LogsIcon />,
       onClick: ({ sendMessage }) => {
         sendMessage({

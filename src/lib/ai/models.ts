@@ -9,7 +9,7 @@ export const titleModel: {
 } = {
   description: "Fast model for title generation",
   id: "deepseek-chat",
-  name: "DeepSeek Chat",
+  name: "DeepSeek V4 Flash",
   provider: "deepseek",
 };
 
@@ -32,7 +32,7 @@ export const chatModels: ChatModel[] = [
   {
     description: "Fast and capable model with tool use",
     id: "deepseek-chat",
-    name: "DeepSeek Chat",
+    name: "DeepSeek V4 Flash",
     provider: "deepseek",
   },
 ];

@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { useOnClickOutside } from "usehooks-ts";
 import {
   Tooltip,
@@ -44,12 +45,12 @@ type ToolProps = {
 };
 
 const READING_LEVELS = [
-  "Elementary",
-  "Middle School",
-  "Keep current level",
-  "High School",
-  "College",
-  "Graduate",
+  "reasoning.elementary",
+  "reasoning.middleSchool",
+  "reasoning.currentLevel",
+  "reasoning.highSchool",
+  "reasoning.college",
+  "reasoning.graduate",
 ];
 
 const Tool = ({
@@ -63,6 +64,7 @@ const Tool = ({
   sendMessage,
   onClick,
 }: ToolProps) => {
+  const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
 
   useEffect(() => {
@@ -151,7 +153,7 @@ const Tool = ({
         side="left"
         sideOffset={16}
       >
-        {description}
+        {t(description)}
       </TooltipContent>
     </Tooltip>
   );
@@ -168,6 +170,7 @@ const ReadingLevelSelector = ({
   isAnimating: boolean;
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
 }) => {
+  const { t } = useTranslation();
   const y = useMotionValue(-40 * 2);
   const dragConstraints = 5 * 40 + 2;
   const yToLevel = useTransform(y, [0, -dragConstraints], [0, 5]);
@@ -190,7 +193,7 @@ const ReadingLevelSelector = ({
       sendMessage({
         parts: [
           {
-            text: `Please adjust the reading level to ${READING_LEVELS[currentLevel]} level.`,
+            text: `Please adjust the reading level to ${t(READING_LEVELS[currentLevel])} level.`,
             type: "text",
           },
         ],
@@ -199,7 +202,7 @@ const ReadingLevelSelector = ({
 
       setSelectedTool(null);
     }
-  }, [currentLevel, hasUserSelectedLevel, sendMessage, setSelectedTool]);
+  }, [currentLevel, hasUserSelectedLevel, sendMessage, setSelectedTool, t]);
 
   const handleDragEnd = useCallback(() => {
     if (currentLevel === 2) {
@@ -259,7 +262,7 @@ const ReadingLevelSelector = ({
             side="left"
             sideOffset={16}
           >
-            {READING_LEVELS[currentLevel]}
+            {t(READING_LEVELS[currentLevel])}
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

@@ -38,6 +38,10 @@ export class BackendRequestError extends Error {
   }
 }
 
+export type BackendRequestOptions = {
+  timeoutMs?: number;
+};
+
 type BackendAuthorizationFailureHandler = (error: BackendRequestError) => void;
 
 let authorizationFailureHandler: BackendAuthorizationFailureHandler | null = null;
@@ -68,26 +72,75 @@ function normalizeInit(init: RequestInit = {}): RequestInit {
 
 export async function requestBackend<TData>(
   input: RequestInfo | URL,
-  init?: RequestInit
+  init?: RequestInit,
+  options: BackendRequestOptions = {}
 ): Promise<TData> {
-  const response = await apiFetch(input, normalizeInit(init));
-  const contentType = response.headers.get("content-type") ?? "";
-  const payload = contentType.includes("application/json")
-    ? ((await response.json().catch(() => null)) as unknown)
-    : await response.text();
+  const timeoutMs = options.timeoutMs;
+  const timeoutController = timeoutMs
+    ? new AbortController()
+    : null;
+  const parentSignal = init?.signal;
+  let timeoutTriggered = false;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let abortFromParent: (() => void) | null = null;
 
-  if (!response.ok) {
-    const error = new BackendRequestError(
-      response.status,
-      payload && typeof payload === "object"
-        ? (payload as BackendErrorPayload)
-        : null
-    );
-    if (response.status === 401 || response.status === 403) {
-      authorizationFailureHandler?.(error);
+  if (timeoutController && timeoutMs) {
+    timeoutId = setTimeout(() => {
+      timeoutTriggered = true;
+      timeoutController.abort();
+    }, timeoutMs);
+    abortFromParent = () => timeoutController.abort();
+    if (parentSignal) {
+      if (parentSignal.aborted) {
+        abortFromParent();
+      } else {
+        parentSignal.addEventListener("abort", abortFromParent, { once: true });
+      }
     }
-    throw error;
   }
 
-  return payload as TData;
+  try {
+    const response = await apiFetch(
+      input,
+      normalizeInit({
+        ...init,
+        ...(timeoutController ? { signal: timeoutController.signal } : {}),
+      })
+    );
+
+    const contentType = response.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json")
+      ? ((await response.json().catch(() => null)) as unknown)
+      : await response.text();
+
+    if (!response.ok) {
+      const error = new BackendRequestError(
+        response.status,
+        payload && typeof payload === "object"
+          ? (payload as BackendErrorPayload)
+          : null
+      );
+      if (response.status === 401 || response.status === 403) {
+        authorizationFailureHandler?.(error);
+      }
+      throw error;
+    }
+
+    return payload as TData;
+  } catch (error) {
+    if (timeoutTriggered) {
+      throw new BackendRequestError(504, {
+        code: "backend:timeout",
+        message: "The backend request timed out.",
+      });
+    }
+    throw error;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    if (parentSignal && abortFromParent) {
+      parentSignal.removeEventListener("abort", abortFromParent);
+    }
+  }
 }

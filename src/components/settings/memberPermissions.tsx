@@ -22,6 +22,7 @@ import {
   useEffect,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -99,21 +100,35 @@ type InvitationResponse = Invitation & {
 };
 
 const roleDescriptions: Record<WorkspaceRole, string> = {
-  admin: "Manage members, data, and workspace settings.",
-  editor: "Work with knowledge, chats, and documents.",
-  employee: "Work with chats and documents, without knowledge-base access.",
-  owner: "Full control, including workspace ownership.",
-  viewer: "Read knowledge and use the assistant.",
+  admin: "roles.adminDescription",
+  editor: "roles.editorDescription",
+  employee: "roles.employeeDescription",
+  owner: "roles.ownerDescription",
+  viewer: "roles.viewerDescription",
 };
 
 const invitationStatusLabels: Record<InvitationStatus, string> = {
-  accepted: "Accepted",
-  expired: "Expired",
-  pending: "Pending",
-  revoked: "Revoked",
+  accepted: "settings.invitationAccepted",
+  expired: "settings.invitationExpired",
+  pending: "settings.invitationPending",
+  revoked: "settings.invitationRevokedStatus",
+};
+
+const permissionTranslationKeys: Record<Permission, string> = {
+  "members.read": "membersRead",
+  "members.manage": "membersManage",
+  "knowledge.read": "knowledgeRead",
+  "knowledge.manage": "knowledgeManage",
+  "chat.read": "chatRead",
+  "chat.write": "chatWrite",
+  "chat.delete": "chatDelete",
+  "document.read": "documentRead",
+  "document.write": "documentWrite",
+  "audit.read": "auditRead",
 };
 
 export function MemberPermissions() {
+  const { t } = useTranslation();
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<WorkspaceRole>("employee");
   const [generatedInvitation, setGeneratedInvitation] =
@@ -231,8 +246,8 @@ export function MemberPermissions() {
   const { isPending: isRevokingInvitation } = revokeInvitationMutation;
   const loadError = queryError
     ? queryError.status === 403
-      ? "You do not have permission to manage members."
-      : "Unable to load workspace members."
+      ? t("settings.unableToManageMembers")
+      : t("settings.unableToLoadMembers")
     : null;
 
   const selectedMember = data?.members.find(({ id }) => id === selectedId);
@@ -355,16 +370,16 @@ export function MemberPermissions() {
         );
       }
       setIsDirty(false);
-      toast.success("Permissions updated");
+      toast.success(t("settings.permissionsUpdated"));
     } catch (saveError) {
       const message =
         saveError instanceof Error
           ? saveError.message
-          : "Unable to save permissions.";
+          : t("settings.unableToSavePermissions");
       setError(message);
       toast.error(message);
     }
-  }, [canManageMembers, identity, permissions, queryClient, role, saveMutation, selectedMember]);
+  }, [canManageMembers, identity, permissions, queryClient, role, saveMutation, selectedMember, t]);
 
   const addMember = useCallback(async () => {
     if (!candidateId || !canManageMembers) {
@@ -388,14 +403,14 @@ export function MemberPermissions() {
       if (result.member) {
         setSelectedId(result.member.id);
       }
-      toast.success("Member added");
+      toast.success(t("settings.memberAdded"));
     } catch (addError) {
       const message =
-        addError instanceof Error ? addError.message : "Unable to add member.";
+        addError instanceof Error ? addError.message : t("settings.unableToAddMember");
       setError(message);
       toast.error(message);
     }
-  }, [addMutation, candidateId, candidateRole, canManageMembers, identity, queryClient]);
+  }, [addMutation, candidateId, candidateRole, canManageMembers, identity, queryClient, t]);
 
   const createInvitation = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -416,12 +431,12 @@ export function MemberPermissions() {
         await queryClient.invalidateQueries({
           queryKey: backendQueryKeys.invitations(identity),
         });
-        toast.success("Invitation link created");
+        toast.success(t("settings.invitationCreated"));
       } catch (invitationError) {
         const message =
           invitationError instanceof Error
             ? invitationError.message
-            : "Unable to create the invitation link.";
+            : t("settings.unableToCreateInvitation");
         setError(message);
         toast.error(message);
       }
@@ -433,6 +448,7 @@ export function MemberPermissions() {
       inviteEmail,
       inviteRole,
       queryClient,
+      t,
     ]
   );
 
@@ -444,12 +460,12 @@ export function MemberPermissions() {
 
     try {
       await navigator.clipboard.writeText(activationUrl);
-      toast.success("Link copied to clipboard");
+      toast.success(t("settings.linkCopied"));
     } catch {
-      setError("Copy failed. Select the link and copy it manually.");
-      toast.error("Copy failed");
+      setError(t("settings.copyFailedDescription"));
+      toast.error(t("settings.copyFailed"));
     }
-  }, [generatedInvitation]);
+  }, [generatedInvitation, t]);
 
   const regenerateInvitation = useCallback(
     async (invitationId: string) => {
@@ -466,12 +482,12 @@ export function MemberPermissions() {
         await queryClient.invalidateQueries({
           queryKey: backendQueryKeys.invitations(identity),
         });
-        toast.success("A new invitation link was created");
+        toast.success(t("settings.newInvitationCreated"));
       } catch (invitationError) {
         const message =
           invitationError instanceof Error
             ? invitationError.message
-            : "Unable to create a new invitation link.";
+            : t("settings.unableToCreateNewInvitation");
         setError(message);
         toast.error(message);
       }
@@ -481,12 +497,13 @@ export function MemberPermissions() {
       identity,
       queryClient,
       regenerateInvitationMutation,
+      t,
     ]
   );
 
   const revokeInvitation = useCallback(
     async (invitationId: string) => {
-      if (!canManageMembers || !window.confirm("Revoke this invitation link?")) {
+      if (!canManageMembers || !window.confirm(t("settings.revokeInvitationConfirm"))) {
         return;
       }
 
@@ -499,12 +516,12 @@ export function MemberPermissions() {
         await queryClient.invalidateQueries({
           queryKey: backendQueryKeys.invitations(identity),
         });
-        toast.success("Invitation revoked");
+        toast.success(t("settings.invitationRevoked"));
       } catch (invitationError) {
         const message =
           invitationError instanceof Error
             ? invitationError.message
-            : "Unable to revoke the invitation.";
+            : t("settings.unableToRevokeInvitation");
         setError(message);
         toast.error(message);
       }
@@ -515,6 +532,7 @@ export function MemberPermissions() {
       identity,
       queryClient,
       revokeInvitationMutation,
+      t,
     ]
   );
 
@@ -544,16 +562,20 @@ export function MemberPermissions() {
               : current
         );
       }
-      toast.success(nextStatus === "active" ? "Member restored" : "Member suspended");
+      toast.success(
+        nextStatus === "active"
+          ? t("settings.memberRestored")
+          : t("settings.memberSuspended")
+      );
     } catch (statusError) {
       const message =
         statusError instanceof Error
           ? statusError.message
-          : "Unable to update member status.";
+          : t("settings.unableToUpdateMember");
       setError(message);
       toast.error(message);
     }
-  }, [canManageMembers, identity, queryClient, selectedMember, statusMutation]);
+  }, [canManageMembers, identity, queryClient, selectedMember, statusMutation, t]);
 
   const visibleError = error ?? loadError;
 
@@ -566,7 +588,7 @@ export function MemberPermissions() {
   }
 
   if (!data || data.members.length === 0) {
-    return <EmptyState message="No workspace members are available yet." />;
+    return <EmptyState message={t("settings.noMembers")} />;
   }
 
   return (
@@ -576,14 +598,13 @@ export function MemberPermissions() {
           <div>
             <div className="mb-3 flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.18em]">
               <ShieldCheckIcon className="size-4 text-primary" />
-              Access control
+              {t("settings.accessControl")}
             </div>
             <h1 className="font-semibold text-3xl tracking-tight md:text-4xl">
-              Workspace permissions
+              {t("settings.workspacePermissions")}
             </h1>
             <p className="mt-2 max-w-xl text-muted-foreground text-sm leading-6">
-              Decide who can work with your knowledge base, conversations, and
-              documents. Changes apply to the backend immediately.
+              {t("settings.decideAccess")}
             </p>
           </div>
           <Badge className="w-fit gap-1.5 px-3 py-1.5" variant="outline">
@@ -600,21 +621,20 @@ export function MemberPermissions() {
                   <div>
                     <div className="flex items-center gap-2 font-medium text-sm">
                       <LinkIcon className="size-4 text-primary" />
-                      Invite a teammate
+                      {t("settings.inviteTeammate")}
                     </div>
                     <p className="mt-1 max-w-2xl text-muted-foreground text-xs leading-5">
-                      Create a private link and share it directly. They will use it to
-                      choose their name and password—no email service is required.
+                      {t("settings.inviteDescription")}
                     </p>
                   </div>
                   <Badge className="w-fit" variant="secondary">
-                    Manual link
+                    {t("settings.manualLink")}
                   </Badge>
                 </div>
 
                 <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto] md:items-end" onSubmit={createInvitation}>
                   <label className="grid gap-1.5 text-xs" htmlFor="invite-email">
-                    Work email
+                    {t("settings.workEmail")}
                     <Input
                       autoComplete="email"
                       id="invite-email"
@@ -625,21 +645,24 @@ export function MemberPermissions() {
                     />
                   </label>
                   <label className="grid gap-1.5 text-xs" htmlFor="invite-role">
-                    Access level
+                    {t("settings.accessLevel")}
                     <Select
                       disabled={isCreatingInvitation}
                       onValueChange={(value) => setInviteRole(value as WorkspaceRole)}
                       value={inviteRole}
                     >
-                      <SelectTrigger aria-label="Invitation access level" id="invite-role">
+                      <SelectTrigger
+                        aria-label={t("settings.accessLevel")}
+                        id="invite-role"
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {Object.entries(roleLabels)
                           .filter(([value]) => value !== "owner")
-                          .map(([value, label]) => (
+                          .map(([value]) => (
                             <SelectItem key={value} value={value}>
-                              {label}
+                              {t("roles." + value)}
                             </SelectItem>
                           ))}
                       </SelectContent>
@@ -647,7 +670,9 @@ export function MemberPermissions() {
                   </label>
                   <Button disabled={!inviteEmail.trim() || isCreatingInvitation} type="submit">
                     <LinkIcon />
-                    {isCreatingInvitation ? "Creating" : "Create link"}
+                    {isCreatingInvitation
+                      ? t("settings.creating")
+                      : t("settings.createLink")}
                   </Button>
                 </form>
 
@@ -655,12 +680,17 @@ export function MemberPermissions() {
                   <div className="rounded-xl border border-border/70 bg-background/80 p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                       <label className="grid min-w-0 flex-1 gap-1.5 text-xs" htmlFor="generated-invite-link">
-                        Link for {generatedInvitation.email}
+                        {t("settings.linkFor", {
+                          email: generatedInvitation.email,
+                        })}
                         <Input
                           className="font-mono text-xs"
                           id="generated-invite-link"
                           readOnly
-                          value={generatedInvitation.activationUrl ?? "Link unavailable"}
+                          value={
+                            generatedInvitation.activationUrl ??
+                            t("settings.linkUnavailable")
+                          }
                         />
                       </label>
                       <Button
@@ -670,12 +700,11 @@ export function MemberPermissions() {
                         variant="outline"
                       >
                         <CopyIcon />
-                        Copy link
+                        {t("common.copyLink")}
                       </Button>
                     </div>
                     <p className="mt-2 text-amber-700 text-xs dark:text-amber-300">
-                      Anyone with this link can activate the account. Share it privately;
-                      it expires automatically.
+                      {t("settings.invitationWarning")}
                     </p>
                   </div>
                 ) : null}
@@ -683,19 +712,23 @@ export function MemberPermissions() {
                 <div className="border-t border-border/60 pt-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="font-medium text-sm">Recent invitations</h3>
+                      <h3 className="font-medium text-sm">
+                        {t("settings.recentInvitations")}
+                      </h3>
                       <p className="mt-1 text-muted-foreground text-xs">
-                        Links are not shown again after this page is refreshed.
+                        {t("settings.invitationsNotShown")}
                       </p>
                     </div>
                     {invitationsQuery.isFetching ? (
-                      <span className="text-muted-foreground text-xs">Refreshing…</span>
+                      <span className="text-muted-foreground text-xs">
+                        {t("settings.invitationsRefresh")}
+                      </span>
                     ) : null}
                   </div>
                   <div className="mt-3 space-y-2">
                     {invitations.length === 0 ? (
                       <p className="rounded-lg border border-dashed border-border/70 px-3 py-4 text-muted-foreground text-xs">
-                        No invitations yet.
+                        {t("settings.noInvitations")}
                       </p>
                     ) : (
                       invitations.map((invitation) => {
@@ -711,12 +744,14 @@ export function MemberPermissions() {
                             <div className="min-w-0">
                               <p className="truncate font-medium text-sm">{invitation.email}</p>
                               <p className="mt-1 text-muted-foreground text-xs">
-                                {roleLabels[invitation.role]} · Expires {new Date(invitation.expiresAt).toLocaleDateString()}
+                                {t("roles." + invitation.role)} ·{" "}
+                                {t("common.expires")}{" "}
+                                {new Date(invitation.expiresAt).toLocaleDateString()}
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
                               <Badge variant={invitation.status === "pending" ? "secondary" : "outline"}>
-                                {invitationStatusLabels[invitation.status]}
+                                {t(invitationStatusLabels[invitation.status])}
                               </Badge>
                               {canRegenerate ? (
                                 <Button
@@ -727,7 +762,7 @@ export function MemberPermissions() {
                                   variant="outline"
                                 >
                                   <RefreshCwIcon />
-                                  New link
+                                  {t("settings.newLink")}
                                 </Button>
                               ) : null}
                               {invitation.status === "pending" ? (
@@ -739,7 +774,7 @@ export function MemberPermissions() {
                                   variant="ghost"
                                 >
                                   <XCircleIcon />
-                                  Revoke
+                                  {t("settings.revoke")}
                                 </Button>
                               ) : null}
                             </div>
@@ -750,7 +785,7 @@ export function MemberPermissions() {
                   </div>
                   {invitationsQuery.error ? (
                     <p className="mt-3 text-destructive text-xs">
-                      Unable to load recent invitations.
+                      {t("settings.unableToLoadInvitations")}
                     </p>
                   ) : null}
                 </div>
@@ -762,24 +797,27 @@ export function MemberPermissions() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 font-medium text-sm">
                     <UserPlusIcon className="size-4 text-primary" />
-                    Add a registered user
+                    {t("settings.addRegisteredUser")}
                   </div>
                   <p className="mt-1 text-muted-foreground text-xs leading-5">
-                    Only users who have signed in and completed account setup appear here.
+                    {t("settings.registeredUserDescription")}
                   </p>
                   <Select
                     disabled={candidatesQuery.isLoading || candidates.length === 0 || isAdding}
                     onValueChange={setCandidateId}
                     value={candidateId}
                   >
-                    <SelectTrigger aria-label="Select a registered user" className="mt-3">
+                    <SelectTrigger
+                      aria-label={t("settings.selectUser")}
+                      className="mt-3"
+                    >
                       <SelectValue
                         placeholder={
                           candidatesQuery.isLoading
-                            ? "Loading users…"
+                            ? t("settings.loadingUsers")
                             : candidates.length === 0
-                              ? "No users waiting for access"
-                              : "Select a user"
+                              ? t("settings.noUsersWaiting")
+                              : t("settings.selectUser")
                         }
                       />
                     </SelectTrigger>
@@ -798,25 +836,28 @@ export function MemberPermissions() {
                   onValueChange={(value) => setCandidateRole(value as WorkspaceRole)}
                   value={candidateRole}
                 >
-                  <SelectTrigger aria-label="New member role" className="w-full md:w-40">
+                  <SelectTrigger
+                    aria-label={t("settings.newMemberRole")}
+                    className="w-full md:w-40"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.entries(roleLabels).map(([value, label]) => (
+                    {Object.entries(roleLabels).map(([value]) => (
                       <SelectItem key={value} value={value}>
-                        {label}
+                        {t("roles." + value)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <Button disabled={!candidateId || isAdding} onClick={addMember}>
                   <UserPlusIcon />
-                  {isAdding ? "Adding" : "Add member"}
+                  {isAdding ? t("settings.adding") : t("settings.addMember")}
                 </Button>
               </div>
               {candidatesQuery.error ? (
                 <p className="mt-3 text-destructive text-xs">
-                  Unable to load users waiting for workspace access.
+                  {t("settings.unableToLoadWaitingUsers")}
                 </p>
               ) : null}
             </section>
@@ -825,26 +866,25 @@ export function MemberPermissions() {
 
         {!canManageMembers ? (
           <p className="mb-5 rounded-xl border border-border/70 bg-muted/30 px-4 py-3 text-muted-foreground text-sm">
-            You can view workspace members, but only members with manage access
-            can change roles or permissions.
+            {t("settings.viewOnlyMembers")}
           </p>
         ) : null}
 
         {pendingMemberId ? (
           <div className="mb-5 flex flex-col gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
             <span>
-              Unsaved changes will be discarded if you switch members.
+              {t("settings.unsavedChangesDiscarded")}
             </span>
             <div className="flex items-center gap-2">
               <Button onClick={keepEditing} size="sm" variant="ghost">
-                Keep editing
+                {t("settings.keepEditing")}
               </Button>
               <Button
                 onClick={discardAndSelectMember}
                 size="sm"
                 variant="outline"
               >
-                Discard changes
+                {t("settings.discardChanges")}
               </Button>
             </div>
           </div>
@@ -853,7 +893,7 @@ export function MemberPermissions() {
         <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
           <section className="rounded-2xl border border-border/70 bg-card/50 p-2 shadow-sm">
             <div className="px-3 py-3 text-muted-foreground text-xs uppercase tracking-[0.14em]">
-              Members · {data.members.length}
+              {t("settings.membersCount", { count: data.members.length })}
             </div>
             <div className="space-y-1">
               {data.members.map((member) => {
@@ -886,7 +926,7 @@ export function MemberPermissions() {
                       ) : null}
                     </span>
                     <span className="text-muted-foreground text-[11px]">
-                      {roleLabels[member.role]}
+                      {t("roles." + member.role)}
                     </span>
                   </button>
                 );
@@ -904,13 +944,13 @@ export function MemberPermissions() {
                         {selectedMember.name || selectedMember.email}
                       </h2>
                       {isDirty ? (
-                        <Badge variant="secondary">Unsaved</Badge>
+                        <Badge variant="secondary">{t("settings.unsaved")}</Badge>
                       ) : null}
                     </div>
                     <p className="mt-1 text-muted-foreground text-sm">
                       {selectedMember.name
                         ? selectedMember.email
-                        : "Workspace member"}
+                        : t("settings.workspaceMember")}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -921,23 +961,26 @@ export function MemberPermissions() {
                     >
                       <PowerIcon />
                       {isChangingStatus
-                        ? "Updating"
+                        ? t("settings.updating")
                         : selectedMember.status === "active"
-                          ? "Suspend"
-                          : "Restore"}
+                          ? t("settings.suspend")
+                          : t("settings.restoreMember")}
                     </Button>
                     <Select
                       disabled={!canManageMembers}
                       onValueChange={changeRole}
                       value={role}
                     >
-                      <SelectTrigger aria-label="Member role" className="w-40">
+                      <SelectTrigger
+                        aria-label={t("settings.memberRole")}
+                        className="w-40"
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {Object.entries(roleLabels).map(([value, label]) => (
+                        {Object.entries(roleLabels).map(([value]) => (
                           <SelectItem key={value} value={value}>
-                            {label}
+                            {t("roles." + value)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -947,7 +990,7 @@ export function MemberPermissions() {
                       onClick={save}
                     >
                       <SaveIcon />
-                      {isSaving ? "Saving" : "Save changes"}
+                      {isSaving ? t("common.saving") : t("common.saveChanges")}
                     </Button>
                   </div>
                 </div>
@@ -956,20 +999,21 @@ export function MemberPermissions() {
                   <div>
                     <div className="flex items-center gap-2 font-medium text-sm">
                       <LockKeyholeIcon className="size-4 text-primary" />
-                      Role baseline
+                      {t("settings.roleBaseline")}
                     </div>
                     <p className="mt-2 text-muted-foreground text-sm leading-6">
-                      {roleDescriptions[role]}
+                      {t(roleDescriptions[role])}
                     </p>
                     <p className="mt-4 text-muted-foreground text-xs leading-5">
-                      Individual switches override the baseline for this member.
+                      {t("settings.roleBaselineDescription")}
                     </p>
                   </div>
 
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {permissionCatalog.map(({ description, key, label }) => {
+                    {permissionCatalog.map(({ key }) => {
                       const enabled = permissions.includes(key);
                       const isAllowed = roleAllowsPermission(role, key);
+                      const permissionKey = permissionTranslationKeys[key];
                       return (
                         <button
                           aria-pressed={enabled}
@@ -997,10 +1041,14 @@ export function MemberPermissions() {
                           </span>
                           <span>
                             <span className="block font-medium text-sm">
-                              {label}
+                              {t("permissions." + permissionKey + ".label")}
                             </span>
                             <span className="mt-1 block text-muted-foreground text-xs leading-5">
-                              {description}
+                              {t(
+                                "permissions." +
+                                  permissionKey +
+                                  ".description"
+                              )}
                             </span>
                           </span>
                         </button>
@@ -1041,7 +1089,9 @@ function EmptyState({ message }: { message: string }) {
     <main className="grid min-h-full place-items-center bg-background px-6">
       <div className="max-w-md text-center">
         <ShieldCheckIcon className="mx-auto mb-4 size-8 text-muted-foreground" />
-        <h1 className="font-semibold text-xl">Permissions unavailable</h1>
+        <h1 className="font-semibold text-xl">
+          {t("settings.permissionsUnavailable")}
+        </h1>
         <p className="mt-2 text-muted-foreground text-sm leading-6">
           {message}
         </p>

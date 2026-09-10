@@ -64,8 +64,26 @@ type ApplicationAuthContextValue = {
 const ApplicationAuthContext =
   createContext<ApplicationAuthContextValue | null>(null);
 
+const CURRENT_USER_REQUEST_TIMEOUT_MS = 10_000;
+
 function errorCode(error: BackendRequestError | null) {
   return error?.payload?.code ?? null;
+}
+
+function shouldRetryCurrentUser(
+  failureCount: number,
+  error: unknown
+) {
+  if (failureCount >= 1) {
+    return false;
+  }
+
+  if (error && typeof error === "object" && "status" in error) {
+    const status = error.status;
+    return typeof status === "number" ? status >= 500 : true;
+  }
+
+  return true;
 }
 
 export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
@@ -86,7 +104,9 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
     enabled: sessionStatus === "authenticated",
     path: "/api/v1/me",
     queryKey: ["backend", "user", identity, "current-user"],
-    retry: false,
+    requestOptions: { timeoutMs: CURRENT_USER_REQUEST_TIMEOUT_MS },
+    retry: shouldRetryCurrentUser,
+    retryDelay: 500,
   });
   const { refetch: refetchCurrentUser } = currentUserQuery;
 

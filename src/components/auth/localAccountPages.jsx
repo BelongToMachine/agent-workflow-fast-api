@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Preview } from "../chat/preview";
 import {
   activateLocalInvitation,
@@ -9,6 +10,7 @@ import { useSession } from "../../lib/auth";
 import { Link, useLocationSearch, useRouter } from "../../lib/router";
 
 function LocalAccountShell({ children, eyebrow }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-dvh w-full bg-sidebar">
       <div className="flex w-full flex-col bg-background p-8 md:p-16 xl:w-[600px] xl:shrink-0 xl:rounded-r-2xl xl:border-r xl:border-border/40">
@@ -16,7 +18,7 @@ function LocalAccountShell({ children, eyebrow }) {
           className="flex w-fit items-center text-[13px] text-muted-foreground hover:text-foreground"
           href="/"
         >
-          ← Back
+          ← {t("common.back")}
         </Link>
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8">
           <div>
@@ -57,6 +59,7 @@ function FormMessage({ children, error = false }) {
 export function LocalActivationPage() {
   const router = useRouter();
   const { update } = useSession();
+  const { t } = useTranslation();
   const search = useLocationSearch();
   const token = new URLSearchParams(search).get("token") ?? "";
   const [name, setName] = useState("");
@@ -69,15 +72,15 @@ export function LocalActivationPage() {
     event.preventDefault();
     setErrorMessage("");
     if (!token) {
-      setErrorMessage("This invitation link is missing its token.");
+      setErrorMessage(t("auth.invitationMissingToken"));
       return;
     }
     if (password !== confirmation) {
-      setErrorMessage("The passwords do not match.");
+      setErrorMessage(t("auth.passwordsDoNotMatch"));
       return;
     }
     if (password.length < 12) {
-      setErrorMessage("Use at least 12 characters for your password.");
+      setErrorMessage(t("auth.passwordMinLength"));
       return;
     }
 
@@ -90,7 +93,7 @@ export function LocalActivationPage() {
       setErrorMessage(
         error instanceof LocalAuthRequestError && error.status === 400
           ? error.message
-          : "This invitation is invalid or could not be activated."
+          : t("auth.invitationInvalid")
       );
     } finally {
       setIsSubmitting(false);
@@ -98,15 +101,15 @@ export function LocalActivationPage() {
   }
 
   return (
-    <LocalAccountShell eyebrow="Workspace invitation">
-      <h1 className="mt-3 text-2xl font-semibold tracking-tight">Set up your account</h1>
+    <LocalAccountShell eyebrow={t("auth.workspaceInvitation")}>
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight">{t("auth.setUpAccount")}</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Choose a password to activate your workspace account.
+        {t("auth.choosePassword")}
       </p>
       <form className="mt-8 flex flex-col gap-4" onSubmit={handleSubmit}>
         <FormMessage error>{errorMessage}</FormMessage>
         <label className="flex flex-col gap-2 text-sm font-medium">
-          Name <span className="text-muted-foreground font-normal">(optional)</span>
+          {t("auth.name")} <span className="text-muted-foreground font-normal">({t("common.optional")})</span>
           <input
             autoComplete="name"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -115,7 +118,7 @@ export function LocalActivationPage() {
           />
         </label>
         <label className="flex flex-col gap-2 text-sm font-medium">
-          Password
+          {t("auth.password")}
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -127,7 +130,7 @@ export function LocalActivationPage() {
           />
         </label>
         <label className="flex flex-col gap-2 text-sm font-medium">
-          Confirm password
+          {t("auth.confirmPassword")}
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -143,13 +146,13 @@ export function LocalActivationPage() {
           disabled={isSubmitting || !token}
           type="submit"
         >
-          {isSubmitting ? "Activating…" : "Activate account"}
+          {isSubmitting ? t("auth.activating") : t("auth.activateAccount")}
         </button>
       </form>
       <p className="mt-5 text-center text-[13px] text-muted-foreground">
-        Already activated?{" "}
+        {t("auth.alreadyActivated")}{" "}
         <Link className="text-foreground underline-offset-4 hover:underline" href="/login">
-          Sign in
+          {t("auth.signIn")}
         </Link>
       </p>
     </LocalAccountShell>
@@ -159,6 +162,7 @@ export function LocalActivationPage() {
 export function LocalChangePasswordPage() {
   const { update } = useSession();
   const router = useRouter();
+  const { t } = useTranslation();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -171,11 +175,11 @@ export function LocalChangePasswordPage() {
     setErrorMessage("");
     setSuccessMessage("");
     if (newPassword !== confirmation) {
-      setErrorMessage("The passwords do not match.");
+      setErrorMessage(t("auth.passwordsDoNotMatch"));
       return;
     }
     if (newPassword.length < 12) {
-      setErrorMessage("Use at least 12 characters for your password.");
+      setErrorMessage(t("auth.passwordMinLength"));
       return;
     }
 
@@ -186,12 +190,12 @@ export function LocalChangePasswordPage() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmation("");
-      setSuccessMessage("Your password was changed and other sessions were signed out.");
+      setSuccessMessage(t("auth.passwordChanged"));
     } catch (error) {
       setErrorMessage(
         error instanceof LocalAuthRequestError && error.status === 400
           ? error.message
-          : "Unable to change your password right now."
+          : t("auth.unableToChangePassword")
       );
     } finally {
       setIsSubmitting(false);
@@ -199,16 +203,16 @@ export function LocalChangePasswordPage() {
   }
 
   return (
-    <LocalAccountShell eyebrow="Account security">
-      <h1 className="mt-3 text-2xl font-semibold tracking-tight">Change password</h1>
+    <LocalAccountShell eyebrow={t("auth.accountSecurity")}>
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight">{t("auth.changePassword")}</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Use a new password with at least 12 characters.
+        {t("auth.newPasswordDescription")}
       </p>
       <form className="mt-8 flex flex-col gap-4" onSubmit={handleSubmit}>
         <FormMessage error>{errorMessage}</FormMessage>
         <FormMessage>{successMessage}</FormMessage>
         <label className="flex flex-col gap-2 text-sm font-medium">
-          Current password
+          {t("auth.currentPassword")}
           <input
             autoComplete="current-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -219,7 +223,7 @@ export function LocalChangePasswordPage() {
           />
         </label>
         <label className="flex flex-col gap-2 text-sm font-medium">
-          New password
+          {t("auth.newPassword")}
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -231,7 +235,7 @@ export function LocalChangePasswordPage() {
           />
         </label>
         <label className="flex flex-col gap-2 text-sm font-medium">
-          Confirm new password
+          {t("auth.confirmNewPassword")}
           <input
             autoComplete="new-password"
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -248,14 +252,14 @@ export function LocalChangePasswordPage() {
             disabled={isSubmitting}
             type="submit"
           >
-            {isSubmitting ? "Saving…" : "Change password"}
+            {isSubmitting ? t("auth.saving") : t("auth.changePassword")}
           </button>
           <button
             className="h-10 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-muted"
             onClick={() => router.back()}
             type="button"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
         </div>
       </form>

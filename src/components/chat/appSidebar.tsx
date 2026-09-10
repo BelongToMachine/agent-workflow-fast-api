@@ -13,6 +13,7 @@ import {
 import type { User } from "@/lib/auth";
 import { Link, useRouter } from "@/lib/router";
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { SidebarHistory } from "@/components/chat/sidebarHistory";
 import { SidebarUserNav } from "@/components/chat/sidebarUserNav";
@@ -41,6 +42,7 @@ import {
 } from "@/lib/backend/chatHistoryCache";
 import { requestBackend } from "@/lib/backend/request";
 import { getNewChatPath } from "@/lib/utils";
+import { sidebarSelectedMenuItemClassName } from "./sidebarStyles";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,6 +65,7 @@ export function AppSidebar({
   user: User | undefined;
 }) {
   const router = useRouter();
+  const { t } = useTranslation();
   const { setOpenMobile, toggleSidebar } = useSidebar();
   const queryClient = useQueryClient();
   const identity = useBackendIdentity(user?.id);
@@ -111,8 +114,8 @@ export function AppSidebar({
       method: "DELETE",
     }).catch(() => undefined);
 
-    toast.success("All chats deleted");
-  }, [identity, queryClient, router]);
+    toast.success(t("sidebar.allChatsDeleted"));
+  }, [identity, queryClient, router, t]);
 
   return (
     <>
@@ -124,7 +127,7 @@ export function AppSidebar({
                 <SidebarMenuButton
                   asChild
                   className="size-8 !px-0 items-center justify-center group-data-[collapsible=icon]:group-hover/logo:opacity-0"
-                  tooltip="Atlas Trade Copilot"
+                  tooltip={t("app.name")}
                 >
                   <Link href="/" onClick={closeMobile}>
                     <MessageSquareIcon className="size-4 text-sidebar-foreground/50" />
@@ -140,7 +143,7 @@ export function AppSidebar({
                     </SidebarMenuButton>
                   </TooltipTrigger>
                   <TooltipContent className="hidden md:block" side="right">
-                    Open sidebar
+                    {t("sidebar.open")}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -156,12 +159,12 @@ export function AppSidebar({
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    className="h-8 rounded-lg border border-sidebar-border text-[13px] text-sidebar-foreground/70 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    className={sidebarSelectedMenuItemClassName}
                     onClick={handleNewChat}
-                    tooltip="New Chat"
+                    tooltip={t("sidebar.newChat")}
                   >
                     <PenSquareIcon className="size-4" />
-                    <span className="font-medium">New chat</span>
+                    <span className="font-medium">{t("sidebar.newChat")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 {canViewPermissions ? (
@@ -170,11 +173,11 @@ export function AppSidebar({
                       asChild
                       className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                       onClick={closeMobile}
-                      tooltip="Workspace Permissions"
+                      tooltip={t("sidebar.permissions")}
                     >
                       <Link href="/settings/members">
                         <ShieldCheckIcon className="size-4" />
-                        <span className="text-[13px]">Permissions</span>
+                        <span className="text-[13px]">{t("sidebar.permissions")}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -185,11 +188,11 @@ export function AppSidebar({
                       asChild
                       className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                       onClick={closeMobile}
-                      tooltip="Knowledge Base Access"
+                      tooltip={t("sidebar.knowledgeAccess")}
                     >
                       <Link href="/settings/knowledge-bases">
                         <KeyRoundIcon className="size-4" />
-                        <span className="text-[13px]">Knowledge access</span>
+                        <span className="text-[13px]">{t("sidebar.knowledgeAccess")}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -200,11 +203,11 @@ export function AppSidebar({
                       asChild
                       className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                       onClick={closeMobile}
-                      tooltip="Knowledge Base Files"
+                      tooltip={t("sidebar.knowledgeFiles")}
                     >
                       <Link href="/settings/knowledge-bases/files">
                         <FilesIcon className="size-4" />
-                        <span className="text-[13px]">Knowledge files</span>
+                        <span className="text-[13px]">{t("sidebar.knowledgeFiles")}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -214,10 +217,10 @@ export function AppSidebar({
                     <SidebarMenuButton
                       className="rounded-lg text-sidebar-foreground/40 transition-colors duration-150 hover:bg-destructive/10 hover:text-destructive"
                       onClick={handleShowDeleteAllDialog}
-                      tooltip="Delete All Chats"
+                      tooltip={t("sidebar.deleteAll")}
                     >
                       <TrashIcon className="size-4" />
-                      <span className="text-[13px]">Delete all</span>
+                      <span className="text-[13px]">{t("sidebar.deleteAll")}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ) : null}
@@ -238,16 +241,15 @@ export function AppSidebar({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete all chats?</AlertDialogTitle>
+            <AlertDialogTitle>{t("sidebar.deleteAllTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete all
-              your chats and remove them from our servers.
+              {t("sidebar.deleteAllDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteAll}>
-              Delete All
+              {t("common.deleteAll")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

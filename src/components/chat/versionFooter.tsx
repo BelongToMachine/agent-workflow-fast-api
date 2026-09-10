@@ -3,6 +3,7 @@
 import { isAfter } from "date-fns";
 import { motion } from "framer-motion";
 import { ChevronLeftIcon, ChevronRightIcon, DiffIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useState } from "react";
 import { useSWRConfig } from "swr";
@@ -28,6 +29,7 @@ export const VersionFooter = ({
   setMode,
 }: VersionFooterProps) => {
   const { artifact } = useArtifact();
+  const { t } = useTranslation();
 
   const { mutate } = useSWRConfig();
   const [isMutating, setIsMutating] = useState(false);
@@ -118,7 +120,10 @@ export const VersionFooter = ({
             <ChevronLeftIcon className="size-4" />
           </button>
           <span className="min-w-[4rem] text-center text-xs tabular-nums text-muted-foreground">
-            {currentVersionIndex + 1} of {documents.length}
+            {t("common.versionOf", {
+              current: currentVersionIndex + 1,
+              total: documents.length,
+            })}
           </span>
           <button
             className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
@@ -136,7 +141,7 @@ export const VersionFooter = ({
             mode === "diff" && "bg-muted text-foreground"
           )}
           onClick={handleToggleMode}
-          title="Show changes"
+          title={t("common.showChanges")}
           type="button"
         >
           <DiffIcon className="size-4" />
@@ -150,7 +155,7 @@ export const VersionFooter = ({
           onClick={handleRestore}
           type="button"
         >
-          Restore
+          {t("common.restore")}
           {isMutating ? (
             <div className="animate-spin">
               <LoaderIcon size={14} />
@@ -162,7 +167,7 @@ export const VersionFooter = ({
           onClick={handleLatest}
           type="button"
         >
-          Latest
+          {t("common.latest")}
         </button>
       </div>
     </motion.div>

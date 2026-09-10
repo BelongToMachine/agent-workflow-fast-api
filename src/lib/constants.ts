@@ -19,9 +19,9 @@ export const DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 
 export const DUMMY_PASSWORD = "frontend-only";
 
-export const suggestions = [
-  "找出价格低于 10 美元、交期不超过 30 天的家居产品，并列出供应商和 MOQ。",
-  "推荐适合土耳其卖家的产品：价格不高于 8 美元、MOQ 不超过 500、交期不超过 30 天。",
-  "查看内容计划中已经安排拍摄的选题，并按拍摄状态整理。",
-  "找出运营数据里缺少价格、供应商或资质信息的产品。",
-];
+export const suggestionKeys = [
+  "suggestions.price",
+  "suggestions.turkey",
+  "suggestions.content",
+  "suggestions.missingData",
+] as const;

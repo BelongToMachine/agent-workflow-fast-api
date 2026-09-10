@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronUp } from "lucide-react";
+import { ChevronUp, LanguagesIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { User } from "@/lib/auth";
 import { useSession } from "@/lib/auth";
 import { useApplicationAuth } from "@/lib/auth/applicationAuth";
@@ -10,7 +11,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdownMenu";
 import {
@@ -19,6 +25,11 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { guestRegex } from "@/lib/constants";
+import {
+  languageOptions,
+  setAppLanguage,
+  type AppLanguage,
+} from "@/lib/i18n";
 import { LoaderIcon } from "./icons";
 import { toast } from "./toast";
 
@@ -34,6 +45,7 @@ export function SidebarUserNav({ user }: { user: User }) {
   const { data, status } = useSession();
   const { signOut } = useApplicationAuth();
   const { setTheme, resolvedTheme } = useTheme();
+  const { t, i18n } = useTranslation();
 
   const isGuest = guestRegex.test(data?.user?.email ?? "");
   const handleThemeSelect = useCallback(() => {
@@ -43,7 +55,7 @@ export function SidebarUserNav({ user }: { user: User }) {
   const handleAuthClick = useCallback(() => {
     if (status === "loading") {
       toast({
-        description: "Checking authentication status, please try again!",
+        description: t("sidebar.authStatusLoading"),
         type: "error",
       });
 
@@ -51,7 +63,17 @@ export function SidebarUserNav({ user }: { user: User }) {
     }
 
     void signOut();
-  }, [signOut, status]);
+  }, [signOut, status, t]);
+
+  const handleLanguageChange = useCallback((value: string) => {
+    if (value === "en" || value === "zh") {
+      void setAppLanguage(value as AppLanguage);
+    }
+  }, []);
+
+  const currentLanguage: AppLanguage = i18n.language.startsWith("zh")
+    ? "zh"
+    : "en";
 
   return (
     <SidebarMenu>
@@ -63,7 +85,7 @@ export function SidebarUserNav({ user }: { user: User }) {
                 <div className="flex flex-row items-center gap-2">
                   <div className="size-6 animate-pulse rounded-full bg-sidebar-foreground/10" />
                   <span className="animate-pulse rounded-md bg-sidebar-foreground/10 text-transparent text-[13px]">
-                    Loading...
+                    {t("common.loadingShort")}
                   </span>
                 </div>
                 <div className="animate-spin text-sidebar-foreground/50">
@@ -82,7 +104,7 @@ export function SidebarUserNav({ user }: { user: User }) {
                   }}
                 />
                 <span className="truncate text-[13px]" data-testid="user-email">
-                  {isGuest ? "Guest" : user?.email}
+                  {isGuest ? t("sidebar.guest") : user?.email}
                 </span>
                 <ChevronUp className="ml-auto size-3.5 text-sidebar-foreground/50" />
               </SidebarMenuButton>
@@ -98,8 +120,30 @@ export function SidebarUserNav({ user }: { user: User }) {
               data-testid="user-nav-item-theme"
               onSelect={handleThemeSelect}
             >
-              {`Toggle ${resolvedTheme === "light" ? "dark" : "light"} mode`}
+              {resolvedTheme === "light"
+                ? t("theme.toggleDark")
+                : t("theme.toggleLight")}
             </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <LanguagesIcon />
+                <span>{t("language.label")}</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  onValueChange={handleLanguageChange}
+                  value={currentLanguage}
+                >
+                  {languageOptions.map((option) => (
+                    <DropdownMenuRadioItem key={option.code} value={option.code}>
+                      {option.code === "en"
+                        ? t("language.english")
+                        : t("language.chinese")}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">
               <button
@@ -107,7 +151,7 @@ export function SidebarUserNav({ user }: { user: User }) {
                 onClick={handleAuthClick}
                 type="button"
               >
-                {isGuest ? "Login to your account" : "Sign out"}
+                {isGuest ? t("sidebar.loginToAccount") : t("sidebar.signOut")}
               </button>
             </DropdownMenuItem>
           </DropdownMenuContent>

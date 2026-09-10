@@ -172,6 +172,7 @@
 
   html {
     overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
   }
 
   h1,
@@ -228,6 +229,17 @@ textarea:focus-visible {
   scrollbar-width: none;
   &::-webkit-scrollbar {
     display: none;
+  }
+}
+
+/* Lift the new-chat content without changing the composer footprint. */
+@utility new-chat-content-shift {
+  transform: translateY(calc(-1 * clamp(4rem, 12vh, 9rem)));
+}
+
+@media (max-width: 767px) {
+  .new-chat-content-shift {
+    transform: translateY(calc(-1 * clamp(2.5rem, 8vh, 4.5rem)));
   }
 }
 
@@ -350,6 +362,27 @@ textarea:focus-visible {
   to {
     transform: translateY(-1px);
     box-shadow: var(--shadow-float);
+  }
+}
+
+@keyframes workspace-loading-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.workspace-loading-orbit {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: workspace-loading-orbit 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-loading-orbit {
+    animation: none;
   }
 }
 
