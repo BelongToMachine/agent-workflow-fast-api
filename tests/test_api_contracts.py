@@ -2,6 +2,7 @@ from app.main import app
 
 EXPECTED_API_PATHS = {
     "/api/v1/healthz",
+    "/api/v1/readyz",
     "/api/v1/me",
     "/api/v1/models",
     "/api/v1/products",
@@ -42,6 +43,7 @@ def test_openapi_declares_bearer_security_for_business_paths() -> None:
 
     for path in EXPECTED_API_PATHS - {
         "/api/v1/healthz",
+        "/api/v1/readyz",
         "/api/v1/models",
         "/api/v1/dev/oidc/consent",
         "/api/v1/files/attachments/{token}",

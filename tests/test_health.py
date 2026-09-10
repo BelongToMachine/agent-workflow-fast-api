@@ -1,5 +1,8 @@
+from contextlib import asynccontextmanager
+
 from fastapi.testclient import TestClient
 
+import app.api.routes.health as health
 from app.api.routes.chat import ChatRequest, to_openai_messages
 from app.main import app
 
@@ -22,6 +25,42 @@ def test_health_check() -> None:
         "service": "Asianode FastAPI",
         "environment": "development",
     }
+
+
+def test_readiness_check_requires_database() -> None:
+    response = client.get("/api/v1/readyz", headers={"X-Request-ID": "ready-check-1"})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "database:unavailable",
+        "detail": "The database is temporarily unavailable.",
+        "message": "The database is temporarily unavailable.",
+        "requestId": "ready-check-1",
+    }
+    assert response.headers["x-request-id"] == "ready-check-1"
+    assert response.headers["retry-after"] == "1"
+
+
+def test_readiness_check_uses_a_database_connection(monkeypatch) -> None:
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        async def execute(self, statement: object) -> None:
+            self.statements.append(str(statement))
+
+    connection = FakeConnection()
+
+    @asynccontextmanager
+    async def fake_db_connection():
+        yield connection
+
+    monkeypatch.setattr(health, "get_db_connection", fake_db_connection)
+
+    response = client.get("/api/v1/readyz")
+
+    assert response.status_code == 200
+    assert connection.statements == ["SELECT 1"]
 
 
 def test_cors_allows_nextjs_development_origin() -> None:

@@ -20,7 +20,8 @@
 - 服务端从认证上下文取得 user、role、permission 和 workspace，不接受调用方在 body 中提交
   这些字段作为可信身份。
 - `ENVIRONMENT=staging` 或 `production` 时，应用启动会拒绝缺失/非 HTTPS 的 OIDC issuer、缺失
-  audience、弱 bridge/auth secret、通配符 CORS 或关闭全局限流的配置。
+  audience、弱 bridge/auth secret、缺失/非 HTTPS 的 `AUTH_FRONTEND_URL`、通配符 CORS 或关闭全局
+  限流的配置。
 - JSON 字段使用 camelCase；query parameter 保持现有 BFF 兼容命名，例如 `workspace_id`、
   `starting_after` 和 `sourceFileNames`。
 

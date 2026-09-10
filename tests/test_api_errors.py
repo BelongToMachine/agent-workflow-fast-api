@@ -59,3 +59,34 @@ def test_workspace_permission_denial_uses_a_stable_code() -> None:
         "detail": "The user does not have permission to access this workspace data.",
         "message": "The user does not have permission to access this workspace data.",
     }
+
+
+def test_database_unavailable_http_exception_uses_a_stable_code() -> None:
+    request = Request(
+        {
+            "headers": [(b"x-request-id", b"database-unavailable-1")],
+            "method": "GET",
+            "path": "/api/v1/me",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "type": "http",
+        }
+    )
+    response = asyncio.run(
+        structured_http_exception_handler(
+            request,
+            HTTPException(
+                status_code=503,
+                detail="FastAPI could not query workspace membership.",
+            ),
+        )
+    )
+
+    assert response.status_code == 503
+    assert json.loads(response.body) == {
+        "code": "database:unavailable",
+        "detail": "FastAPI could not query workspace membership.",
+        "message": "FastAPI could not query workspace membership.",
+        "requestId": "database-unavailable-1",
+    }
+    assert response.headers["x-request-id"] == "database-unavailable-1"

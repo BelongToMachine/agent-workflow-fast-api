@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import AliasChoices, Field, field_validator
@@ -55,6 +56,33 @@ class Settings(BaseSettings):
     postgres_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("POSTGRES_URL", "ASIANODE_POSTGRES_URL"),
+    )
+    postgres_connect_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        validation_alias=AliasChoices(
+            "POSTGRES_CONNECT_TIMEOUT_SECONDS",
+            "ASIANODE_POSTGRES_CONNECT_TIMEOUT_SECONDS",
+        ),
+    )
+    postgres_command_timeout_seconds: float = Field(
+        default=15.0,
+        ge=1.0,
+        le=300.0,
+        validation_alias=AliasChoices(
+            "POSTGRES_COMMAND_TIMEOUT_SECONDS",
+            "ASIANODE_POSTGRES_COMMAND_TIMEOUT_SECONDS",
+        ),
+    )
+    postgres_pool_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        validation_alias=AliasChoices(
+            "POSTGRES_POOL_TIMEOUT_SECONDS",
+            "ASIANODE_POSTGRES_POOL_TIMEOUT_SECONDS",
+        ),
     )
     default_workspace_id: UUID = Field(
         default=UUID("00000000-0000-0000-0000-000000000001"),
@@ -422,6 +450,18 @@ def validate_runtime_settings(settings: Settings) -> None:
         return
 
     errors: list[str] = []
+    frontend_url = settings.auth_frontend_url.strip()
+    parsed_frontend_url = urlsplit(frontend_url)
+    if not frontend_url:
+        errors.append("AUTH_FRONTEND_URL is required")
+    elif not parsed_frontend_url.scheme or not parsed_frontend_url.netloc:
+        errors.append("AUTH_FRONTEND_URL must be an absolute URL")
+    elif parsed_frontend_url.scheme != "https":
+        errors.append("AUTH_FRONTEND_URL must use HTTPS")
+    elif parsed_frontend_url.hostname in {"localhost", "127.0.0.1", "::1"}:
+        errors.append("AUTH_FRONTEND_URL cannot point to localhost")
+    elif parsed_frontend_url.query or parsed_frontend_url.fragment:
+        errors.append("AUTH_FRONTEND_URL must not contain a query or fragment")
     if settings.debug:
         errors.append("DEBUG must be false")
     if settings.auth_mode in {"logto", "dual"}:

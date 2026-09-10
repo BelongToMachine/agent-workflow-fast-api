@@ -163,7 +163,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         if not settings.rate_limit_enabled or not request.url.path.startswith("/api/v1/"):
             return await call_next(request)
-        if request.url.path in {"/api/v1/healthz", "/api/v1/docs", "/api/v1/openapi.json"}:
+        if request.url.path in {
+            "/api/v1/healthz",
+            "/api/v1/readyz",
+            "/api/v1/docs",
+            "/api/v1/openapi.json",
+        }:
             return await call_next(request)
 
         limit = _path_limit(

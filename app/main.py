@@ -2,11 +2,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.admin import install_sqladmin
-from app.api.errors import structured_http_exception_handler
+from app.api.errors import database_service_error_handler, structured_http_exception_handler
 from app.api.router import api_router
 from app.core.config import get_settings, validate_runtime_settings
 from app.core.csrf import CSRFMiddleware
 from app.core.rate_limit import RateLimitMiddleware
+from app.core.request_context import REQUEST_ID_HEADER, RequestContextMiddleware
+from app.db.errors import DatabaseServiceError
 from app.db.session import get_engine
 
 
@@ -24,6 +26,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_headers=["*"],
         allow_methods=["*"],
+        expose_headers=[REQUEST_ID_HEADER],
         allow_origins=[
             origin.strip()
             for origin in settings.cors_origins.split(",")
@@ -43,6 +46,8 @@ def create_app() -> FastAPI:
             if origin.strip()
         ],
     )
+    application.add_middleware(RequestContextMiddleware)
+    application.add_exception_handler(DatabaseServiceError, database_service_error_handler)
     application.add_exception_handler(HTTPException, structured_http_exception_handler)
     application.include_router(api_router)
     if settings.sqladmin_enabled:

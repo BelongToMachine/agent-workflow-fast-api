@@ -15,6 +15,7 @@ def _production_settings(**overrides: object) -> Settings:
         "auth_audience": "api://asianode",
         "auth_secret": "x" * 32,
         "cors_origins": "https://app.example.com",
+        "auth_frontend_url": "https://app.example.com",
         "rate_limit_enabled": True,
     }
     values.update(overrides)
@@ -63,6 +64,14 @@ def test_session_timeout_defaults_are_bounded_for_browser_sessions() -> None:
     assert settings.session_touch_interval_seconds == 5 * 60
 
 
+def test_postgres_timeouts_have_safe_defaults() -> None:
+    settings = Settings()
+
+    assert settings.postgres_connect_timeout_seconds == 10.0
+    assert settings.postgres_command_timeout_seconds == 15.0
+    assert settings.postgres_pool_timeout_seconds == 10.0
+
+
 def test_production_runtime_settings_reject_missing_identity_configuration() -> None:
     settings = _production_settings(
         auth_mode="logto",
@@ -91,6 +100,15 @@ def test_production_runtime_settings_reject_insecure_cors_and_disabled_rate_limi
 
     assert "CORS_ORIGINS" in str(error.value)
     assert "RATE_LIMIT_ENABLED" in str(error.value)
+
+
+def test_production_runtime_settings_reject_localhost_invitation_frontend() -> None:
+    settings = _production_settings(auth_frontend_url="http://localhost:5173")
+
+    with pytest.raises(SettingsConfigurationError) as error:
+        validate_runtime_settings(settings)
+
+    assert "AUTH_FRONTEND_URL" in str(error.value)
 
 
 def test_app_factory_fails_before_starting_with_unsafe_production_settings(monkeypatch) -> None:

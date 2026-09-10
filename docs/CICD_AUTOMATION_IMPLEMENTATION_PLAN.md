@@ -562,6 +562,8 @@ POSTGRES_URL=<vps-only-production-database-url>
 REDIS_URL=redis://redis:6379/0
 
 CORS_ORIGINS=https://<production-frontend-domain>
+# The origin used in manually shared invitation and password-reset links.
+AUTH_FRONTEND_URL=https://<production-frontend-domain>
 DEFAULT_WORKSPACE_ID=<production-workspace-uuid>
 SINGLE_WORKSPACE_MODE=true
 
