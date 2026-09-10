@@ -27,7 +27,6 @@ import {
 useBackendIdentity,
 useBackendQuery,
 } from "@/lib/backend/reactQuery";
-import type { Vote } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
 import { fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
@@ -50,7 +49,6 @@ setInput: Dispatch<SetStateAction<string>>;
 visibilityType: VisibilityType;
 isReadonly: boolean;
 isLoading: boolean;
-votes: Vote[] | undefined;
 currentModelId: string;
 setCurrentModelId: (id: string) => void;
 showCreditCardAlert: boolean;
@@ -319,12 +317,6 @@ setMessages,
 
 const isReadonly = isNewChat ? false : (chatData?.isReadonly ?? false);
 
-const { data: votes } = useBackendQuery<Vote[]>({
-enabled: !isReadonly && messages.length >= 2,
-path: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/vote?chatId=${chatId}`,
-queryKey: backendQueryKeys.chatVotes(identity, chatId),
-});
-
 const value = useMemo<ActiveChatContextValue>(
 () => ({
   addToolApprovalResponse,
@@ -344,7 +336,6 @@ const value = useMemo<ActiveChatContextValue>(
   status,
   stop,
   visibilityType: visibility,
-  votes,
 }),
 [
   chatId,
@@ -360,7 +351,6 @@ const value = useMemo<ActiveChatContextValue>(
   isReadonly,
   isNewChat,
   isLoading,
-  votes,
   currentModelId,
   showCreditCardAlert,
 ]

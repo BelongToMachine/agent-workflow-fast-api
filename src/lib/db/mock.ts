@@ -6,10 +6,6 @@ import type { Chat, DBMessage, User } from "./schema";
 const users = new Map<string, User>();
 const chats = new Map<string, Chat>();
 const messages = new Map<string, DBMessage[]>();
-const votes = new Map<
-  string,
-  { chatId: string; messageId: string; isUpvoted: boolean }
->();
 
 function now() {
   return new Date();
@@ -164,29 +160,6 @@ export function mockGetMessageCountByUserId(id: string) {
     ).length;
   }
   return Promise.resolve(count);
-}
-
-export function mockVoteMessage({
-  chatId,
-  messageId,
-  type,
-}: {
-  chatId: string;
-  messageId: string;
-  type: "up" | "down";
-}) {
-  votes.set(`${chatId}:${messageId}`, {
-    chatId,
-    isUpvoted: type === "up",
-    messageId,
-  });
-  return Promise.resolve();
-}
-
-export function mockGetVotesByChatId(chatId: string) {
-  return Promise.resolve(
-    [...votes.values()].filter((item) => item.chatId === chatId)
-  );
 }
 
 export function mockDeleteChatById(id: string) {

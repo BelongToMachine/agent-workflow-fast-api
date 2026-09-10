@@ -41,7 +41,6 @@ export function ChatShell() {
     visibilityType,
     isReadonly,
     isLoading,
-    votes,
     currentModelId,
     setCurrentModelId,
     showCreditCardAlert,
@@ -138,7 +137,6 @@ export function ChatShell() {
               selectedModelId={currentModelId}
               setMessages={setMessages}
               status={status}
-              votes={votes}
             />
 
             <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
@@ -171,7 +169,6 @@ export function ChatShell() {
         <Artifact
           addToolApprovalResponse={addToolApprovalResponse}
           attachments={attachments}
-          chatId={chatId}
           input={input}
           isReadonly={isReadonly}
           messages={messages}
@@ -184,7 +181,6 @@ export function ChatShell() {
           setMessages={setMessages}
           status={status}
           stop={stop}
-          votes={votes}
         />
       </div>
 

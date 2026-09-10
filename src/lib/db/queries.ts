@@ -32,13 +32,11 @@ import {
   mockGetMessagesByChatId,
   mockGetStreamIdsByChatId,
   mockGetUser,
-  mockGetVotesByChatId,
   mockSaveChat,
   mockSaveMessages,
   mockUpdateChatTitle,
   mockUpdateChatVisibility,
   mockUpdateMessage,
-  mockVoteMessage,
 } from "./mock";
 import {
   type Chat,
@@ -51,7 +49,6 @@ import {
   suggestion,
   type User,
   user,
-  vote,
 } from "./schema";
 import { generateHashedPassword } from "./utils";
 import { ensureDefaultWorkspaceMembership } from "./workspaceQueries";
@@ -160,7 +157,6 @@ export async function deleteChatById({ id }: { id: string }) {
     return mockDeleteChatById(id);
   }
   try {
-    await db.delete(vote).where(eq(vote.chatId, id));
     await db.delete(message).where(eq(message.chatId, id));
     await db.delete(stream).where(eq(stream.chatId, id));
 
@@ -198,7 +194,6 @@ export async function deleteAllChatsByUserId({
 
     const chatIds = userChats.map((c) => c.id);
 
-    await db.delete(vote).where(inArray(vote.chatId, chatIds));
     await db.delete(message).where(inArray(message.chatId, chatIds));
     await db.delete(stream).where(inArray(stream.chatId, chatIds));
 
@@ -369,53 +364,6 @@ export async function getMessagesByChatId({ id }: { id: string }) {
       .from(message)
       .where(eq(message.chatId, id))
       .orderBy(asc(message.createdAt));
-  } catch (error) {
-    throw new ChatbotError("bad_request:database", { cause: error });
-  }
-}
-
-export async function voteMessage({
-  chatId,
-  messageId,
-  type,
-}: {
-  chatId: string;
-  messageId: string;
-  type: "up" | "down";
-}) {
-  if (isMockDatabase) {
-    return mockVoteMessage({ chatId, messageId, type });
-  }
-  try {
-    const [existingVote] = await db
-      .select()
-      .from(vote)
-      .where(and(eq(vote.messageId, messageId)));
-
-    if (existingVote) {
-      return await db
-        .update(vote)
-        .set({ isUpvoted: type === "up" })
-        .where(and(eq(vote.messageId, messageId), eq(vote.chatId, chatId)));
-    }
-    return await db.insert(vote).values({
-      chatId,
-      isUpvoted: type === "up",
-      messageId,
-    });
-  } catch (error) {
-    throw new ChatbotError("bad_request:database", {
-      cause: error,
-    });
-  }
-}
-
-export async function getVotesByChatId({ id }: { id: string }) {
-  if (isMockDatabase) {
-    return mockGetVotesByChatId(id);
-  }
-  try {
-    return await db.select().from(vote).where(eq(vote.chatId, id));
   } catch (error) {
     throw new ChatbotError("bad_request:database", { cause: error });
   }
@@ -633,12 +581,6 @@ export async function deleteMessagesByChatIdAfterTimestamp({
     );
 
     if (messageIds.length > 0) {
-      await db
-        .delete(vote)
-        .where(
-          and(eq(vote.chatId, chatId), inArray(vote.messageId, messageIds))
-        );
-
       return await db
         .delete(message)
         .where(

@@ -22,8 +22,6 @@ export const backendQueryKeys = {
     ["backend", "user", identity, "chat-history"] as const,
   chatMessages: (identity: string, chatId: string) =>
     ["backend", "user", identity, "chat-messages", chatId] as const,
-  chatVotes: (identity: string, chatId: string) =>
-    ["backend", "user", identity, "chat-votes", chatId] as const,
   members: (identity: string) =>
     ["backend", "user", identity, "members"] as const,
   accessCandidates: (identity: string) =>

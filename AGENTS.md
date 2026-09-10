@@ -56,7 +56,7 @@ FastAPI 后端位于同级目录 [`../asianode-fastapi`](../asianode-fastapi)，
 ### 聊天、流式数据与 Artifact
 
 - `src/hooks/useActiveChat.tsx` 负责当前 chat ID、消息加载、AI SDK `useChat`、模型选择、自动恢复、
-  投票查询和聊天错误处理。
+  聊天错误处理。
 - `src/components/chat/dataStreamProvider.tsx` 保存流式 UI data；
   `dataStreamHandler.tsx` 消费数据并更新 Artifact、React Query 缓存和 waiting status。
 - `src/lib/types.ts` 中的 `CustomUIDataTypes`、`ChatMessage` 和 `ChatTools` 是前后端流式消息的共享
@@ -148,7 +148,7 @@ bun run lint
 bun run build
 ```
 
-如果改动聊天或后端合同，还应手动验证：开发 OIDC 登录、聊天发送与 SSE、历史/删除、投票、Artifact
+如果改动聊天或后端合同，还应手动验证：开发 OIDC 登录、聊天发送与 SSE、历史/删除、Artifact
 流式打开与保存、移动端布局，以及 FastAPI 错误/未授权响应。涉及成员或知识库设置时，验证不同权限下
 的入口、加载、mutation 和后端拒绝行为。
 

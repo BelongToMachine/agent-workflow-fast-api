@@ -1,18 +1,14 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
-import equal from "fast-deep-equal";
 import { AnimatePresence, motion } from "framer-motion";
 import { memo } from "react";
 import { useMessages } from "@/hooks/useMessages";
-import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import type { UIArtifact } from "./artifact";
 import { PreviewMessage, ThinkingMessage } from "./message";
 
 type ArtifactMessagesProps = {
   addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
-  chatId: string;
   status: UseChatHelpers<ChatMessage>["status"];
-  votes: Vote[] | undefined;
   messages: ChatMessage[];
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
@@ -22,9 +18,7 @@ type ArtifactMessagesProps = {
 
 function PureArtifactMessages({
   addToolApprovalResponse,
-  chatId,
   status,
-  votes,
   messages,
   setMessages,
   regenerate,
@@ -48,7 +42,6 @@ function PureArtifactMessages({
       {messages.map((message, index) => (
         <PreviewMessage
           addToolApprovalResponse={addToolApprovalResponse}
-          chatId={chatId}
           isLoading={status === "streaming" && index === messages.length - 1}
           isReadonly={isReadonly}
           key={message.id}
@@ -58,11 +51,6 @@ function PureArtifactMessages({
             hasSentMessage && index === messages.length - 1
           }
           setMessages={setMessages}
-          vote={
-            votes
-              ? votes.find((vote) => vote.messageId === message.id)
-              : undefined
-          }
         />
       ))}
 
@@ -105,10 +93,6 @@ function areEqual(
   if (prevProps.messages.length !== nextProps.messages.length) {
     return false;
   }
-  if (!equal(prevProps.votes, nextProps.votes)) {
-    return false;
-  }
-
   return true;
 }
 

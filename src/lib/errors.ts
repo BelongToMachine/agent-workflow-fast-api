@@ -13,7 +13,6 @@ export type Surface =
   | "stream"
   | "database"
   | "history"
-  | "vote"
   | "document"
   | "suggestions"
   | "activate_gateway";
@@ -32,7 +31,6 @@ export const visibilityBySurface: Record<Surface, ErrorVisibility> = {
   history: "response",
   stream: "response",
   suggestions: "response",
-  vote: "response",
 };
 
 export class ChatbotError extends Error {
