@@ -159,7 +159,7 @@
   <rect x="1251" y="771" width="279" height="210" rx="16" fill="#f7fbff"/>
   <text x="1281" y="809" class="sans node-subtitle" fill="#e77f31">BUSINESS APIS</text>
   <text x="1281" y="844" class="sans body ink">Products &amp; content</text>
-  <text x="1281" y="874" class="sans small muted">Chat history &amp; votes</text>
+  <text x="1281" y="874" class="sans small muted">Chat history</text>
   <text x="1281" y="899" class="sans small muted">Documents &amp; suggestions</text>
   <text x="1281" y="924" class="sans small muted">Workspace administration</text>
   <rect x="1281" y="945" width="212" height="23" rx="11" fill="#fff3e8"/>
@@ -222,7 +222,7 @@
 
   <rect x="780" y="1423" width="620" height="104" rx="14" fill="#173354" stroke="#315a80"/>
   <text x="810" y="1452" class="sans node-subtitle" fill="#13c1b8">CONVERSATION &amp; ARTIFACTS</text>
-  <text x="810" y="1480" class="sans body white">Chat → Message_v2 → Vote_v2</text>
+  <text x="810" y="1480" class="sans body white">Chat → Message_v2</text>
   <text x="810" y="1505" class="sans small dbmuted">Stream · Document · Suggestion</text>
 
   <rect x="1430" y="1423" width="800" height="104" rx="14" fill="#173354" stroke="#315a80"/>

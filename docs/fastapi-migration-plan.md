@@ -82,7 +82,6 @@ Next.js Web → Next.js BFF / Logto → FastAPI → 数据库 / 向量库 / AI W
 | Agent Query | `POST /api/v1/agents/query` | [x] ✅ 仅允许预定义只读工具（含知识库发现、单知识库/单文件上下文、文件状态查看和语义搜索），FastAPI 从认证上下文取得 workspace/user，并执行权限检查 |
 | Agent Workflow | `POST /api/v1/agents/run` | [x] ✅ 使用服务端模型配置执行最多 5 轮只读 tool loop，不创建 Chat/Message；workspace、用户和知识库权限由 FastAPI 取得并校验；[x] 已提供显式 `FASTAPI_TEST_AGENT_*` 真实 provider smoke test（单次、单步、禁用知识库工具，默认跳过），部署环境中的实际执行待完成 |
 | Chat 图片附件上传 | `POST /api/v1/files/upload` | [ ] 🚧 FastAPI 已支持 `document.write` 权限、JPEG/PNG MIME 与 magic bytes 和大小校验、local HMAC 签名 URL、S3 预签名 URL；[x] 路由回归测试确认 workspace 进入权限检查，存储 key 按 workspace/user 隔离；Next.js `/api/files/upload` 通过 `USE_FASTAPI_ATTACHMENT_UPLOAD` 可切换转发，旧 Vercel Blob 路径保留；真实对象存储和浏览器访问验证待完成 |
-| Chat 消息评价 | `GET/PATCH /api/v1/votes` | [x] ✅ FastAPI 已迁移投票查询和 upsert，校验 `chat.read/chat.write`、workspace、chat owner 和 message 归属；Next.js `/api/vote` 在 `USE_FASTAPI_BACKEND=1` 时转发，旧 Drizzle 路径保留 |
 | 文档建议读取 | `GET /api/v1/suggestions` | [x] ✅ FastAPI 已迁移建议查询和 camelCase 返回结构，校验 `document.read`、workspace 和文档 owner；Next.js `/api/suggestions` 与实际使用的 `artifacts/actions.ts` Server Action 在 `USE_FASTAPI_BACKEND=1` 时均转发，旧 Drizzle 路径保留 |
 | 模型能力 | `GET /api/v1/models` | [x] ✅ FastAPI 已迁移公开模型能力查询，保持 `/api/models` 的返回结构；模型选择器和图片附件按钮在 `USE_FASTAPI_BACKEND=1` 时通过 Next.js BFF 读取 FastAPI，聊天请求只接受公开 capability model ID，旧静态实现保留 |
 
@@ -95,7 +94,6 @@ Next.js Web → Next.js BFF / Logto → FastAPI → 数据库 / 向量库 / AI W
 | `app/(chat)/api/files/upload/route.ts` | `app/api/v1/files/upload`（feature-gated；Vercel Blob fallback） |
 | `app/(chat)/api/history/route.ts` | `app/api/v1/chats` |
 | `app/(chat)/api/messages/route.ts` | `app/api/v1/chats/{id}/messages` |
-| `app/(chat)/api/vote/route.ts` | `app/api/v1/votes` |
 | `app/(chat)/api/suggestions/route.ts`、`artifacts/actions.ts` | `app/api/v1/suggestions` |
 | `app/(chat)/api/models/route.ts` | `app/api/v1/models` |
 | `app/(chat)/api/knowledge-bases/[knowledgeBaseId]/files/route.ts` | `app/api/v1/knowledge-bases/{id}/files` |

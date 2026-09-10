@@ -69,9 +69,6 @@ CHAT_ANCHOR_QUERY = text(
 )
 
 DELETE_CHAT_CHILDREN_QUERIES = (
-    text('DELETE FROM "Vote_v2" WHERE "chatId" IN :chat_ids').bindparams(
-        bindparam("chat_ids", expanding=True)
-    ),
     text('DELETE FROM "Message_v2" WHERE "chatId" IN :chat_ids').bindparams(
         bindparam("chat_ids", expanding=True)
     ),

@@ -453,7 +453,7 @@ POST /api/v1/admin/members?workspace_id=<uuid>
 - 使用本地 User UUID 查询 membership；
 - 不信任前端 role、permissions 或 owner；
 - 在 SQL 中携带 workspace 条件；
-- 对 Chat/Document/Vote/File 等继续检查 owner/resource；
+- 对 Chat/Document/File 等继续检查 owner/resource；
 - 对知识库继续执行 grant 过滤；
 - 不使用 Logto Token 的 role 直接替代本地 role。
 

@@ -85,8 +85,6 @@ validation error 的标准结构由 FastAPI 生成：
 | DELETE | `/api/v1/chats` | `chat.delete` | query：`workspace_id` | `{deletedCount}` |
 | DELETE | `/api/v1/chats/{chat_id}` | `chat.delete` + owner/workspace check | query：`workspace_id` | `{id}` |
 | GET | `/api/v1/chats/{chat_id}/messages` | `chat.read` + owner/workspace check | query：`workspace_id` | `ChatMessagesResponse` |
-| GET | `/api/v1/votes` | `chat.read` + chat owner/workspace check | query：`chatId`、`workspace_id` | `VoteRecord[]` |
-| PATCH | `/api/v1/votes` | `chat.write` + chat/message owner/workspace check | query：`workspace_id`；body：`{chatId,messageId,type}` | `Message voted` |
 | GET | `/api/v1/suggestions` | `document.read` + document owner/workspace check | query：`documentId`、`workspace_id` | `SuggestionRecord[]` |
 | GET | `/api/v1/documents` | `document.read` | query：`id`、`workspace_id` | `DocumentRecord[]` |
 | POST | `/api/v1/documents` | `document.write` | query：`id`、`workspace_id`；body：`{content,isManualEdit?,kind,title}` | `DocumentRecord[]` |

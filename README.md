@@ -61,6 +61,9 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 `KNOWLEDGE_EMBEDDINGS_ENABLED` 和 `KNOWLEDGE_BASE_ENTITY_ENABLED`。`make infra-down` 只停止并
 移除容器，不带 `-v`，因此不会删除本地数据库或 Redis volume。
 
+发布移除聊天反馈功能的版本前，应由正式部署迁移流程执行
+`migrations/0011_remove_vote_v2.sql`，物理删除已废弃的 `Vote_v2` 表；这是不可逆的数据清理，执行前请先完成数据库备份。
+
 `make knowledge-integrity` 是只读安全检查，要求四个 migration 已完成，然后验证 grant、
 文件和切片没有孤儿记录，且 workspace、knowledge base、file 的归属一致。检查失败时返回
 非零退出码；它不会自动修复数据，也不会替代真实数据库和对象存储验证。
@@ -87,8 +90,6 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 - 聊天历史：`GET http://127.0.0.1:8000/api/v1/chats?workspace_id={workspace_id}`
 - 删除当前 workspace 的聊天历史：`DELETE http://127.0.0.1:8000/api/v1/chats?workspace_id={workspace_id}`
 - 聊天消息：`GET http://127.0.0.1:8000/api/v1/chats/{chat_id}/messages?workspace_id={workspace_id}`
-- 聊天评价查询：`GET http://127.0.0.1:8000/api/v1/votes?chatId={chat_id}&workspace_id={workspace_id}`
-- 聊天评价保存：`PATCH http://127.0.0.1:8000/api/v1/votes?workspace_id={workspace_id}`
 - 文档建议：`GET http://127.0.0.1:8000/api/v1/suggestions?documentId={document_id}&workspace_id={workspace_id}`
 - 模型能力：`GET http://127.0.0.1:8000/api/v1/models`
 - 知识库授权列表：`GET http://127.0.0.1:8000/api/v1/admin/knowledge-base-grants?workspace_id={workspace_id}`
