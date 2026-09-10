@@ -67,6 +67,8 @@ GET_SESSION_QUERY = text(
       AND session."revokedAt" IS NULL
       AND session."idleExpiresAt" > CURRENT_TIMESTAMP
       AND session."absoluteExpiresAt" > CURRENT_TIMESTAMP
+      AND session."createdAt" + make_interval(secs => :absolute_timeout_seconds)
+          > CURRENT_TIMESTAMP
     """
 )
 
@@ -152,10 +154,18 @@ class AuthSessionRepository:
         record = _record_from_row({**row, "user_status": "active"})
         return NewSessionTokenRecord(token=token.token, record=record)
 
-    async def get_active(self, token: str) -> AuthSessionRecord | None:
+    async def get_active(
+        self,
+        token: str,
+        *,
+        absolute_timeout_seconds: int,
+    ) -> AuthSessionRecord | None:
         result = await self.connection.execute(
             GET_SESSION_QUERY,
-            {"token_hash": hash_session_token(token)},
+            {
+                "token_hash": hash_session_token(token),
+                "absolute_timeout_seconds": absolute_timeout_seconds,
+            },
         )
         row = result.mappings().first()
         return _record_from_row(dict(row)) if row is not None else None
@@ -178,6 +188,27 @@ class AuthSessionRepository:
                 "touch_after": touch_after,
             },
         )
+
+    async def touch_if_due(
+        self,
+        record: AuthSessionRecord,
+        *,
+        idle_timeout: timedelta,
+        touch_interval: timedelta,
+        now: datetime | None = None,
+    ) -> bool:
+        current = now or datetime.now(UTC).replace(tzinfo=None)
+        touch_after = current - touch_interval
+        if record.last_seen_at >= touch_after:
+            return False
+
+        await self.touch(
+            record,
+            idle_timeout=idle_timeout,
+            touch_after=touch_after,
+            now=current,
+        )
+        return True
 
     async def revoke(self, session_id: UUID, *, now: datetime | None = None) -> None:
         await self.connection.execute(

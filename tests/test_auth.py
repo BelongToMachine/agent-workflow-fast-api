@@ -23,6 +23,19 @@ from app.core.auth import (
 from app.core.config import Settings
 
 
+class _Transaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+
+class _Connection:
+    def begin(self):
+        return _Transaction()
+
+
 def test_development_mode_has_an_explicit_non_production_identity() -> None:
     settings = Settings(environment="development", auth_required=False)
 
@@ -60,13 +73,17 @@ def test_dual_mode_prefers_a_valid_local_session(monkeypatch) -> None:
         def __init__(self, connection) -> None:
             self.connection = connection
 
-        async def get_active(self, token: str):
+        async def get_active(self, token: str, **_kwargs):
             assert token == "opaque-session-token"
             return record
 
+        async def touch_if_due(self, received_record, **_kwargs):
+            assert received_record is record
+            return True
+
     @asynccontextmanager
     async def fake_db_connection():
-        yield object()
+        yield _Connection()
 
     monkeypatch.setattr(auth, "get_db_connection", fake_db_connection)
     monkeypatch.setattr(auth_sessions, "AuthSessionRepository", FakeRepository)
@@ -102,13 +119,13 @@ def test_dual_mode_rejects_an_invalid_local_session_cookie(monkeypatch) -> None:
         def __init__(self, connection) -> None:
             self.connection = connection
 
-        async def get_active(self, token: str):
+        async def get_active(self, token: str, **_kwargs):
             assert token == "invalid-session-token"
             return None
 
     @asynccontextmanager
     async def fake_db_connection():
-        yield object()
+        yield _Connection()
 
     monkeypatch.setattr(auth, "get_db_connection", fake_db_connection)
     monkeypatch.setattr(auth_sessions, "AuthSessionRepository", FakeRepository)

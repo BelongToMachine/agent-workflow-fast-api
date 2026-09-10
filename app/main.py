@@ -5,6 +5,7 @@ from app.admin import install_sqladmin
 from app.api.errors import structured_http_exception_handler
 from app.api.router import api_router
 from app.core.config import get_settings, validate_runtime_settings
+from app.core.csrf import CSRFMiddleware
 from app.core.rate_limit import RateLimitMiddleware
 from app.db.session import get_engine
 
@@ -33,6 +34,14 @@ def create_app() -> FastAPI:
         RateLimitMiddleware,
         limit=settings.rate_limit_requests,
         window_seconds=settings.rate_limit_window_seconds,
+    )
+    application.add_middleware(
+        CSRFMiddleware,
+        allowed_origins=[
+            origin.strip()
+            for origin in settings.cors_origins.split(",")
+            if origin.strip()
+        ],
     )
     application.add_exception_handler(HTTPException, structured_http_exception_handler)
     application.include_router(api_router)

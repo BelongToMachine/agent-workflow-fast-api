@@ -107,7 +107,7 @@ class Settings(BaseSettings):
         ),
     )
     session_absolute_timeout_seconds: int = Field(
-        default=7 * 24 * 60 * 60,
+        default=3 * 24 * 60 * 60,
         ge=3600,
         le=90 * 24 * 60 * 60,
         validation_alias=AliasChoices(

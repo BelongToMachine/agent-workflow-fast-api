@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import timedelta
 from typing import Annotated, Any
 
 import httpx
@@ -181,12 +182,26 @@ def _session_mode(settings: Settings) -> bool:
 
 async def _get_local_session_user(
     session_token: str,
+    settings: Settings,
 ) -> AuthenticatedUser | None:
     from app.db.auth_sessions import AuthSessionRepository
 
     try:
         async with get_db_connection() as connection:
-            record = await AuthSessionRepository(connection).get_active(session_token)
+            async with connection.begin():
+                sessions = AuthSessionRepository(connection)
+                record = await sessions.get_active(
+                    session_token,
+                    absolute_timeout_seconds=settings.session_absolute_timeout_seconds,
+                )
+                if record is not None and record.user_status == "active":
+                    await sessions.touch_if_due(
+                        record,
+                        idle_timeout=timedelta(seconds=settings.session_idle_timeout_seconds),
+                        touch_interval=timedelta(
+                            seconds=settings.session_touch_interval_seconds
+                        ),
+                    )
     except (ValueError, RuntimeError, SQLAlchemyError) as error:
         if isinstance(error, ValueError):
             return None
@@ -388,7 +403,7 @@ async def get_current_user(
 ) -> AuthenticatedUser:
     if _session_mode(settings):
         if session_token:
-            session_user = await _get_local_session_user(session_token)
+            session_user = await _get_local_session_user(session_token, settings)
             if session_user is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,

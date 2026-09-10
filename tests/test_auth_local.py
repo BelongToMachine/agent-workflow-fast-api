@@ -171,5 +171,6 @@ def test_local_login_sets_an_opaque_httponly_session_cookie(monkeypatch) -> None
     cookie = response.headers["set-cookie"]
     assert "__Host-asianode_session=opaque-session-token" in cookie
     assert "HttpOnly" in cookie
+    assert "Max-Age=259200" in cookie
     assert "Path=/" in cookie
     assert "Domain=" not in cookie

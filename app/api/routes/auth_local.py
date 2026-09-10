@@ -9,7 +9,7 @@ mode while local account provisioning is being validated.
 from __future__ import annotations
 
 import unicodedata
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -332,11 +332,25 @@ async def read_local_session(
 
     try:
         async with get_db_connection() as connection:
-            session = await AuthSessionRepository(connection).get_active(session_token)
-            if session is None:
-                _clear_auth_cookies(response, request, settings)
-                return LocalSessionResponse(authenticated=False)
-            user = await _load_session_user(connection, session.user_id)
+            async with connection.begin():
+                sessions = AuthSessionRepository(connection)
+                session = await sessions.get_active(
+                    session_token,
+                    absolute_timeout_seconds=settings.session_absolute_timeout_seconds,
+                )
+                if session is None:
+                    _clear_auth_cookies(response, request, settings)
+                    return LocalSessionResponse(authenticated=False)
+                user = await _load_session_user(connection, session.user_id)
+                if user is not None:
+                    await sessions.touch_if_due(
+                        session,
+                        idle_timeout=timedelta(seconds=settings.session_idle_timeout_seconds),
+                        touch_interval=timedelta(
+                            seconds=settings.session_touch_interval_seconds
+                        ),
+                        now=datetime.now(UTC).replace(tzinfo=None),
+                    )
     except (ValueError, RuntimeError, SQLAlchemyError) as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -362,7 +376,10 @@ async def logout_local_user(
         if session_token:
             async with get_db_connection() as connection:
                 async with connection.begin():
-                    session = await AuthSessionRepository(connection).get_active(session_token)
+                    session = await AuthSessionRepository(connection).get_active(
+                        session_token,
+                        absolute_timeout_seconds=settings.session_absolute_timeout_seconds,
+                    )
                     if session is not None:
                         await AuthSessionRepository(connection).revoke(session.session_id)
     except (ValueError, RuntimeError, SQLAlchemyError) as error:

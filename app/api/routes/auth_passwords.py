@@ -117,7 +117,10 @@ async def change_password(
         async with get_db_connection() as connection:
             async with connection.begin():
                 sessions = AuthSessionRepository(connection)
-                session = await sessions.get_active(session_token)
+                session = await sessions.get_active(
+                    session_token,
+                    absolute_timeout_seconds=settings.session_absolute_timeout_seconds,
+                )
                 if session is None or session.user_id != user_id:
                     raise _auth_error(
                         status.HTTP_401_UNAUTHORIZED,

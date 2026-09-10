@@ -118,7 +118,7 @@ def test_change_password_rotates_session_and_revokes_other_sessions(monkeypatch)
         def __init__(self, _connection):
             pass
 
-        async def get_active(self, token):
+        async def get_active(self, token, **_kwargs):
             assert token == "old-session-token"
             return old_session
 

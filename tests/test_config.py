@@ -59,7 +59,7 @@ def test_session_timeout_defaults_are_bounded_for_browser_sessions() -> None:
     settings = Settings()
 
     assert settings.session_idle_timeout_seconds == 12 * 60 * 60
-    assert settings.session_absolute_timeout_seconds == 7 * 24 * 60 * 60
+    assert settings.session_absolute_timeout_seconds == 3 * 24 * 60 * 60
     assert settings.session_touch_interval_seconds == 5 * 60
 
 
