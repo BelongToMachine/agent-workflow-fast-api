@@ -23,6 +23,11 @@ export class LocalAuthRequestError extends Error {
 }
 
 let csrfToken: string | null = null;
+let csrfRefreshAt = 0;
+let csrfRefreshPromise: Promise<string> | null = null;
+
+const CSRF_TOKEN_MAX_AGE_MS = 60 * 60 * 1000;
+const CSRF_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 async function responsePayload(response: Response) {
   const contentType = response.headers.get("content-type") ?? "";
@@ -52,24 +57,45 @@ function errorMessage(payload: Awaited<ReturnType<typeof responsePayload>>) {
 }
 
 async function getCsrfToken(force = false) {
-  if (!force && csrfToken) {
+  if (!force && csrfToken && Date.now() < csrfRefreshAt) {
     return csrfToken;
   }
 
-  const response = await apiFetch("/api/v1/auth/csrf", {
-    credentials: "include",
-  });
-  const payload = await responsePayload(response);
-  if (!response.ok || !payload?.csrfToken) {
-    throw new LocalAuthRequestError(response.status, errorMessage(payload));
+  if (csrfRefreshPromise) {
+    return csrfRefreshPromise;
   }
 
-  csrfToken = payload.csrfToken;
-  return csrfToken;
+  const refreshPromise = (async () => {
+    const response = await apiFetch("/api/v1/auth/csrf", {
+      credentials: "include",
+    });
+    const payload = await responsePayload(response);
+    if (!response.ok || !payload?.csrfToken) {
+      throw new LocalAuthRequestError(response.status, errorMessage(payload));
+    }
+
+    csrfToken = payload.csrfToken;
+    csrfRefreshAt = Date.now() + CSRF_TOKEN_MAX_AGE_MS - CSRF_REFRESH_MARGIN_MS;
+    return csrfToken;
+  })();
+  csrfRefreshPromise = refreshPromise;
+
+  try {
+    return await refreshPromise;
+  } finally {
+    if (csrfRefreshPromise === refreshPromise) {
+      csrfRefreshPromise = null;
+    }
+  }
 }
 
-export async function getLocalCsrfToken() {
-  return getCsrfToken();
+export function invalidateLocalCsrfToken() {
+  csrfToken = null;
+  csrfRefreshAt = 0;
+}
+
+export async function getLocalCsrfToken(force = false) {
+  return getCsrfToken(force);
 }
 
 export async function getLocalSession(): Promise<LocalSessionResponse> {
@@ -104,7 +130,7 @@ export async function signInWithLocalSession(
   const payload = await responsePayload(response);
   if (!response.ok && response.status === 403) {
     // A stale token must not make the user retry valid credentials forever.
-    csrfToken = null;
+    invalidateLocalCsrfToken();
   }
   if (!response.ok || !payload || typeof payload.authenticated !== "boolean") {
     throw new LocalAuthRequestError(response.status, errorMessage(payload));
@@ -126,11 +152,13 @@ export async function signOutLocalSession() {
   });
   const payload = await responsePayload(response);
   if (!response.ok) {
-    csrfToken = response.status === 403 ? null : csrfToken;
+    if (response.status === 403) {
+      invalidateLocalCsrfToken();
+    }
     throw new LocalAuthRequestError(response.status, errorMessage(payload));
   }
 
-  csrfToken = null;
+  invalidateLocalCsrfToken();
   window.dispatchEvent(new Event("asianode-auth-change"));
 }
 
@@ -152,7 +180,7 @@ export async function activateLocalInvitation(
   const payload = await responsePayload(response);
   if (!response.ok) {
     if (response.status === 403) {
-      csrfToken = null;
+      invalidateLocalCsrfToken();
     }
     throw new LocalAuthRequestError(response.status, errorMessage(payload));
   }
@@ -184,7 +212,7 @@ export async function changeLocalPassword(
   const payload = await responsePayload(response);
   if (!response.ok) {
     if (response.status === 403) {
-      csrfToken = null;
+      invalidateLocalCsrfToken();
     }
     throw new LocalAuthRequestError(response.status, errorMessage(payload));
   }

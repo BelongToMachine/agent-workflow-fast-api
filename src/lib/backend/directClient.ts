@@ -5,7 +5,10 @@ import {
   isFastApiProxyMode,
   isSingleWorkspaceMode,
 } from "./mode";
-import { getLocalCsrfToken } from "../auth/localSession";
+import {
+  getLocalCsrfToken,
+  invalidateLocalCsrfToken,
+} from "../auth/localSession";
 
 function getBasePath() {
   return (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
@@ -136,6 +139,39 @@ function mapLegacyApiUrl(
   return new URL(mapLegacyApiPath(input, method), fastApiBrowserBaseUrl);
 }
 
+function cloneRequestInput(input: RequestInfo | URL) {
+  return input instanceof Request ? input.clone() : input;
+}
+
+async function isCsrfFailure(response: Response) {
+  if (response.status !== 403) {
+    return false;
+  }
+
+  const payload = (await response.clone().json().catch(() => null)) as {
+    code?: unknown;
+  } | null;
+  return payload?.code === "csrf:token_invalid";
+}
+
+async function sendWithCsrfRecovery(
+  method: string,
+  requestHeaders: Headers,
+  send: () => Promise<Response>,
+) {
+  let response = await send();
+  if (
+    !["DELETE", "PATCH", "POST", "PUT"].includes(method) ||
+    !(await isCsrfFailure(response))
+  ) {
+    return response;
+  }
+
+  invalidateLocalCsrfToken();
+  requestHeaders.set("X-CSRF-Token", await getLocalCsrfToken(true));
+  return send();
+}
+
 export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit
@@ -152,11 +188,14 @@ export async function apiFetch(
   }
 
   if (isFastApiProxyMode && typeof window !== "undefined") {
-    return fetch(mapLegacyApiPath(input, method), {
-      ...init,
-      credentials: init?.credentials ?? "include",
-      headers: requestHeaders,
-    });
+    const target = mapLegacyApiPath(input, method);
+    return sendWithCsrfRecovery(method, requestHeaders, () =>
+      fetch(cloneRequestInput(target), {
+        ...init,
+        credentials: init?.credentials ?? "include",
+        headers: requestHeaders,
+      }),
+    );
   }
 
   if (!isFastApiDirectMode || typeof window === "undefined") {
@@ -164,10 +203,11 @@ export async function apiFetch(
   }
 
   const target = mapLegacyApiUrl(input, method);
-
-  return fetch(target, {
-    ...init,
-    credentials: init?.credentials ?? "include",
-    headers: requestHeaders,
-  });
+  return sendWithCsrfRecovery(method, requestHeaders, () =>
+    fetch(cloneRequestInput(target), {
+      ...init,
+      credentials: init?.credentials ?? "include",
+      headers: requestHeaders,
+    }),
+  );
 }
