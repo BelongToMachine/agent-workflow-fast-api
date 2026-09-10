@@ -35,7 +35,6 @@ function appendWorkspaceId(url: URL) {
   const isWorkspaceScoped =
     path.startsWith("/api/v1/chat") ||
     path.startsWith("/api/v1/chats") ||
-    path.startsWith("/api/v1/votes") ||
     path.startsWith("/api/v1/documents") ||
     path.startsWith("/api/v1/suggestions") ||
     path.startsWith("/api/v1/knowledge-") ||
@@ -93,8 +92,6 @@ function mapLegacyApiPath(
     }
   } else if (path === "/api/history") {
     targetPath = "/api/v1/chats";
-  } else if (path === "/api/vote") {
-    targetPath = "/api/v1/votes";
   } else if (path === "/api/document") {
     targetPath = "/api/v1/documents";
   } else if (path === "/api/suggestions") {
