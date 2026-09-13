@@ -461,7 +461,7 @@ bash /home/asianode/asianode-production/deploy/deploy-production.sh
 
 脚本会从 `main` 拉取源码、按完整 commit 创建或复用 release、运行 Compose 配置预检、构建 API 镜像、停止旧 `asianode-preview` API/Redis、启动新的 `asianode-production` Redis/API，并检查容器 healthcheck、本机 `healthz`/`readyz` 和公网 `api.<domain>/api/v1/healthz`。所有检查通过后才更新 `current`；停止旧服务后任一步失败，脚本会尝试恢复旧容器。脚本不执行数据库 migration，migration 必须作为独立的备份和 preflight 步骤完成。
 
-由于 `compose.production.yaml` 当前尚未进入 Git，过渡期间脚本使用 `/home/asianode/asianode-production/deploy/compose.production.yaml` 作为新 release 的模板。将该文件提交到仓库后，脚本会优先使用源码 release 中的同名文件。
+`compose.production.yaml` 已进入 Git。脚本要求拉取的 commit 中存在该文件，并只使用 `git archive` 导出的 release 内版本，避免把服务器上的旧 Compose 模板与新源码混用。
 
 CI/CD 建成后，production 再切换为复用 staging 已验证镜像的发布流程。
 

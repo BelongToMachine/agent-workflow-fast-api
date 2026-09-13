@@ -19,12 +19,6 @@ NEW_PROJECT="${NEW_PROJECT:-asianode-production}"
 OLD_PROJECT="${OLD_PROJECT:-asianode-preview}"
 OLD_COMPOSE="${OLD_COMPOSE:-/home/asianode/asianode-preview/app/compose.preview.yaml}"
 
-# The production Compose file is expected to be committed to the source
-# repository. A temporary server-side fallback is kept only for the current
-# transition period; it is used only when the pulled commit does not contain
-# compose.production.yaml.
-COMPOSE_TEMPLATE="${COMPOSE_TEMPLATE:-$ROOT/deploy/compose.production.yaml}"
-
 PUBLIC_HEALTH_URL="${PUBLIC_HEALTH_URL:-https://api.asianodeatlas.com/api/v1/healthz}"
 LOCAL_HEALTH_URL="${LOCAL_HEALTH_URL:-http://127.0.0.1:18000/api/v1/healthz}"
 LOCAL_READY_URL="${LOCAL_READY_URL:-http://127.0.0.1:18000/api/v1/readyz}"
@@ -111,16 +105,11 @@ SHA="$(git rev-parse HEAD)"
 RELEASE="$ROOT/releases/$SHA"
 log "Preparing commit $SHA."
 
-# Check whether the pulled commit contains the production Compose file. Once
-# this becomes true on origin/main, every new release will receive the exact
-# Compose file from git archive and the server-side fallback will be unused.
-if git ls-files --error-unmatch compose.production.yaml >/dev/null 2>&1; then
-  COMPOSE_FROM_GIT=1
-else
-  COMPOSE_FROM_GIT=0
-  [[ -f "$COMPOSE_TEMPLATE" ]] || fail "Pulled commit has no compose.production.yaml and fallback template is missing: $COMPOSE_TEMPLATE"
-  log "WARNING: compose.production.yaml is not in the pulled commit; using the temporary server-side template."
-fi
+# Require the production Compose file to be tracked in the pulled commit. This
+# keeps the source, Dockerfile, and environment-specific Compose definition in
+# one versioned release and prevents a stale server-side template from being
+# combined with newer application code.
+git ls-files --error-unmatch compose.production.yaml >/dev/null 2>&1 || fail "Pulled commit does not contain tracked compose.production.yaml"
 
 # Create an immutable release directory. If the same commit was prepared
 # before, reuse it instead of overwriting an existing release.
@@ -136,12 +125,9 @@ else
   # files, local build output, and server-side runtime secrets.
   git archive --format=tar "$SHA" | tar -x -C "$RELEASE"
 
-  # Normally git archive supplies compose.production.yaml. The fallback is
-  # only for commits from before that file was added to origin/main.
-  if [[ ! -f "$RELEASE/compose.production.yaml" ]]; then
-    (( COMPOSE_FROM_GIT == 0 )) || fail "Git release does not contain compose.production.yaml: $RELEASE"
-    install -m 0640 "$COMPOSE_TEMPLATE" "$RELEASE/compose.production.yaml"
-  fi
+  # The Compose file must be included by git archive with the application
+  # source. Do not copy a server-side file into a new release.
+  [[ -f "$RELEASE/compose.production.yaml" ]] || fail "Git release does not contain compose.production.yaml: $RELEASE"
 
   printf '%s\n' "$SHA" > "$RELEASE/.deploy-commit"
   chmod 0640 "$RELEASE/.deploy-commit"
