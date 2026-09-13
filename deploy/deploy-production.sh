@@ -23,6 +23,13 @@ PUBLIC_HEALTH_URL="${PUBLIC_HEALTH_URL:-https://api.asianodeatlas.com/api/v1/hea
 LOCAL_HEALTH_URL="${LOCAL_HEALTH_URL:-http://127.0.0.1:18000/api/v1/healthz}"
 LOCAL_READY_URL="${LOCAL_READY_URL:-http://127.0.0.1:18000/api/v1/readyz}"
 
+# The base image is normally detected from the first FROM instruction. It can
+# be overridden for a Dockerfile that uses an indirect or generated base
+# image. This is checked against the same Docker daemon that runs Compose.
+BASE_IMAGE="${BASE_IMAGE:-}"
+BASE_IMAGE_SOURCE=""
+BUILD_PULL=0
+
 RELEASE=""
 OLD_STOPPED=0
 
@@ -133,8 +140,39 @@ else
   chmod 0640 "$RELEASE/.deploy-commit"
 fi
 
-# Record the source and configuration used for this release. This file has no
-# secret values and can be inspected during incident response.
+# BuildKit does not need to contact a registry when the Dockerfile base image
+# is already available in the local Docker daemon. This matters on the
+# Alibaba Cloud VPS, where Docker Hub can time out. Detect the base image from
+# the release Dockerfile and only use --pull when the local image is missing.
+if [[ -z "$BASE_IMAGE" ]]; then
+  BASE_IMAGE="$(awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*FROM[[:space:]]+/ {
+      for (i = 2; i <= NF; i++) {
+        if ($i !~ /^--/) {
+          print $i
+          exit
+        }
+      }
+    }
+  ' "$RELEASE/Dockerfile")"
+fi
+[[ -n "$BASE_IMAGE" ]] || fail "Could not determine the Dockerfile base image"
+
+if docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+  BASE_IMAGE_SOURCE="local"
+  BUILD_PULL=0
+  log "Base image $BASE_IMAGE is available locally; build will not use --pull."
+else
+  BASE_IMAGE_SOURCE="remote"
+  BUILD_PULL=1
+  log "Base image $BASE_IMAGE is not available locally; build will use --pull."
+fi
+
+# Record the source, configuration, and base-image decision used for this
+# release. This file has no secret values and can be inspected during incident
+# response. The status remains prepared-not-started until all cutover and
+# health checks succeed.
 cat > "$RELEASE/release-info" <<EOF
 commit=$SHA
 source=git
@@ -144,6 +182,9 @@ pulled_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 compose=compose.production.yaml
 runtime_env=$RUNTIME_ENV
 build_env=$BUILD_ENV
+base_image=$BASE_IMAGE
+base_image_source=$BASE_IMAGE_SOURCE
+build_pull=$BUILD_PULL
 status=prepared-not-started
 EOF
 chmod 0640 "$RELEASE/release-info"
@@ -154,9 +195,14 @@ log "Validating production Compose configuration."
 new_compose config -q
 
 # Build the API image while the old production service is still serving.
-# --pull refreshes the base image and does not affect running containers.
 log "Building the API image from release $SHA."
-new_compose build --pull api
+if (( BUILD_PULL == 1 )); then
+  # The local image was not found, so allow BuildKit to download it.
+  new_compose build --pull api
+else
+  # Reuse the local base image and avoid an unnecessary Docker Hub request.
+  new_compose build api
+fi
 
 # Intentional cutover point: both stacks use host port 18000, so a short outage
 # is expected. Stop only the old Asianode project.

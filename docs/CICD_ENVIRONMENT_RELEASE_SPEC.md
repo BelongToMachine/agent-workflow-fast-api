@@ -243,7 +243,7 @@ production VPS:
 │   │       ├── compose.production.yaml
 │   │       ├── app/
 │   │       ├── .deploy-commit              # 该 release 的 commit
-│   │       └── release-info                # 来源、时间、镜像和结果
+│   │       └── release-info                # 来源、时间、构建和结果
 │   ├── current -> releases/<full-commit-sha> # 当前成功 release 的指针
 │   ├── shared/
 │   │   ├── env/.env.production              # runtime 环境变量和 secret，0600
@@ -330,6 +330,18 @@ staging 使用自己的 `build.env`，至少定义自己的 `RUNTIME_ENV_FILE`�
 
 公共镜像地址不属于 secret，可以放在 `build.env`；如果将来使用需要认证的私有镜像，不能把用户名密码放进 Docker `ARG` 或 URL，应改用 BuildKit secret、keyring 或服务器上的受限凭据文件。
 
+Dockerfile 的基础镜像和 Python 依赖是两条不同的下载链路。`PYPI_INDEX_URL` 只影响 `uv sync` 下载 Python 依赖，不影响 `FROM python:3.12-slim` 的 Docker 基础镜像来源。当前 production VPS 使用 rootless Docker，因此必须检查执行部署用户所连接的 Docker daemon，而不能只检查 rootful Docker 的镜像缓存。
+
+源码构建采用基础镜像的本地优先、远端 fallback 策略：
+
+1. 从 release 内的 Dockerfile 识别基础镜像。
+2. 使用当前 Docker daemon 执行 `docker image inspect <base-image>`。
+3. 本机已有镜像时执行 `docker compose build api`，不使用 `--pull`，避免无谓访问 Docker Hub。
+4. 本机没有镜像时执行 `docker compose build --pull api`，允许从配置的 registry 或远端仓库下载。
+5. 若远端仓库仍然不可达，构建失败并保留 release；不能把不存在的基础镜像假装成已构建。
+
+生产部署脚本会把 `base_image`、`base_image_source` 和 `build_pull` 写入 `release-info`。这些字段不包含密钥，便于判断本次构建是使用本地缓存还是远端下载。
+
 ### 7.2 事件与动作矩阵
 
 | 事件 | 必须执行 | 是否发布 production |
@@ -380,11 +392,20 @@ bun run build
    STAGING_ROOT=/home/asianode/asianode-staging
    RELEASE="$STAGING_ROOT/releases/<full-sha>"
 
-   docker compose \
-     --project-name asianode-staging \
-     --env-file "$STAGING_ROOT/shared/build/build.env" \
-     -f "$RELEASE/compose.staging.yaml" \
-     build --pull api
+   BASE_IMAGE=python:3.12-slim
+   if docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+     docker compose \
+       --project-name asianode-staging \
+       --env-file "$STAGING_ROOT/shared/build/build.env" \
+       -f "$RELEASE/compose.staging.yaml" \
+       build api
+   else
+     docker compose \
+       --project-name asianode-staging \
+       --env-file "$STAGING_ROOT/shared/build/build.env" \
+       -f "$RELEASE/compose.staging.yaml" \
+       build --pull api
+   fi
 
    docker compose \
      --project-name asianode-staging \
@@ -423,11 +444,22 @@ Production 的人工源码发布流程：
    PRODUCTION_ROOT=/home/asianode/asianode-production
    RELEASE="$PRODUCTION_ROOT/releases/<full-sha>"
 
-   docker compose \
-     --project-name asianode-production \
-     --env-file "$PRODUCTION_ROOT/shared/build/build.env" \
-     -f "$RELEASE/compose.production.yaml" \
-     build --pull api
+   BASE_IMAGE=python:3.12-slim
+   if docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+     echo "Using local base image: $BASE_IMAGE"
+     docker compose \
+       --project-name asianode-production \
+       --env-file "$PRODUCTION_ROOT/shared/build/build.env" \
+       -f "$RELEASE/compose.production.yaml" \
+       build api
+   else
+     echo "Local base image missing; pulling: $BASE_IMAGE"
+     docker compose \
+       --project-name asianode-production \
+       --env-file "$PRODUCTION_ROOT/shared/build/build.env" \
+       -f "$RELEASE/compose.production.yaml" \
+       build --pull api
+   fi
    ```
 
 5. 确认构建成功后，只停止旧 `asianode-preview` project 的 API/Redis，不执行全局 `docker compose down`、`docker system prune`，也不触碰无关容器、volume 或数据库：

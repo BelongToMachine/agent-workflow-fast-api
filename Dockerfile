@@ -11,8 +11,9 @@ ENV PIP_INDEX_URL=${PYPI_INDEX_URL} \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
+# -vv prints uv request, index, cache, and retry details during builds.
 RUN pip install --no-cache-dir "uv>=0.6,<1.0" \
-    && uv sync --frozen --no-dev --no-install-project \
+    && uv sync -vv --frozen --no-dev --no-install-project \
     && pip uninstall -y uv
 
 COPY app ./app
