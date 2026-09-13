@@ -454,7 +454,7 @@ async def _create_member_access(
         raise MemberAccessError("Only the workspace owner can grant owner access.")
     if get_forbidden_permissions(body.role).intersection(permissions):
         raise MemberAccessError(
-            "The employee role cannot receive knowledge permissions."
+            "The employee role cannot receive knowledge-management permissions."
         )
 
     async with get_db_connection() as connection:
@@ -605,7 +605,7 @@ async def _update_member_access(
                 raise MemberAccessError("Only the workspace owner can grant owner access.")
             if get_forbidden_permissions(body.role).intersection(body.permissions):
                 raise MemberAccessError(
-                    "The employee role cannot receive knowledge permissions."
+                    "The employee role cannot receive knowledge-management permissions."
                 )
             if target_user_id == actor_user_id and (
                 "members.manage" not in body.permissions

@@ -287,7 +287,10 @@ async def create_development_token(
         return _error("The request contains an unknown permission.", 400)
 
     if get_forbidden_permissions(payload.role).intersection(payload.permissions):
-        return _error("The employee role cannot receive knowledge permissions.", 400)
+        return _error(
+            "The employee role cannot receive knowledge-management permissions.",
+            400,
+        )
 
     token = create_dev_direct_token(
         {
