@@ -324,13 +324,24 @@ RUNTIME_ENV_FILE=/home/asianode/asianode-production/shared/env/.env.production
 PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ```
 
-staging 使用自己的 `build.env`，至少定义自己的 `RUNTIME_ENV_FILE`。如果 staging 也能稳定访问同一个国内镜像，建议两边使用相同的镜像地址，以减少由于不同 index 导致的构建差异；否则必须在 release-info 中记录实际使用的 index。
+staging 使用自己的 `build.env`，至少定义自己的 `RUNTIME_ENV_FILE`。当前两个环境共用项目提交的 `uv.lock`，因此构建时使用同一套已锁定的依赖版本和下载来源。
 
-当前 Dockerfile 已经把 `PYPI_INDEX_URL` 传给 uv，但使用的是兼容变量 `UV_INDEX_URL`。后续应改为优先使用 uv 当前推荐的 `UV_DEFAULT_INDEX`，同时保留 `uv.lock` 和 `uv sync --frozen`，不要在 production 构建时重新解析依赖。uv 官方文档说明 `UV_DEFAULT_INDEX` 是默认 index 配置，`UV_INDEX_URL` 已标记为 deprecated；默认的 `first-index` 策略也应保留，以降低依赖混淆风险。[uv index 配置](https://docs.astral.sh/uv/concepts/indexes/)
+项目根目录的 `pyproject.toml` 已声明阿里云为项目级默认 index：
+
+```toml
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+```
+
+这意味着在本地、staging 和 production 中执行 `uv lock`、`uv sync` 或其他需要解析项目依赖的 uv 命令时，默认都会使用阿里云。当前 `uv.lock` 也已经在该 index 下重新生成：锁文件中的 registry、sdist 和 wheel 地址均指向 `mirrors.aliyun.com`，所以 Dockerfile 的 `uv sync --frozen` 会直接使用这些已锁定的阿里云地址，不再根据默认 PyPI 重新解析。
+
+`PYPI_INDEX_URL` 仍保留在各环境的 `build.env` 中，用于通过 Compose build arg 配置 Dockerfile 内的 `pip install uv`，并兼容当前 Dockerfile 导出的 `PIP_INDEX_URL`/`UV_INDEX_URL`。它不属于 runtime `.env`，也不包含应用 secret。命令行参数或环境变量可以有意覆盖项目默认 index，但必须重新检查 lockfile 来源，不能让不同环境静默使用不同依赖来源。uv 的项目级 index 配置和优先级见官方文档。[uv index 配置](https://docs.astral.sh/uv/concepts/indexes/)
 
 公共镜像地址不属于 secret，可以放在 `build.env`；如果将来使用需要认证的私有镜像，不能把用户名密码放进 Docker `ARG` 或 URL，应改用 BuildKit secret、keyring 或服务器上的受限凭据文件。
 
-Dockerfile 的基础镜像和 Python 依赖是两条不同的下载链路。`PYPI_INDEX_URL` 只影响 `uv sync` 下载 Python 依赖，不影响 `FROM python:3.12-slim` 的 Docker 基础镜像来源。当前 production VPS 使用 rootless Docker，因此必须检查执行部署用户所连接的 Docker daemon，而不能只检查 rootful Docker 的镜像缓存。
+Dockerfile 的基础镜像和 Python 依赖是两条不同的下载链路。项目级 uv index 和 `PYPI_INDEX_URL` 只影响 Python 依赖，不影响 `FROM python:3.12-slim` 的 Docker 基础镜像来源。当前 production VPS 使用 rootless Docker，因此必须检查执行部署用户所连接的 Docker daemon，而不能只检查 rootful Docker 的镜像缓存。
 
 源码构建采用基础镜像的本地优先、远端 fallback 策略：
 
@@ -437,7 +448,7 @@ Production 的人工源码发布流程：
 
 1. 在 production VPS 的 `/home/asianode/src/agent-workflow-fast-api` 只拉取已经批准的 `main` commit，并确认工作树干净。
 2. 将该 commit 导出到 `/home/asianode/asianode-production/releases/<full-sha>/`，不把 `.env.production`、数据库密码或其他 secret 放入 release。
-3. 检查 production 的 `/home/asianode/asianode-production/shared/build/build.env`。阿里云 production 默认使用国内 PyPI 镜像；该配置只影响 Docker build，不作为应用 runtime 环境变量。
+3. 检查 production 的 `/home/asianode/asianode-production/shared/build/build.env`。`PYPI_INDEX_URL` 用于 Docker build；项目 `pyproject.toml` 和已提交的 `uv.lock` 共同保证 Python 依赖默认从阿里云获取。该配置不作为应用 runtime 环境变量。
 4. 先执行数据库备份和 migration preflight，再构建镜像：
 
    ```bash
@@ -494,6 +505,144 @@ bash /home/asianode/asianode-production/deploy/deploy-production.sh
 脚本会从 `main` 拉取源码、按完整 commit 创建或复用 release、运行 Compose 配置预检、构建 API 镜像、停止旧 `asianode-preview` API/Redis、启动新的 `asianode-production` Redis/API，并检查容器 healthcheck、本机 `healthz`/`readyz` 和公网 `api.<domain>/api/v1/healthz`。所有检查通过后才更新 `current`；停止旧服务后任一步失败，脚本会尝试恢复旧容器。脚本不执行数据库 migration，migration 必须作为独立的备份和 preflight 步骤完成。
 
 `compose.production.yaml` 已进入 Git。脚本要求拉取的 commit 中存在该文件，并只使用 `git archive` 导出的 release 内版本，避免把服务器上的旧 Compose 模板与新源码混用。
+
+#### 8.3.1 当前 production 手工部署命令
+
+以下命令在 production VPS 上以 `asianode` 用户、同一个 shell 会话执行。`<full-sha>` 必须替换为已经准备好的 release commit；例如当前 release 使用 `d653130cb971042fc9a580ce7dda12091abcdb68`。该流程只切换指定的 Asianode 服务，不执行全局清理。
+
+1. 设置 release 变量并确认文件存在：
+
+   ```bash
+   PRODUCTION_ROOT=/home/asianode/asianode-production
+   SHA=<full-sha>
+   BUILD_ENV="$PRODUCTION_ROOT/shared/build/build.env"
+   RELEASE="$PRODUCTION_ROOT/releases/$SHA"
+
+   test -f "$RELEASE/Dockerfile"
+   test -f "$RELEASE/compose.production.yaml"
+   test -f "$BUILD_ENV"
+   test -f "$PRODUCTION_ROOT/shared/env/.env.production"
+   ```
+
+2. 验证 Compose 展开结果。该命令不会启动服务：
+
+   ```bash
+   docker compose \
+     --project-name asianode-production \
+     --env-file "$BUILD_ENV" \
+     -f "$RELEASE/compose.production.yaml" \
+     config -q
+   ```
+
+3. 构建 API image。当前 `python:3.12-slim` 已在 production VPS 的 rootless Docker 中缓存，因此优先不访问 Docker Hub；如果本机没有基础镜像，才使用 `--pull` 下载。`BUILDKIT_PROGRESS=plain` 配合 Dockerfile 中的 `uv sync -vv` 输出构建和依赖请求细节：
+
+   ```bash
+   BASE_IMAGE=python:3.12-slim
+
+   if docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+     echo "Using local base image: $BASE_IMAGE"
+     BUILDKIT_PROGRESS=plain docker compose \
+       --project-name asianode-production \
+       --env-file "$BUILD_ENV" \
+       -f "$RELEASE/compose.production.yaml" \
+       build api
+   else
+     echo "Local base image missing; pulling: $BASE_IMAGE"
+     BUILDKIT_PROGRESS=plain docker compose \
+       --project-name asianode-production \
+       --env-file "$BUILD_ENV" \
+       -f "$RELEASE/compose.production.yaml" \
+       build --pull api
+   fi
+   ```
+
+   构建成功后不要立即运行 `docker compose down` 或 `docker system prune`。如果本次 release 包含数据库 migration，必须在停止旧服务前完成已审查的备份和 migration preflight；部署脚本不会自动执行 migration。
+
+4. 停止旧的 API 和 Redis。因为新旧 Compose 都使用 `127.0.0.1:18000`，这一步会造成短暂中断；Cloudflare Tunnel 的 upstream 不需要修改：
+
+   ```bash
+   docker compose \
+     --project-name asianode-preview \
+     -f /home/asianode/asianode-preview/app/compose.preview.yaml \
+     stop api redis
+   ```
+
+5. 启动新的 production Redis 和 API。Redis 使用 Compose 中的预构建 `redis:7-alpine` image，不需要执行 `build`；API 才使用刚刚构建的本地 image：
+
+   ```bash
+   docker compose \
+     --project-name asianode-production \
+     --env-file "$BUILD_ENV" \
+     -f "$RELEASE/compose.production.yaml" \
+     up -d redis
+
+   docker compose \
+     --project-name asianode-production \
+     --env-file "$BUILD_ENV" \
+     -f "$RELEASE/compose.production.yaml" \
+     up -d --no-deps api
+   ```
+
+6. 检查容器状态、本机 health/readiness 和公网 health：
+
+   ```bash
+   docker compose \
+     --project-name asianode-production \
+     --env-file "$BUILD_ENV" \
+     -f "$RELEASE/compose.production.yaml" \
+     ps
+
+   API_CONTAINER="$(docker compose \
+     --project-name asianode-production \
+     --env-file "$BUILD_ENV" \
+     -f "$RELEASE/compose.production.yaml" \
+     ps -q api)"
+
+   docker inspect \
+     --format '{{.State.Health.Status}}' \
+     "$API_CONTAINER"
+
+   curl --fail --silent --show-error \
+     http://127.0.0.1:18000/api/v1/healthz
+   curl --fail --silent --show-error \
+     http://127.0.0.1:18000/api/v1/readyz
+   curl --fail --silent --show-error \
+     https://api.asianodeatlas.com/api/v1/healthz
+   ```
+
+   容器必须为 `healthy`，三个 HTTP 检查都成功后，继续执行下一步；之后还要完成人工登录、CSRF、核心业务、数据库读写和 Redis smoke test。
+
+7. 所有检查通过后，才更新成功 release 指针和发布记录：
+
+   ```bash
+   ln -sfn "$RELEASE" "$PRODUCTION_ROOT/current"
+   sed -i 's/^status=.*/status=successful/' "$RELEASE/release-info"
+   printf 'deployed_at=%s\n' \
+     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     >> "$RELEASE/release-info"
+
+   readlink "$PRODUCTION_ROOT/current"
+   sed -n '1,30p' "$RELEASE/release-info"
+   ```
+
+8. 任一步失败时，保留失败 release 和日志，停止新服务并恢复旧服务：
+
+   ```bash
+   sed -i 's/^status=.*/status=failed/' "$RELEASE/release-info"
+
+   docker compose \
+     --project-name asianode-production \
+     --env-file "$BUILD_ENV" \
+     -f "$RELEASE/compose.production.yaml" \
+     stop api redis
+
+   docker compose \
+     --project-name asianode-preview \
+     -f /home/asianode/asianode-preview/app/compose.preview.yaml \
+     start api redis
+   ```
+
+   回滚后确认旧 API 已恢复 healthy，再调查新 release；不要删除 release、镜像、volume 或旧 Compose project 的容器。
 
 CI/CD 建成后，production 再切换为复用 staging 已验证镜像的发布流程。
 
