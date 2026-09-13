@@ -63,7 +63,7 @@ def test_effective_permissions_apply_role_defaults_and_overrides() -> None:
     assert memberships[0].overrides[0].permission == "audit.read"
 
 
-def test_employee_role_matches_editor_without_knowledge_permissions() -> None:
+def test_employee_role_can_read_knowledge_but_not_manage_it() -> None:
     membership_id = UUID("00000000-0000-0000-0000-000000000020")
     workspace_id = UUID("00000000-0000-0000-0000-000000000021")
 
@@ -93,6 +93,7 @@ def test_employee_role_matches_editor_without_knowledge_permissions() -> None:
     )
 
     assert memberships[0].permissions == [
+        "knowledge.read",
         "chat.read",
         "chat.write",
         "chat.delete",

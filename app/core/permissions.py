@@ -26,6 +26,7 @@ DEFAULT_PERMISSIONS_BY_ROLE = {
         "document.write",
     ),
     "employee": (
+        "knowledge.read",
         "chat.read",
         "chat.write",
         "chat.delete",
@@ -41,7 +42,7 @@ DEFAULT_PERMISSIONS_BY_ROLE = {
 }
 
 ROLE_FORBIDDEN_PERMISSIONS = {
-    "employee": frozenset(("knowledge.read", "knowledge.manage")),
+    "employee": frozenset(("knowledge.manage",)),
 }
 
 

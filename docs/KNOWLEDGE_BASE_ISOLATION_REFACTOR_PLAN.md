@@ -37,7 +37,7 @@ Workspace（公司，目前只有一个）
 - Logto RBAC 替代本地 `WorkspaceMember` 权限；
 - 数据库 PostgreSQL RLS；
 - 部门、团队、用户组实体；
-- 改变 `employee` 当前禁止 `knowledge.read`/`knowledge.manage` 的规则；
+- 改变 `employee` 当前禁止 `knowledge.manage` 的规则；
 - 删除 legacy `KnowledgeSource` 表。
 
 ## 2. 真实现状盘点
@@ -159,11 +159,11 @@ KnowledgeBase.accessMode: workspace | restricted
 viewer + knowledge.read + KB read grant       → 可读 restricted KB
 editor + knowledge.manage + KB manage grant   → 可读写 restricted KB
 editor + knowledge.manage + 只有 KB read grant → 只能读
-employee + KB read grant                      → 仍不可读
+employee + KB read grant                      → 可读（但不能管理）
 ```
 
-最后一行是有意设计：当前 `employee` 在前后端角色目录中都被禁止 knowledge 权限。
-如果未来要允许 employee 访问指定知识库，应单独修改角色产品定义，不能让 KB grant 隐式提权。
+`employee` 在前后端角色目录中允许 `knowledge.read`，但仍禁止 `knowledge.manage`。
+KB grant 只能进一步缩小 employee 可见的知识库范围，不能让成员获得管理权限。
 
 ### 3.3 管理权限与内容权限分开
 
@@ -574,7 +574,7 @@ runner 当成无审查的生产发布工具。
 - [ ] admin 可以切换 shared/restricted 并管理 grants；
 - [ ] editor 只管理拥有 manage access 的 KB；
 - [ ] viewer 只能读取授权 KB；
-- [ ] employee 看不到知识库入口和知识结果；
+- [ ] employee 可以查看知识库结果，但看不到知识库管理入口；
 - [ ] 用户选择器显示 name/email，不要求输入 UUID；
 - [ ] grant 更新后列表、文件页和搜索缓存正确失效；
 - [ ] 401、403、404、409、503 都有可理解的 UI；
@@ -610,4 +610,3 @@ runner 当成无审查的生产发布工具。
    - React Query hooks、access mode、成员选择器、路由权限修正。
 5. `Document and verify knowledge isolation rollout`
    - API contract、README、preview migration 结果和 E2E 验收记录。
-
