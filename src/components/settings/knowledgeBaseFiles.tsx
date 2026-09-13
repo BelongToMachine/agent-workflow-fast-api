@@ -111,7 +111,7 @@ function statusVariant(status: string): "default" | "destructive" | "outline" {
 }
 
 export function KnowledgeBaseFiles() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState("");
@@ -484,7 +484,7 @@ export function KnowledgeBaseFiles() {
                   ) : null}
                 </>
               ) : (
-                <EmptyState message="Select a knowledge base to manage files." />
+                <EmptyState message={t("settings.selectKnowledgeBaseToManageFiles")} />
               )}
             </section>
           </div>
@@ -502,7 +502,9 @@ export function KnowledgeBaseFiles() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingDelete
-                ? `${pendingDelete.originalName} and its processed chunks will be permanently removed.`
+                ? t("settings.deleteKnowledgeFileDescriptionWithName", {
+                    name: pendingDelete.originalName,
+                  })
                 : t("settings.deleteKnowledgeFileDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>

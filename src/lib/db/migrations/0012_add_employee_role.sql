@@ -1,4 +1,4 @@
--- Employee members can work with chats and documents, but never knowledge data.
+-- Employee members can query knowledge data, but cannot manage the knowledge base.
 ALTER TABLE "WorkspaceMember"
   DROP CONSTRAINT IF EXISTS "WorkspaceMember_role_check";--> statement-breakpoint
 ALTER TABLE "WorkspaceMember"

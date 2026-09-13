@@ -573,7 +573,7 @@ function PureMultimodalInput({
                 className={cn(
                   "size-11 rounded-2xl transition-all duration-200 md:size-7 md:rounded-xl",
                   input.trim()
-                    ? "bg-foreground text-background hover:opacity-85 active:scale-95"
+                    ? "bg-[var(--message-accent-background)] text-[var(--message-accent-foreground)] hover:opacity-85 active:scale-95"
                     : "bg-muted text-muted-foreground/25 cursor-not-allowed"
                 )}
                 data-testid="send-button"

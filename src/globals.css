@@ -80,6 +80,10 @@
   --sidebar-accent-foreground: oklch(0.12 0 0);
   --sidebar-border: oklch(0.88 0 0);
   --sidebar-ring: oklch(0.5 0 0);
+  --user-message-background: var(--muted);
+  --user-message-foreground: var(--foreground);
+  --message-accent-background: var(--foreground);
+  --message-accent-foreground: var(--background);
 
   --shadow-card: 0 1px 3px oklch(0 0 0 / 0.05), 0 1px 1px oklch(0 0 0 / 0.03);
   --shadow-float:
@@ -139,6 +143,46 @@
   --shadow-composer-focus:
     0 0 0 1px oklch(1 0 0 / 0.1), 0 4px 16px -4px oklch(0 0 0 / 0.3),
     inset 0 1px 0 oklch(1 0 0 / 0.04);
+}
+
+:root[data-accent-color="blue"] {
+  --message-accent-background: oklch(0.57 0.15 245);
+  --message-accent-foreground: oklch(0.985 0 0);
+  --user-message-background: color-mix(
+    in srgb,
+    var(--background) 76%,
+    oklch(0.57 0.15 245)
+  );
+}
+
+:root[data-accent-color="sage"] {
+  --message-accent-background: oklch(0.58 0.13 175);
+  --message-accent-foreground: oklch(0.985 0 0);
+  --user-message-background: color-mix(
+    in srgb,
+    var(--background) 76%,
+    oklch(0.58 0.13 175)
+  );
+}
+
+:root[data-accent-color="amber"] {
+  --message-accent-background: oklch(0.64 0.16 80);
+  --message-accent-foreground: oklch(0.12 0 0);
+  --user-message-background: color-mix(
+    in srgb,
+    var(--background) 76%,
+    oklch(0.64 0.16 80)
+  );
+}
+
+:root[data-accent-color="rose"] {
+  --message-accent-background: oklch(0.58 0.15 20);
+  --message-accent-foreground: oklch(0.985 0 0);
+  --user-message-background: color-mix(
+    in srgb,
+    var(--background) 76%,
+    oklch(0.58 0.15 20)
+  );
 }
 
 @layer base {
@@ -411,6 +455,12 @@ textarea:focus-visible {
 
 @utility message-fade-in {
   animation: message-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@utility user-message-bubble {
+  background-color: var(--user-message-background);
+  color: var(--user-message-foreground);
+  transition: background-color 180ms ease;
 }
 
 @utility thinking-dot {

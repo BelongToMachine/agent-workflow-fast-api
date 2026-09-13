@@ -128,7 +128,7 @@ const permissionTranslationKeys: Record<Permission, string> = {
 };
 
 export function MemberPermissions() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<WorkspaceRole>("employee");
   const [generatedInvitation, setGeneratedInvitation] =
@@ -746,7 +746,9 @@ export function MemberPermissions() {
                               <p className="mt-1 text-muted-foreground text-xs">
                                 {t("roles." + invitation.role)} ·{" "}
                                 {t("common.expires")}{" "}
-                                {new Date(invitation.expiresAt).toLocaleDateString()}
+                                {new Intl.DateTimeFormat(
+                                  i18n.language === "zh" ? "zh-CN" : "en-US"
+                                ).format(new Date(invitation.expiresAt))}
                               </p>
                             </div>
                             <div className="flex items-center gap-2">

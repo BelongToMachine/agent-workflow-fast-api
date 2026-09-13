@@ -1,6 +1,7 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 import { LoaderIcon } from "@/components/chat/icons";
 
@@ -14,6 +15,7 @@ export function SubmitButton({
   isSuccessful: boolean;
 }) {
   const { pending } = useFormStatus();
+  const { t } = useTranslation();
 
   return (
     <Button
@@ -31,7 +33,7 @@ export function SubmitButton({
       ) : null}
 
       <output aria-live="polite" className="sr-only">
-        {pending || isSuccessful ? "Loading" : "Submit form"}
+        {pending || isSuccessful ? t("common.loadingShort") : t("ui.submitForm")}
       </output>
     </Button>
   );

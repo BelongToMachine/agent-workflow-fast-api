@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { AppSidebar } from "./components/chat/appSidebar";
@@ -20,12 +20,14 @@ import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
 import { KnowledgeBaseFiles } from "./components/settings/knowledgeBaseFiles";
 import { KnowledgeBaseGrants } from "./components/settings/knowledgeBaseGrants";
 import { MemberPermissions } from "./components/settings/memberPermissions";
+import { AppearanceSettings } from "./components/settings/appearanceSettings";
 import { FastApiConnectionTest } from "./components/fastapiConnectionTest";
 import {
   LocalActivationPage,
   LocalChangePasswordPage,
 } from "./components/auth/localAccountPages";
 import { Link, usePathname, useRouter } from "./lib/router";
+import { applyAccentColor, getStoredAccentColor } from "./lib/accentColor";
 
 function isKnownRoute(pathname) {
   if (
@@ -42,7 +44,8 @@ function isKnownRoute(pathname) {
     pathname === "/settings/knowledge-bases" ||
     pathname === "/settings/knowledge-bases/files" ||
     pathname === "/settings/members" ||
-    pathname === "/settings/password"
+    pathname === "/settings/password" ||
+    pathname === "/settings/appearance"
   ) {
     return true;
   }
@@ -256,6 +259,17 @@ function ChatLayout() {
               path="settings/knowledge-bases/files"
             />
             <Route
+              element={
+                <SettingsPage
+                  descriptionKey="settings.accentColorPageDescription"
+                  titleKey="settings.accentColor"
+                >
+                  <AppearanceSettings />
+                </SettingsPage>
+              }
+              path="settings/appearance"
+            />
+            <Route
               element={<SettingsPage titleKey="settings.fastApiConnection"><FastApiConnectionTest /></SettingsPage>}
               path="fastapi-test"
             />
@@ -273,6 +287,14 @@ function ChatLayout() {
       </SidebarProvider>
     </DataStreamProvider>
   );
+}
+
+function AccentColorSync() {
+  useEffect(() => {
+    applyAccentColor(getStoredAccentColor());
+  }, []);
+
+  return null;
 }
 
 function WorkspaceAccessPendingPage() {
@@ -369,7 +391,11 @@ function PermissionRoute({ children, permission }) {
   return children;
 }
 
-function SettingsPage({ children, titleKey }) {
+function SettingsPage({
+  children,
+  descriptionKey = "settings.manageDescription",
+  titleKey,
+}) {
   const { t } = useTranslation();
   return (
     <main className="min-h-dvh overflow-y-auto bg-background px-4 py-8 md:px-8">
@@ -377,7 +403,7 @@ function SettingsPage({ children, titleKey }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{t(titleKey)}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t("settings.manageDescription")}
+            {t(descriptionKey)}
           </p>
         </div>
         {children}
@@ -426,17 +452,28 @@ function LocalSessionAuthPage({ mode }) {
   return (
     <div className="flex min-h-dvh w-full bg-sidebar">
       <div className="flex w-full flex-col bg-background p-8 md:p-16 xl:w-[600px] xl:shrink-0 xl:rounded-r-2xl xl:border-r xl:border-border/40">
-        <Link
-          className="flex w-fit items-center text-[13px] text-muted-foreground hover:text-foreground"
-          href="/"
-        >
-          ← {t("common.back")}
-        </Link>
+        <div className="mx-auto w-full max-w-md">
+          <div className="flex items-center gap-2.5">
+            <span
+              aria-hidden="true"
+              className="size-2.5 rounded-full bg-primary"
+            />
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              {t("auth.productEyebrow")}
+            </p>
+          </div>
+          <h1 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-foreground md:text-4xl">
+            Asianode Copilot
+          </h1>
+          <p className="mt-4 max-w-sm text-sm leading-6 text-muted-foreground">
+            {t("auth.productDescription")}
+          </p>
+        </div>
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <h2 className="text-2xl font-semibold tracking-tight">
               {isLogin ? t("auth.welcomeBack") : t("auth.invitationRequired")}
-            </h1>
+            </h2>
             <p className="mt-2 text-sm text-muted-foreground">
               {isLogin
                 ? t("auth.signInOrganization")
@@ -537,6 +574,7 @@ export default function AppRoot() {
       <AuthProvider>
         <ApplicationAuthProvider>
           <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            <AccentColorSync />
             <TooltipProvider>
               <App />
             </TooltipProvider>

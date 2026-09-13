@@ -1,16 +1,18 @@
 "use client";
 
-import { ChevronUp, LanguagesIcon } from "lucide-react";
+import { ChevronUp, LanguagesIcon, PaletteIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { User } from "@/lib/auth";
 import { useSession } from "@/lib/auth";
 import { useApplicationAuth } from "@/lib/auth/applicationAuth";
 import { useTheme } from "next-themes";
 import { useCallback } from "react";
+import { Link } from "@/lib/router";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPortal,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -116,6 +118,16 @@ export function SidebarUserNav({ user }: { user: User }) {
             side="top"
           >
             <DropdownMenuItem
+              asChild
+              className="cursor-pointer text-[13px]"
+              data-testid="user-nav-item-accent-color"
+            >
+              <Link href="/settings/appearance">
+                <PaletteIcon className="size-4" />
+                <span>{t("settings.accentColor")}</span>
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
               className="cursor-pointer text-[13px]"
               data-testid="user-nav-item-theme"
               onSelect={handleThemeSelect}
@@ -129,20 +141,22 @@ export function SidebarUserNav({ user }: { user: User }) {
                 <LanguagesIcon />
                 <span>{t("language.label")}</span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuRadioGroup
-                  onValueChange={handleLanguageChange}
-                  value={currentLanguage}
-                >
-                  {languageOptions.map((option) => (
-                    <DropdownMenuRadioItem key={option.code} value={option.code}>
-                      {option.code === "en"
-                        ? t("language.english")
-                        : t("language.chinese")}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubContent>
+              <DropdownMenuPortal>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup
+                    onValueChange={handleLanguageChange}
+                    value={currentLanguage}
+                  >
+                    {languageOptions.map((option) => (
+                      <DropdownMenuRadioItem key={option.code} value={option.code}>
+                        {option.code === "en"
+                          ? t("language.english")
+                          : t("language.chinese")}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuPortal>
             </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">

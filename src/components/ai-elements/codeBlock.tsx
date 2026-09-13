@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   createContext,
   memo,
@@ -459,6 +460,7 @@ export const CodeBlockCopyButton = ({
   const [isCopied, setIsCopied] = useState(false);
   const timeoutRef = useRef<number>(0);
   const { code } = useContext(CodeBlockContext);
+  const { t } = useTranslation();
 
   const copyToClipboard = useCallback(async () => {
     if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
@@ -492,6 +494,7 @@ export const CodeBlockCopyButton = ({
 
   return (
     <Button
+      aria-label={props["aria-label"] ?? t("common.copy")}
       className={cn("shrink-0", className)}
       onClick={copyToClipboard}
       size="icon"

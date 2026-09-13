@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   Command,
@@ -177,16 +178,20 @@ export const ModelSelectorLogo = ({
   provider,
   className,
   ...props
-}: ModelSelectorLogoProps) => (
-  <img
-    {...props}
-    alt={`${provider} logo`}
-    className={cn("size-4 dark:invert", className)}
-    height={16}
-    src={`https://models.dev/logos/${provider}.svg`}
-    width={16}
-  />
-);
+}: ModelSelectorLogoProps) => {
+  const { t } = useTranslation();
+
+  return (
+    <img
+      {...props}
+      alt={t("ui.providerLogo", { provider })}
+      className={cn("size-4 dark:invert", className)}
+      height={16}
+      src={`https://models.dev/logos/${provider}.svg`}
+      width={16}
+    />
+  );
+};
 
 export type ModelSelectorLogoGroupProps = ComponentProps<"div">;
 

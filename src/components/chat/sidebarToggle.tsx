@@ -1,4 +1,5 @@
 import type { ComponentProps } from "react";
+import { useTranslation } from "react-i18next";
 
 import { type SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import {
@@ -12,6 +13,7 @@ import { SidebarLeftIcon } from "./icons";
 export function SidebarToggle({
   className,
 }: ComponentProps<typeof SidebarTrigger>) {
+  const { t } = useTranslation();
   const { toggleSidebar } = useSidebar();
 
   return (
@@ -28,7 +30,7 @@ export function SidebarToggle({
         </Button>
       </TooltipTrigger>
       <TooltipContent align="start" className="hidden md:block">
-        Toggle Sidebar
+        {t("ui.toggleSidebar")}
       </TooltipContent>
     </Tooltip>
   );

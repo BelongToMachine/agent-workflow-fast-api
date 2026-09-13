@@ -576,7 +576,7 @@ export function KnowledgeBaseGrants() {
                       onSubmit={renameKnowledgeBase}
                     >
                       <Label className="sr-only" htmlFor="knowledge-base-name">
-                        Knowledge base name
+                        {t("settings.knowledgeBaseName")}
                       </Label>
                       <Input
                         className="sm:max-w-sm"

@@ -46,6 +46,7 @@ export const PreviewAttachment = ({
 
       {onRemove && !isUploading && (
         <button
+          aria-label={t("ui.removeAttachment")}
           className="absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/80 group-hover:opacity-100"
           onClick={onRemove}
           type="button"

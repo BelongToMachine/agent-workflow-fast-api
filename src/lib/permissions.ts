@@ -71,6 +71,7 @@ export const defaultPermissionsByRole: Record<WorkspaceRole, Permission[]> = {
     "document.write",
   ],
   employee: [
+    "knowledge.read",
     "chat.read",
     "chat.write",
     "chat.delete",
@@ -92,7 +93,7 @@ export const roleLabels: Record<WorkspaceRole, string> = {
 export const restrictedPermissionsByRole: Partial<
   Record<WorkspaceRole, Permission[]>
 > = {
-  employee: ["knowledge.read", "knowledge.manage"],
+  employee: ["knowledge.manage"],
 };
 
 export function roleAllowsPermission(

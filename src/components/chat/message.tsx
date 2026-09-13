@@ -68,7 +68,7 @@ function SourceCitationLine({
 
   return (
     <div className="mt-2 border-border/50 border-t pt-2 text-muted-foreground text-xs">
-      {t("chat.source")}：{resolvedFileName ?? t("chat.unknownFileName")}
+      {t("chat.source")}: {resolvedFileName ?? t("chat.unknownFileName")}
       {location.length > 0 ? ` · ${location.join(" · ")}` : ""}
     </div>
   );
@@ -93,7 +93,7 @@ const PurePreviewMessage = ({
   requiresScrollPadding: boolean;
   onEdit?: (message: ChatMessage) => void;
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
   );
@@ -145,17 +145,12 @@ const PurePreviewMessage = ({
     { isStreaming: false, rendered: false, text: "" }
   ) ?? { isStreaming: false, rendered: false, text: "" };
 
-  const dynamicToolCounts = new Map<string, number>();
   const dynamicToolLastCallIds = new Map<string, string>();
   message.parts?.forEach((part) => {
     if (part.type !== "dynamic-tool") {
       return;
     }
 
-    dynamicToolCounts.set(
-      part.toolName,
-      (dynamicToolCounts.get(part.toolName) ?? 0) + 1
-    );
     dynamicToolLastCallIds.set(part.toolName, part.toolCallId);
   });
 
@@ -202,7 +197,7 @@ const PurePreviewMessage = ({
       return (
         <MessageContent
           className={cn("text-[13px] leading-[1.65]", {
-            "w-fit max-w-[min(80%,56ch)] overflow-hidden break-words rounded-2xl rounded-br-lg border border-border/30 bg-gradient-to-br from-secondary to-muted px-3.5 py-2 shadow-[var(--shadow-card)]":
+            "user-message-bubble w-fit max-w-[min(80%,56ch)] overflow-hidden break-words rounded-xl rounded-br-md px-3.5 py-2":
               message.role === "user",
           })}
           data-testid="message-content"
@@ -219,7 +214,6 @@ const PurePreviewMessage = ({
       }
 
       const { toolCallId, state } = part;
-      const toolCallCount = dynamicToolCounts.get(part.toolName) ?? 1;
       const output =
         state === "output-available" &&
         part.output &&
@@ -306,7 +300,9 @@ const PurePreviewMessage = ({
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground text-xs">
                         <span>{product.productId}</span>
                         <span>{product.supplierName}</span>
-                        <span>MOQ {product.moqUnits ?? "—"}</span>
+                        <span>
+                          {t("common.moq")} {product.moqUnits ?? "—"}
+                        </span>
                         <span>
                           {product.leadTimeDays ?? "—"} {t("common.days")}
                         </span>
@@ -352,7 +348,6 @@ const PurePreviewMessage = ({
       }
 
       const { toolCallId, state } = part;
-      const toolCallCount = dynamicToolCounts.get(part.toolName) ?? 1;
       const output =
         state === "output-available" &&
         part.output &&
@@ -431,7 +426,9 @@ const PurePreviewMessage = ({
                         )}
                         {!!record.plannedAt && (
                           <span>
-                            {new Date(record.plannedAt).toLocaleDateString()}
+                            {new Intl.DateTimeFormat(
+                              i18n.language === "zh" ? "zh-CN" : "en-US"
+                            ).format(new Date(record.plannedAt))}
                           </span>
                         )}
                       </div>
