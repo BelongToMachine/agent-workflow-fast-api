@@ -8,6 +8,8 @@
 
 > **当前阶段说明（2026-09-12）**：CI/CD 管道尚未完成，staging 和 production 暂时采用 VPS 上的源码部署方式。源码部署是过渡方案；CI/CD 建成后，应切换为“CI 构建一次 Docker 镜像，staging 验证后使用同一镜像发布 production”的镜像部署方式。
 
+> **当前 VPS 角色切换说明（2026-09-14）**：物理机器角色已重新分配：`sg-vps` 承载 production，原 production VPS（SSH 别名 `asianode-vps`）承载 staging。环境变量、数据库、Redis、文件存储、Compose project 和 Cloudflare Tunnel 必须随逻辑环境重新配置，不能通过直接重命名旧目录或 `.env` 文件完成切换。
+
 ## 2. 基本原则
 
 1. staging 和 production 部署在不同 VPS 上，且不能共用运行栈、数据库、Redis、文件存储或密钥。
@@ -40,15 +42,16 @@
 - 当前数据库迁移工具会拒绝直接对 staging/production 执行本地迁移，需要在部署流程中使用经过审查的迁移方式。
 - 当前 `.gitignore` 只覆盖 `.env` 和 `.env.local`，正式增加 production 配置前必须补充 `.env.*` 规则。
 
-### 3.2 已确认的 staging VPS 预置状态
+### 3.2 角色切换后的 VPS 映射
 
-- SSH 别名：`sg-vps`；当前系统为 Ubuntu 26.04、x86_64，约 2 GiB 内存和 39 GiB 磁盘。
-- 管理用户为 `ubuntu`；运行 staging 的专用非 root 用户为 `asianode`，未加入 sudo 权限。
-- rootless Docker 29.1.3 和 Docker Compose 2.40.3 已安装，`asianode` 的 Docker user service 已启用并设置为开机自启；rootful Docker 保持禁用。
-- 本机 PostgreSQL 18.6 和 `pgvector` 0.8.1 已安装并设置为开机自启。
-- staging 数据库为 `asianode_staging`，数据库角色为 `asianode_staging`；数据库密码只保存在 VPS 的 `0600` secret 文件中。
-- PostgreSQL 只监听本机回环地址和 staging VPS 私网地址；UFW 已启用，入站 `5432/tcp` 明确拒绝公网访问。
-- 当前 rootless 容器通过 staging VPS 私网地址访问 PostgreSQL；当前预检地址为 `10.3.0.17`，不得把该地址或数据库密码提交到仓库。
+| 逻辑环境 | 新 SSH 别名 | 机器原角色 | 角色切换后的要求 |
+| --- | --- | --- | --- |
+| Production | `sg-vps` | 原 staging | 使用 production Compose、production secrets、production API/前端和 production 数据库连接；不能继续使用 `asianode_staging` 或 staging 密钥。 |
+| Staging | `asianode-vps` | 原 production | 使用 staging Compose、staging secrets、staging API/前端和 staging 数据库；原 production 数据、密钥和 Tunnel 配置必须先隔离。 |
+
+`sg-vps` 上现有的 rootless Docker、staging API/前端和本机 PostgreSQL 只是旧 staging 的运行状态，不能直接视为 production 已就绪。`asianode-vps` 上原有的 production 服务也不能直接视为 staging 已就绪。角色切换必须分别完成备份、停旧栈、建立新环境目录、生成对应环境文件、核对数据库连接和更新路由。
+
+逻辑环境的数据库策略不变：production 使用正式 production 数据库（当前规划为 Supabase），由 `sg-vps` 上的 production API 访问；staging 使用 `asianode-vps` 上独立的本机 PostgreSQL。staging 的本机数据库迁移和用户数据不能自动复制到 production。
 
 ## 4. 目标部署拓扑
 
@@ -59,26 +62,26 @@
 | Git 事件 | VPS 行为 | 构建配置范围 |
 | --- | --- | --- |
 | PR / feature branch | 执行 `bun install --frozen-lockfile`、lint、build，不发布 VPS | 无环境 secret |
-| 合并到 `staging` | 在 `sg-vps` 创建前端 release，构建并启动 `asianode-staging-frontend` | `frontend.build.env` 的 staging 公共构建变量 |
-| 合并到 `main` | 在 production VPS 创建前端 release，经审批后切换 Tunnel upstream | `frontend.build.env` 的 production 公共构建变量 |
+| 合并到 `staging` | 在 `asianode-vps` 创建前端 release，构建并启动 `asianode-staging-frontend` | `frontend.build.env` 的 staging 公共构建变量 |
+| 合并到 `main` | 在 `sg-vps` 创建前端 release，经审批后切换 Tunnel upstream | `frontend.build.env` 的 production 公共构建变量 |
 
 staging 和 production 分别绑定稳定域名 `https://staging.<domain>`、`https://<domain>`。不要使用临时动态域名完成登录联调，因为 CORS、session cookie 和 API URL 必须与固定环境一致。
 
 ### 4.2 后端
 
-staging 部署在独立的 staging VPS `sg-vps` 上，production 保持在 production VPS 上。两边都使用独立的 Compose project：
+production 部署在新的 production VPS `sg-vps` 上，staging 部署在新的 staging VPS `asianode-vps` 上。两边都使用独立的 Compose project：
 
 ```text
 asianode-staging
 asianode-production
 ```
 
-staging VPS 上建议端口规划：
+staging VPS `asianode-vps` 上建议端口规划：
 
 ```text
 staging API     127.0.0.1:18000 -> container:8000
 
-production VPS 上继续使用 production 专用端口，例如：
+production VPS `sg-vps` 上继续使用 production 专用端口，例如：
 
 production API  127.0.0.1:18000 -> container:8000
 ```
@@ -98,8 +101,8 @@ production API  127.0.0.1:18000 -> container:8000
 如果使用 Cloudflare Tunnel，分别配置两条固定路由，指向不同 VPS：
 
 ```text
-api.<domain>         -> production VPS / http://127.0.0.1:18000
-api-staging.<domain> -> staging VPS `sg-vps` / http://127.0.0.1:18000
+api.<domain>         -> production VPS `sg-vps` / http://127.0.0.1:18000
+api-staging.<domain> -> staging VPS `asianode-vps` / http://127.0.0.1:18000
 ```
 
 Tunnel、反向代理和公网 DNS 只负责转发，不负责环境选择。环境选择由 hostname 和对应的后端栈决定。
@@ -108,7 +111,7 @@ Tunnel、反向代理和公网 DNS 只负责转发，不负责环境选择。环
 
 ### 5.1 数据库
 
-staging 使用 `sg-vps` 上的本机 PostgreSQL 18，不依赖外部托管数据库；production 使用 production VPS 上独立的数据库服务。两套环境不得共用数据库连接字符串、数据库用户或数据库实例。
+staging 使用 `asianode-vps` 上的本机 PostgreSQL 18，不依赖外部托管数据库；production 由 `sg-vps` 上的 production API 连接正式 production 数据库（当前规划为 Supabase）。两套环境不得共用数据库连接字符串、数据库用户或数据库实例。
 
 staging 的目标数据库和角色为：
 
@@ -121,7 +124,7 @@ role:     asianode_staging
 
 - staging 用户不能访问 production database；
 - staging 的 migration 只能连接 staging；
-- staging PostgreSQL 只监听回环地址和 staging VPS 私网地址，并由 UFW/云防火墙拒绝公网 `5432/tcp`；
+- staging PostgreSQL 只监听回环地址和 `asianode-vps` 私网地址，并由 UFW/云防火墙拒绝公网 `5432/tcp`；
 - production 发布前必须完成备份和 migration preflight；
 - 不允许把 production 数据库 URL 放入 PR、Preview 或 staging secret；
 - 生产数据复制到 staging 前必须脱敏，并记录复制时间和数据范围。
@@ -216,31 +219,31 @@ feature/*
 在 CI/CD 管道完成前，源码构建发生在准备部署的目标 VPS 上，不从本地 Mac 构建，也不从另一台环境复制源码或镜像。VPS 上允许从指定分支或 commit 拉取源码并部署。建议将源码 checkout 和运行配置分开：
 
 ```text
-staging VPS `sg-vps`:
-/home/asianode/src/agent-workflow-fast-api/  # staging 源码 checkout
-/home/asianode/asianode-staging/             # staging Compose 和环境配置
-/home/asianode/src/asianodeagent-front/     # staging 前端源码 checkout
-/home/asianode/asianode-staging/frontend/   # staging 前端 Compose 和发布配置
-
-production VPS:
+production VPS `sg-vps`:
 /home/asianode/src/agent-workflow-fast-api/  # production 源码 checkout
 /home/asianode/asianode-production/          # production Compose 和环境配置
-/home/asianode/src/asianodeagent-front/     # production 前端源码 checkout
+/home/asianode/src/asianodeagent-front/      # production 前端源码 checkout
 /home/asianode/asianode-production/frontend/ # production 前端 Compose 和发布配置
+
+staging VPS `asianode-vps`:
+/home/asianode/src/agent-workflow-fast-api/  # staging 源码 checkout
+/home/asianode/asianode-staging/             # staging Compose 和环境配置
+/home/asianode/src/asianodeagent-front/      # staging 前端源码 checkout
+/home/asianode/asianode-staging/frontend/   # staging 前端 Compose 和发布配置
 ```
 
 源码部署必须记录 commit SHA，并在部署后执行 health/readiness 和业务 smoke test。不得使用未记录的工作树直接部署，也不得让 staging VPS 和 production VPS 互相复制源码或环境配置。CI/CD 建成后，源码目录不再是运行依赖，Compose 改为使用固定的镜像 tag 或 image digest。
 
 ### 7.1.2 目标目录结构
 
-两台 VPS 使用相同的目录模型，只替换环境名。`src` 是 Git 工作区，负责拉取源码；`releases` 是实际 Docker build context；`shared` 保存环境专属配置和持久化数据。真实 secret 不进入源码 release，也不进入 Git。
+两台 VPS 使用相同的目录模型，只替换环境名。`src` 是 Git 工作区，负责拉取源码；`releases` 是实际 Docker build context；`shared` 保存环境专属配置和持久化数据。真实 secret 不进入源码 release，也不进入 Git。以下树形图按逻辑合并展示；实际每台主机只创建自身对应的 environment root，不会在同一台机器上同时创建两套根目录。
 
 ```text
 /home/asianode/
 ├── src/
 │   ├── agent-workflow-fast-api/             # 后端 Git checkout
 │   └── asianodeagent-front/                 # 前端 Git checkout
-├── asianode-production/                    # production VPS
+├── asianode-production/                    # production root on sg-vps
 │   ├── releases/
 │   │   └── <full-commit-sha>/               # git archive 或干净 checkout 的源码快照
 │   │       ├── Dockerfile
@@ -274,7 +277,7 @@ production VPS:
 │       └── deploy/
 │           ├── deploy-frontend-production.sh
 │           └── deploy.lock
-└── asianode-staging/                         # staging VPS，同样的结构
+└── asianode-staging/                         # staging root on asianode-vps，同样的结构
     ├── releases/                             # 后端 release
     ├── current -> releases/<full-commit-sha>
     ├── shared/
@@ -311,11 +314,11 @@ production VPS:
 - `shared/env/`、`shared/storage/` 和 `shared/backups/` 永远位于 release 之外，发布时不能被源码归档覆盖。
 - `app-backup-*`、`app-failed-*` 和无主的临时 `build.*` 不作为标准目录；如需保留现场，应统一放入 `releases/` 或 `shared/logs/` 并带 commit 和时间戳。
 
-正式 production 迁移前，不直接重命名当前正在使用的 `/home/asianode/asianode-preview`。应先建立新 release，验证成功后再切换反向代理和 Compose project；旧目录至少保留一个回滚周期。
+角色切换前，不直接重命名任一台机器当前正在使用的 `/home/asianode/asianode-preview` 或旧环境目录。应在新的逻辑环境 root 下建立新 release，验证成功后再切换反向代理和 Compose project；旧目录至少保留一个回滚周期。
 
-当前 production VPS 的旧目录还运行着一个独立的 SPA 静态服务（`spa_server.py` + `frontend-dist-clean-*`）。它不是 FastAPI Docker release 的一部分；迁移时应先用新的 `frontend/releases/<frontend-commit-sha>/` 构建并验证 Nginx 容器，确认前端路由和 Cloudflare Tunnel/反向代理关系后，再切换 upstream；旧进程至少保留一个回滚周期。
+原 production VPS（现在规划为 staging 的 `asianode-vps`）的旧目录可能还运行着独立的 SPA 静态服务（`spa_server.py` + `frontend-dist-clean-*`）。它不是新的 staging Docker release 的一部分；迁移时应先备份并隔离原 production 数据和 secrets，再用 staging 的 `frontend/releases/<frontend-commit-sha>/` 构建并验证 Nginx 容器，确认 staging 路由后再切换 upstream；旧进程至少保留一个回滚周期。
 
-首次建立 production 新目录时只创建下面的空目录骨架：
+首次建立新角色目录时只创建下面的空目录骨架。production 骨架在 `sg-vps` 创建，staging 骨架在 `asianode-vps` 创建：
 
 ```text
 /home/asianode/src/agent-workflow-fast-api/
@@ -331,11 +334,24 @@ production VPS:
 /home/asianode/asianode-production/frontend/releases/
 /home/asianode/asianode-production/frontend/shared/build/
 /home/asianode/asianode-production/frontend/deploy/
+
+# 在 asianode-vps 上另外创建 staging 骨架
+/home/asianode/asianode-staging/releases/
+/home/asianode/asianode-staging/shared/env/
+/home/asianode/asianode-staging/shared/build/
+/home/asianode/asianode-staging/shared/storage/knowledge/
+/home/asianode/asianode-staging/shared/storage/attachments/
+/home/asianode/asianode-staging/shared/backups/
+/home/asianode/asianode-staging/shared/logs/
+/home/asianode/asianode-staging/deploy/
+/home/asianode/asianode-staging/frontend/releases/
+/home/asianode/asianode-staging/frontend/shared/build/
+/home/asianode/asianode-staging/frontend/deploy/
 ```
 
-在第一个 release 成功构建并通过健康检查前，不创建 `current` 指针；不复制或移动现有 `asianode-preview` 目录，不覆盖现有 `.env.preview`、容器、镜像、网络和备份。
+在第一个 release 成功构建并通过健康检查前，不创建 `current` 指针；不复制或移动现有 `asianode-preview` 目录，不覆盖现有 `.env.preview`、容器、镜像、网络和备份。两台机器都必须按新的逻辑环境生成独立的 `.env.staging` 或 `.env.production`。
 
-迁移旧部署时，旧环境文件只能先保存为候选配置，不能因为文件名从 `.env.preview` 改成 `.env.production` 就直接启用。特别是当前 production VPS 上的旧 `.env.preview` 曾检查到 `ENVIRONMENT=staging`，且 `CORS_ORIGINS` 同时包含多个开发、Preview 和 production origin；必须逐项复核并生成正式 `.env.production` 后，才能启动新的 production Compose project。
+迁移旧部署时，旧环境文件只能先保存为候选配置，不能因为文件名从 `.env.preview` 改成 `.env.staging` 或 `.env.production` 就直接启用。必须逐项复核 `ENVIRONMENT`、数据库 URL、Redis、CORS、前端地址、认证密钥和文件存储，并为新角色生成正式环境文件后，才能启动对应 Compose project。
 
 ### 7.1.3 构建镜像与环境专属构建配置
 
@@ -377,7 +393,7 @@ default = true
 
 公共镜像地址不属于 secret，可以放在 `build.env`；如果将来使用需要认证的私有镜像，不能把用户名密码放进 Docker `ARG` 或 URL，应改用 BuildKit secret、keyring 或服务器上的受限凭据文件。
 
-Dockerfile 的基础镜像和 Python 依赖是两条不同的下载链路。项目级 uv index 和 `PYPI_INDEX_URL` 只影响 Python 依赖，不影响 `FROM python:3.12-slim` 的 Docker 基础镜像来源。当前 production VPS 使用 rootless Docker，因此必须检查执行部署用户所连接的 Docker daemon，而不能只检查 rootful Docker 的镜像缓存。
+Dockerfile 的基础镜像和 Python 依赖是两条不同的下载链路。项目级 uv index 和 `PYPI_INDEX_URL` 只影响 Python 依赖，不影响 `FROM python:3.12-slim` 的 Docker 基础镜像来源。当前 production VPS `sg-vps` 使用 rootless Docker，因此必须检查执行部署用户所连接的 Docker daemon，而不能只检查 rootful Docker 的镜像缓存。
 
 源码构建采用基础镜像的本地优先、远端 fallback 策略：
 
@@ -456,7 +472,7 @@ bun run build
 
 当前 CI/CD 尚未完成时，执行以下过渡流程：
 
-1. 在 staging VPS 的 `/home/asianode/src/agent-workflow-fast-api` 拉取指定的 `staging` 分支或 commit。
+1. 在 staging VPS `asianode-vps` 的 `/home/asianode/src/agent-workflow-fast-api` 拉取指定的 `staging` 分支或 commit。
 2. 确认工作树干净，使用 `git pull --ff-only` 更新，记录完整 commit SHA。
 3. 使用 `git archive` 将该 commit 导出到 `/home/asianode/asianode-staging/releases/<full-sha>/`，不带 `.git`、`.env` 和任何 secret。
 4. 在 release 目录写入 `.deploy-commit` 和 `release-info`，确认 `shared/env/.env.staging`、`shared/build/build.env` 存在且权限正确。
@@ -508,8 +524,8 @@ CI/CD 完成后，再切换为下面的镜像流程：
 前端使用独立的源码 checkout 和 release 根目录：
 
 ```text
-/home/asianode/src/asianodeagent-front/
-/home/asianode/asianode-staging/frontend/
+/home/asianode/src/asianodeagent-front/       # asianode-vps
+/home/asianode/asianode-staging/frontend/    # asianode-vps
 ```
 
 部署用户先在 release 之外创建 `frontend.build.env`，只写入公共构建变量，不写入 API key、数据库密码或其他 secret：
@@ -534,15 +550,15 @@ BRANCH=staging \
 5. 启动 `asianode-staging-frontend`，检查容器 healthcheck 和 `http://127.0.0.1:18100/healthz`；
 6. 检查通过后更新 `frontend/current` 并写入 `.deploy-commit`、`release-info`。
 
-staging 前端默认只绑定 `127.0.0.1:18100`，不会自动创建 Cloudflare Tunnel 或公网路由。前端浏览器实际访问的 `FRONTEND_API_URL` 必须是浏览器可访问的 staging API 地址；如果只通过 SSH 隧道测试，必须同时规划前端和 API 的本地端口转发。
+staging 前端默认只绑定 `127.0.0.1:18100`，不会自动创建 Cloudflare Tunnel 或公网路由。前端浏览器实际访问的 `FRONTEND_API_URL` 必须是浏览器可访问的 staging API 地址；当前 SSH-only 测试使用 `http://127.0.0.1:18000`，必须同时转发前端和 API 端口。由于前端 `18100` 与 API `18000` 是不同 origin，staging 的 `CORS_ORIGINS` 必须包含 `http://127.0.0.1:18100` 和 `http://localhost:18100`（取决于浏览器打开的地址），否则浏览器会出现 HTTP 200 但 JavaScript 读取失败的 CORS 错误。
 
 ### 8.3 Production 发布
 
-当前 CI/CD 尚未完成时，production 也采用源码部署，但必须由人工执行，并完成数据库备份、commit SHA 记录、配置复核和发布后的 health/readiness 及业务 smoke test。staging 与 production 必须分别从各自 VPS 上的源码 checkout 和环境配置部署，不能跨环境复制运行目录或 secret。
+当前 CI/CD 尚未完成时，production 也采用源码部署，但必须由人工执行，并完成数据库备份、commit SHA 记录、配置复核和发布后的 health/readiness 及业务 smoke test。production 目标 VPS 为 `sg-vps`，staging 目标 VPS 为 `asianode-vps`；两者必须分别从各自 VPS 上的源码 checkout 和环境配置部署，不能跨环境复制运行目录或 secret。
 
 Production 的人工源码发布流程：
 
-1. 在 production VPS 的 `/home/asianode/src/agent-workflow-fast-api` 只拉取已经批准的 `main` commit，并确认工作树干净。
+1. 在 production VPS `sg-vps` 的 `/home/asianode/src/agent-workflow-fast-api` 只拉取已经批准的 `main` commit，并确认工作树干净。
 2. 将该 commit 导出到 `/home/asianode/asianode-production/releases/<full-sha>/`，不把 `.env.production`、数据库密码或其他 secret 放入 release。
 3. 检查 production 的 `/home/asianode/asianode-production/shared/build/build.env`。`PYPI_INDEX_URL` 用于 Docker build；项目 `pyproject.toml` 和已提交的 `uv.lock` 共同保证 Python 依赖默认从阿里云获取。该配置不作为应用 runtime 环境变量。
 4. 先执行数据库备份和 migration preflight，再构建镜像：
@@ -592,7 +608,7 @@ Production 的人工源码发布流程：
 
 6. 通过容器、本机回环地址和公网域名三层检查后，更新 `current` 指针并写入完整 `release-info`。production 继续使用 `127.0.0.1:18000`，因此切换前必须先停止旧 `asianode-preview` API，再启动新的 `asianode-production` API；Cloudflare Tunnel 的 origin 不需要修改，但切换期间会有短暂中断。
 
-当前过渡阶段使用 production VPS 上的自动化脚本：
+当前过渡阶段使用 production VPS `sg-vps` 上的自动化脚本：
 
 ```bash
 bash /home/asianode/asianode-production/deploy/deploy-production.sh
@@ -604,7 +620,7 @@ bash /home/asianode/asianode-production/deploy/deploy-production.sh
 
 #### 8.3.1 当前 production 手工部署命令
 
-以下命令在 production VPS 上以 `asianode` 用户、同一个 shell 会话执行。`<full-sha>` 必须替换为已经准备好的 release commit；例如当前 release 使用 `d653130cb971042fc9a580ce7dda12091abcdb68`。该流程只切换指定的 Asianode 服务，不执行全局清理。
+以下命令在 production VPS `sg-vps` 上以 `asianode` 用户、同一个 shell 会话执行。`<full-sha>` 必须替换为已经准备好的 release commit；例如当前 release 使用 `d653130cb971042fc9a580ce7dda12091abcdb68`。该流程只切换指定的 Asianode 服务，不执行全局清理。
 
 1. 设置 release 变量并确认文件存在：
 
@@ -630,7 +646,7 @@ bash /home/asianode/asianode-production/deploy/deploy-production.sh
      config -q
    ```
 
-3. 构建 API image。当前 `python:3.12-slim` 已在 production VPS 的 rootless Docker 中缓存，因此优先不访问 Docker Hub；如果本机没有基础镜像，才使用 `--pull` 下载。`BUILDKIT_PROGRESS=plain` 配合 Dockerfile 中的 `uv sync -vv` 输出构建和依赖请求细节：
+3. 构建 API image。当前 `python:3.12-slim` 已在 production VPS `sg-vps` 的 rootless Docker 中缓存，因此优先不访问 Docker Hub；如果本机没有基础镜像，才使用 `--pull` 下载。`BUILDKIT_PROGRESS=plain` 配合 Dockerfile 中的 `uv sync -vv` 输出构建和依赖请求细节：
 
    ```bash
    BASE_IMAGE=python:3.12-slim
@@ -762,7 +778,7 @@ Production 发布必须满足：
 
 #### 8.3.2 前端 production 发布
 
-production 前端与后端分别发布，使用独立的前端 root：
+production 前端与后端分别发布，目标 VPS 为 `sg-vps`，使用独立的前端 root：
 
 ```text
 /home/asianode/src/asianodeagent-front/
@@ -933,11 +949,11 @@ SQL review
 
 - [ ] 将 `compose.preview.yaml` 复制或演进为 `compose.staging.yaml`。
 - [ ] 将 `.env.preview.example` 演进为 `.env.staging.example`。
-- [x] 在 production VPS 创建 `src`、`releases`、`shared`、`deploy` 空目录骨架；首个 release 成功前不创建 `current`。
-- [ ] 在 staging VPS 创建 `src`、`releases`、`shared`、`deploy` 空目录骨架；首个 release 成功前不创建 `current`。
+- [ ] 在新的 production VPS `sg-vps` 创建 `src`、`releases`、`shared`、`deploy` 空目录骨架；首个新角色 release 成功前不创建 `current`。
+- [ ] 在新的 staging VPS `asianode-vps` 创建 `src`、`releases`、`shared`、`deploy` 空目录骨架；首个新角色 release 成功前不创建 `current`。
 - [ ] 为两个环境创建独立的 `shared/build/build.env`，并把 package index 与 runtime `.env` 分离。
-- [ ] 确认 `sg-vps` 上的 `asianode-staging` project、network、Redis 和端口 `18000`。
-- [x] 在 `sg-vps` 创建本机 PostgreSQL、`asianode_staging` database/user 和 pgvector 扩展。
+- [ ] 确认 `sg-vps` 上的 `asianode-production` project、network、Redis、production 数据库连接和端口 `18000`。
+- [ ] 在 `asianode-vps` 创建本机 PostgreSQL、`asianode_staging` database/user 和 pgvector 扩展。
 - [ ] 创建 staging 独立 workspace。
 - [ ] 创建 `staging.<domain>`、`api-staging.<domain>` DNS/Tunnel 路由。
 - [ ] 修正 `.gitignore`，确保 `.env.production` 和 `.env.staging` 不会入库。
@@ -945,7 +961,7 @@ SQL review
 ### P1：建立 production 发布单元
 
 - [ ] 新增 `compose.production.yaml`，API 只使用 `image:`。
-- [ ] 创建 production PostgreSQL、Redis、文件存储和 `.env.production`。
+- [ ] 确认 production Supabase 数据库连接、Redis、文件存储和 `.env.production`。
 - [ ] 建立 production image digest、health check 和自动回滚脚本。
 - [ ] 确认 production 与 staging 的端口、网络和 volume 不冲突。
 
@@ -956,8 +972,8 @@ SQL review
 - [ ] `main` 分支合并后构建并推送 SHA 镜像。
 - [ ] 创建 GitHub `production` Environment 和 required reviewer。
 - [ ] production deploy 使用同一个已在 staging 验证的镜像 digest。
-- [ ] 前端 `staging` 分支合并后在 `sg-vps` 构建并发布 `asianode-staging-frontend`。
-- [ ] 前端 `main` 分支合并后在 production VPS 构建并发布 `asianode-production-frontend`。
+- [ ] 前端 `staging` 分支合并后在 `asianode-vps` 构建并发布 `asianode-staging-frontend`。
+- [ ] 前端 `main` 分支合并后在 `sg-vps` 构建并发布 `asianode-production-frontend`。
 - [ ] 前端发布记录前端 commit、构建变量摘要、基础镜像来源和 Nginx healthcheck 结果。
 
 ### P3：上线前演练

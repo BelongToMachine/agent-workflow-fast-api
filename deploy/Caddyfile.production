@@ -1,0 +1,15 @@
+# Production public entrypoints for sg-vps.
+# Caddy terminates HTTPS and keeps the application containers private on loopback.
+
+copilot.asianodeatlas.com {
+	encode gzip
+
+	# Keep browser requests same-origin while forwarding the API locally.
+	handle /api/* {
+		reverse_proxy 127.0.0.1:18000
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:18100
+	}
+}
