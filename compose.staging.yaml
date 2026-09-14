@@ -25,6 +25,13 @@ services:
     read_only: true
     cap_drop:
       - ALL
+    # The official Nginx image starts as root, prepares its cache, and then
+    # drops workers to the nginx user. Rootless Docker still needs these
+    # namespaced capabilities for that startup sequence.
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     tmpfs:
