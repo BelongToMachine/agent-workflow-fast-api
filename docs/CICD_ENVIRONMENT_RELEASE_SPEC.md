@@ -26,14 +26,14 @@
 | --- | --- | --- | --- |
 | Production | `https://<domain>` | `https://api.<domain>` | 真实用户和正式数据 |
 | Staging | `https://staging.<domain>` | `https://api-staging.<domain>` | 完整联调、验收和发布前验证 |
-| PR Preview | Vercel 动态 Preview URL | 不保证完整 API/登录联调 | 页面、构建和视觉检查 |
+| PR Preview | 不部署 VPS，仅执行前端 CI 构建校验 | 不保证完整 API/登录联调 | 页面、构建和视觉检查 |
 
 只有一个主域名不影响上述规划。DNS 可以在同一个主域名下创建多个子域名，不需要购买第二个域名。
 
 ### 3.1 当前仓库基线
 
 - 后端是独立的 FastAPI 仓库，使用 Python 3.12、Docker 和 GitHub Actions。
-- 前端是独立的 React/Vite 仓库，使用 Vercel 部署。
+- 前端是独立的 React/Vite 仓库，使用 Bun 构建、Nginx 容器提供静态文件，并部署在对应环境的 VPS 上。
 - 当前仓库已经存在 `compose.preview.yaml`，使用回环端口 `18000`、独立 Redis 和外部 PostgreSQL。
 - `/api/v1/healthz` 是进程存活检查，`/api/v1/readyz` 会额外检查数据库连接。
 - 当前配置已经支持 `ENVIRONMENT`、`CORS_ORIGINS`、`AUTH_FRONTEND_URL`、`AUTH_SECRET` 等环境隔离变量。
@@ -54,15 +54,15 @@
 
 ### 4.1 前端
 
-前端使用一个 Vercel Project：
+前端与 FastAPI 使用独立的源码仓库和 Compose project。前端在目标 VPS 上从对应 commit 构建，构建产物只存在于不可变的 Docker image 中；Nginx 容器只提供静态文件，不连接数据库或 Redis。
 
-| Git 事件 | Vercel 行为 | 环境变量范围 |
+| Git 事件 | VPS 行为 | 构建配置范围 |
 | --- | --- | --- |
-| PR / feature branch | 创建动态 Preview | Preview，默认只用于页面检查 |
-| 合并到 `staging` | 发布稳定 staging deployment | Staging/Preview 配置 |
-| 合并到 `main` | 发布 Production deployment | Production 配置 |
+| PR / feature branch | 执行 `bun install --frozen-lockfile`、lint、build，不发布 VPS | 无环境 secret |
+| 合并到 `staging` | 在 `sg-vps` 创建前端 release，构建并启动 `asianode-staging-frontend` | `frontend.build.env` 的 staging 公共构建变量 |
+| 合并到 `main` | 在 production VPS 创建前端 release，经审批后切换 Tunnel upstream | `frontend.build.env` 的 production 公共构建变量 |
 
-staging 必须绑定稳定域名 `https://staging.<domain>`。不要依赖每个 PR 的动态域名完成完整登录联调，因为 CORS 和认证回调通常需要精确域名。
+staging 和 production 分别绑定稳定域名 `https://staging.<domain>`、`https://<domain>`。不要使用临时动态域名完成登录联调，因为 CORS、session cookie 和 API URL 必须与固定环境一致。
 
 ### 4.2 后端
 
@@ -156,7 +156,6 @@ production bucket/prefix
 - `DEEPSEEK_API_KEY` 及其他模型服务密钥
 - embedding 服务密钥
 - S3-compatible storage credentials
-- Logto tenant / application / API resource（如果启用 Logto）
 
 staging 可以使用额度受限的模型 API key、较小的文件限制和较低的资源配额。production 密钥只保存在 production Environment 或 VPS 的受限文件中，不从 GitHub 仓库复制到服务器。
 
@@ -178,7 +177,7 @@ CORS_ORIGINS=https://<domain>
 AUTH_FRONTEND_URL=https://<domain>
 ```
 
-如果使用 Logto，staging 和 production 使用不同的 SPA App ID，并分别配置 callback、post-logout redirect 和 API resource。
+当前认证只使用 FastAPI 的本地 session 模式。前端不保存或注入认证 secret，浏览器通过 API origin 的 HttpOnly session cookie 完成登录。
 
 ### 6.2 Session Cookie
 
@@ -220,10 +219,14 @@ feature/*
 staging VPS `sg-vps`:
 /home/asianode/src/agent-workflow-fast-api/  # staging 源码 checkout
 /home/asianode/asianode-staging/             # staging Compose 和环境配置
+/home/asianode/src/asianodeagent-front/     # staging 前端源码 checkout
+/home/asianode/asianode-staging/frontend/   # staging 前端 Compose 和发布配置
 
 production VPS:
 /home/asianode/src/agent-workflow-fast-api/  # production 源码 checkout
 /home/asianode/asianode-production/          # production Compose 和环境配置
+/home/asianode/src/asianodeagent-front/     # production 前端源码 checkout
+/home/asianode/asianode-production/frontend/ # production 前端 Compose 和发布配置
 ```
 
 源码部署必须记录 commit SHA，并在部署后执行 health/readiness 和业务 smoke test。不得使用未记录的工作树直接部署，也不得让 staging VPS 和 production VPS 互相复制源码或环境配置。CI/CD 建成后，源码目录不再是运行依赖，Compose 改为使用固定的镜像 tag 或 image digest。
@@ -235,7 +238,8 @@ production VPS:
 ```text
 /home/asianode/
 ├── src/
-│   └── agent-workflow-fast-api/             # Git checkout，仅用于准备 release
+│   ├── agent-workflow-fast-api/             # 后端 Git checkout
+│   └── asianodeagent-front/                 # 前端 Git checkout
 ├── asianode-production/                    # production VPS
 │   ├── releases/
 │   │   └── <full-commit-sha>/               # git archive 或干净 checkout 的源码快照
@@ -256,10 +260,22 @@ production VPS:
 │   │   ├── deploy.sh
 │   │   ├── rollback.sh
 │   │   └── deploy.lock
-│   └── frontend/                          # 仅当 VPS 继续承载 SPA 静态服务时使用
-│       └── releases/<build-id>/
-└── asianode-staging/                       # staging VPS，结构相同
-    ├── releases/<full-commit-sha>/
+│   └── frontend/
+│       ├── releases/
+│       │   └── <frontend-commit-sha>/        # 前端源码 release 快照
+│       │       ├── Dockerfile
+│       │       ├── compose.production.yaml
+│       │       ├── deploy/nginx.conf
+│       │       ├── .deploy-commit
+│       │       └── release-info
+│       ├── current -> releases/<frontend-commit-sha>
+│       ├── shared/
+│       │   └── build/frontend.build.env      # 公共前端构建变量，非 runtime secret
+│       └── deploy/
+│           ├── deploy-frontend-production.sh
+│           └── deploy.lock
+└── asianode-staging/                         # staging VPS，同样的结构
+    ├── releases/                             # 后端 release
     ├── current -> releases/<full-commit-sha>
     ├── shared/
     │   ├── env/.env.staging
@@ -268,7 +284,23 @@ production VPS:
     │   ├── storage/attachments/
     │   ├── backups/
     │   └── logs/
-    └── deploy/
+    ├── deploy/
+    │   ├── deploy-staging.sh
+    │   └── deploy.lock
+    └── frontend/
+        ├── releases/
+        │   └── <frontend-commit-sha>/
+        │       ├── Dockerfile
+        │       ├── compose.staging.yaml
+        │       ├── deploy/nginx.conf
+        │       ├── .deploy-commit
+        │       └── release-info
+        ├── current -> releases/<frontend-commit-sha>
+        ├── shared/
+        │   └── build/frontend.build.env
+        └── deploy/
+            ├── deploy-frontend-staging.sh
+            └── deploy.lock
 ```
 
 目录职责必须保持稳定：
@@ -281,12 +313,13 @@ production VPS:
 
 正式 production 迁移前，不直接重命名当前正在使用的 `/home/asianode/asianode-preview`。应先建立新 release，验证成功后再切换反向代理和 Compose project；旧目录至少保留一个回滚周期。
 
-当前 production VPS 的旧目录还运行着一个独立的 SPA 静态服务（`spa_server.py` + `frontend-dist-clean-*`）。它不是 FastAPI Docker release 的一部分；迁移时可以先复制到 production 的 `frontend/releases/<build-id>/` 作为可回滚静态产物，但在确认前端路由和 Cloudflare Tunnel/反向代理关系前，不切换该进程的工作目录。
+当前 production VPS 的旧目录还运行着一个独立的 SPA 静态服务（`spa_server.py` + `frontend-dist-clean-*`）。它不是 FastAPI Docker release 的一部分；迁移时应先用新的 `frontend/releases/<frontend-commit-sha>/` 构建并验证 Nginx 容器，确认前端路由和 Cloudflare Tunnel/反向代理关系后，再切换 upstream；旧进程至少保留一个回滚周期。
 
 首次建立 production 新目录时只创建下面的空目录骨架：
 
 ```text
 /home/asianode/src/agent-workflow-fast-api/
+/home/asianode/src/asianodeagent-front/
 /home/asianode/asianode-production/releases/
 /home/asianode/asianode-production/shared/env/
 /home/asianode/asianode-production/shared/build/
@@ -295,6 +328,9 @@ production VPS:
 /home/asianode/asianode-production/shared/backups/
 /home/asianode/asianode-production/shared/logs/
 /home/asianode/asianode-production/deploy/
+/home/asianode/asianode-production/frontend/releases/
+/home/asianode/asianode-production/frontend/shared/build/
+/home/asianode/asianode-production/frontend/deploy/
 ```
 
 在第一个 release 成功构建并通过健康检查前，不创建 `current` 指针；不复制或移动现有 `asianode-preview` 目录，不覆盖现有 `.env.preview`、容器、镜像、网络和备份。
@@ -353,14 +389,41 @@ Dockerfile 的基础镜像和 Python 依赖是两条不同的下载链路。项�
 
 生产部署脚本会把 `base_image`、`base_image_source` 和 `build_pull` 写入 `release-info`。这些字段不包含密钥，便于判断本次构建是使用本地缓存还是远端下载。
 
+前端使用独立的 `frontend.build.env`，因为 Vite 配置是在构建阶段编译进浏览器 bundle 的；Nginx 运行容器不读取数据库、Redis 或认证 secret。该文件只允许包含浏览器必须知道的公共值：
+
+```env
+FRONTEND_ENVIRONMENT=staging
+# Current SSH-only staging build; replace with the staging API hostname after
+# the staging Tunnel/domain is provisioned.
+FRONTEND_API_URL=http://127.0.0.1:18000
+VITE_WORKSPACE_ID=00000000-0000-0000-0000-000000000001
+VITE_SINGLE_WORKSPACE_MODE=true
+NEXT_PUBLIC_API_MODE=fastapi-direct
+NEXT_PUBLIC_USE_FASTAPI_BACKEND=1
+FRONTEND_BIND_ADDRESS=127.0.0.1
+FRONTEND_HOST_PORT=18100
+```
+
+production 将 `FRONTEND_ENVIRONMENT` 改为 `production`，并将 `FRONTEND_API_URL` 改为 `https://api.<domain>`。前端项目当前使用 Bun 1.3.11 和 `bun.lock`，构建固定执行：
+
+```text
+bun install --frozen-lockfile
+bun run lint
+bun run build
+```
+
+前端 Dockerfile 使用 `oven/bun:1.3.11-alpine` 构建 `dist/`，再将产物复制到 `nginx:1.27-alpine`。Nginx 监听容器端口 `8080`，提供 `/healthz` 和 React Router 的 `/index.html` fallback。Compose 默认只绑定 VPS 回环地址 `127.0.0.1:18100`；Cloudflare Tunnel 只有在验证完成后才允许指向该端口。
+
+前端发布同样使用本地优先、远端 fallback：部署脚本会同时检查 Bun 和 Nginx 两个基础镜像，只要有一个基础镜像不在目标 VPS 使用的 Docker daemon 中，就为本次 build 加上 `--pull`。脚本把两个基础镜像、来源和 `build_pull` 写入前端 release 的 `release-info`。
+
 ### 7.2 事件与动作矩阵
 
 | 事件 | 必须执行 | 是否发布 production |
 | --- | --- | --- |
-| PR 创建或更新 | Lint、单元测试、Docker build validation、Vercel Preview | 否 |
-| 合并到 `staging` | 构建镜像、发布 staging、health/readiness 和业务 smoke test | 否 |
-| 合并到 `main` | 复用已验证镜像，等待 production Environment 审批 | 审批后是 |
-| `workflow_dispatch` | 指定 SHA/digest 重新部署或回滚 | 审批后是 |
+| PR 创建或更新 | 后端测试、前端 lint/build、Docker build validation，不发布 VPS | 否 |
+| 合并到 `staging` | 发布后端和前端 staging release，执行健康检查和业务 smoke test | 否 |
+| 合并到 `main` | staging 验证后分别审批后端和前端 production release，再切换流量 | 审批后是 |
+| `workflow_dispatch` | 指定后端/前端 SHA 重新部署或回滚 | 审批后是 |
 
 ## 8. CI/CD 流程规范
 
@@ -438,7 +501,40 @@ CI/CD 完成后，再切换为下面的镜像流程：
 4. 只重建 staging API，除非有明确的 Redis 或基础设施变更。
 5. 执行本地 `/api/v1/healthz`、`/api/v1/readyz` 和公网 API 检查。
 6. 执行登录、CSRF、核心业务请求、数据库读写和 Redis 相关 smoke test。
-7. 将 staging 镜像引用、前端 deployment URL 和 migration 版本记录到部署结果中。
+7. 将后端镜像引用、前端 commit/image 信息和 migration 版本记录到部署结果中。
+
+#### 8.2.1 前端 staging 发布
+
+前端使用独立的源码 checkout 和 release 根目录：
+
+```text
+/home/asianode/src/asianodeagent-front/
+/home/asianode/asianode-staging/frontend/
+```
+
+部署用户先在 release 之外创建 `frontend.build.env`，只写入公共构建变量，不写入 API key、数据库密码或其他 secret：
+
+```text
+/home/asianode/asianode-staging/frontend/shared/build/frontend.build.env
+```
+
+当前源码部署阶段执行：
+
+```bash
+BRANCH=staging \
+  bash /home/asianode/src/asianodeagent-front/deploy/deploy-frontend-staging.sh
+```
+
+脚本会依次执行：
+
+1. 检查 staging 前端构建变量和 rootless Docker；
+2. 拉取并确认干净的 `staging` 分支，记录前端完整 commit SHA；
+3. 使用 `git archive` 创建 `/home/asianode/asianode-staging/frontend/releases/<frontend-sha>/`；
+4. 用 `oven/bun:1.3.11-alpine` 构建 Vite `dist/`，再生成 Nginx 静态服务镜像；
+5. 启动 `asianode-staging-frontend`，检查容器 healthcheck 和 `http://127.0.0.1:18100/healthz`；
+6. 检查通过后更新 `frontend/current` 并写入 `.deploy-commit`、`release-info`。
+
+staging 前端默认只绑定 `127.0.0.1:18100`，不会自动创建 Cloudflare Tunnel 或公网路由。前端浏览器实际访问的 `FRONTEND_API_URL` 必须是浏览器可访问的 staging API 地址；如果只通过 SSH 隧道测试，必须同时规划前端和 API 的本地端口转发。
 
 ### 8.3 Production 发布
 
@@ -664,6 +760,24 @@ Production 发布必须满足：
 5. 执行登录、核心业务、数据库和 Redis smoke test。
 6. 成功后记录当前 image digest 为 `last-successful-image`。
 
+#### 8.3.2 前端 production 发布
+
+production 前端与后端分别发布，使用独立的前端 root：
+
+```text
+/home/asianode/src/asianodeagent-front/
+/home/asianode/asianode-production/frontend/
+```
+
+确认 `frontend.build.env` 中的 `FRONTEND_ENVIRONMENT=production` 和 `FRONTEND_API_URL=https://api.<domain>` 正确后执行：
+
+```bash
+BRANCH=main \
+  bash /home/asianode/src/asianodeagent-front/deploy/deploy-frontend-production.sh
+```
+
+该脚本不会停止旧的 `spa_server.py`，也不会修改 Cloudflare Tunnel。新 Nginx 容器在 `127.0.0.1:18100` 健康检查通过后，再由人工将 production 前端 hostname 的 Tunnel upstream 切换到该端口；切换完成并通过登录和核心页面 smoke test 后，旧静态服务才进入回滚保留周期。
+
 ### 8.4 镜像命名
 
 推荐使用：
@@ -711,6 +825,28 @@ VPS: /home/asianode/asianode-production/shared/env/.env.production
 /home/asianode/asianode-staging/shared/build/build.env
 /home/asianode/asianode-production/shared/build/build.env
 ```
+
+前端使用独立的 build env，放在前端 release 根目录之外：
+
+```text
+/home/asianode/asianode-staging/frontend/shared/build/frontend.build.env
+/home/asianode/asianode-production/frontend/shared/build/frontend.build.env
+```
+
+前端 build env 只允许包含会被 Vite 编译到浏览器 bundle 的公共配置：
+
+```env
+FRONTEND_ENVIRONMENT=staging
+FRONTEND_API_URL=https://api-staging.<domain>
+VITE_WORKSPACE_ID=00000000-0000-0000-0000-000000000001
+VITE_SINGLE_WORKSPACE_MODE=true
+NEXT_PUBLIC_API_MODE=fastapi-direct
+NEXT_PUBLIC_USE_FASTAPI_BACKEND=1
+FRONTEND_BIND_ADDRESS=127.0.0.1
+FRONTEND_HOST_PORT=18100
+```
+
+前端不能把 `POSTGRES_URL`、`REDIS_URL`、`AUTH_SECRET`、模型 API key 或任何其他 secret 放进这个文件。当前前端生产构建采用 direct mode，因此 `FRONTEND_API_URL` 必须是浏览器可访问的 API origin；它不是 Docker 容器内部地址。当前 SSH-only staging 使用浏览器本机的 `http://127.0.0.1:18000`，需要同时转发 API 和前端端口；启用 staging Tunnel/domain 后，重新构建并改为 `api-staging.<domain>`，production 使用 `api.<domain>`。
 
 staging 配置示例：
 
@@ -813,14 +949,16 @@ SQL review
 - [ ] 建立 production image digest、health check 和自动回滚脚本。
 - [ ] 确认 production 与 staging 的端口、网络和 volume 不冲突。
 
-### P2：接入 GitHub Actions 和 Vercel
+### P2：接入 GitHub Actions 和 VPS 前端发布
 
 - [ ] PR workflow 完成测试、Lint 和 Docker build validation。
 - [ ] `staging` 分支合并后自动发布 staging。
 - [ ] `main` 分支合并后构建并推送 SHA 镜像。
 - [ ] 创建 GitHub `production` Environment 和 required reviewer。
 - [ ] production deploy 使用同一个已在 staging 验证的镜像 digest。
-- [ ] Vercel 分别配置 staging/preview 和 production 环境变量。
+- [ ] 前端 `staging` 分支合并后在 `sg-vps` 构建并发布 `asianode-staging-frontend`。
+- [ ] 前端 `main` 分支合并后在 production VPS 构建并发布 `asianode-production-frontend`。
+- [ ] 前端发布记录前端 commit、构建变量摘要、基础镜像来源和 Nginx healthcheck 结果。
 
 ### P3：上线前演练
 
@@ -835,6 +973,8 @@ SQL review
 ### 域名和路由
 
 - [ ] `https://staging.<domain>` 可以访问 staging 前端。
+- [ ] `https://staging.<domain>/healthz` 返回 `ok`，且前端 API URL 指向 `api-staging.<domain>`。
+- [ ] `https://<domain>/healthz` 返回 `ok`，且前端 API URL 指向 `api.<domain>`。
 - [ ] `https://api-staging.<domain>/api/v1/healthz` 返回 `environment=staging`。
 - [ ] `https://api.<domain>/api/v1/healthz` 返回 `environment=production`。
 - [ ] staging 和 production 的 Tunnel upstream 不指向同一端口。
