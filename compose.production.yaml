@@ -40,7 +40,7 @@ services:
       - /tmp:size=16m,mode=1777
     stop_grace_period: 10s
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz && wget -q -O /dev/null http://127.0.0.1:8080/favicon.png"]
       interval: 10s
       timeout: 3s
       retries: 6

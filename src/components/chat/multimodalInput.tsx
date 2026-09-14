@@ -80,6 +80,13 @@ function setCookie(name: string, value: string) {
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}`;
 }
 
+function isDesktopPointerDevice() {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(hover: hover) and (pointer: fine)").matches
+  );
+}
+
 function PureMultimodalInput({
   chatId,
   input,
@@ -128,10 +135,7 @@ function PureMultimodalInput({
   useEffect(() => {
     // Do not auto-focus on touch devices: mobile browsers open the keyboard
     // as soon as the chat mounts, which steals the user's viewport.
-    const isDesktopPointer = window.matchMedia(
-      "(hover: hover) and (pointer: fine)"
-    ).matches;
-    if (!hasAutoFocused.current && width && isDesktopPointer) {
+    if (!hasAutoFocused.current && width && isDesktopPointerDevice()) {
       const timer = setTimeout(() => {
         textareaRef.current?.focus();
         hasAutoFocused.current = true;
@@ -651,14 +655,12 @@ function ModelSelectorOption({
   curated,
   model,
   onModelChange,
-  selectedModelId,
   setOpen,
 }: {
   capabilities: Record<string, ModelCapabilities> | undefined;
   curated: boolean;
   model: ChatModel;
   onModelChange?: (modelId: string) => void;
-  selectedModelId: string;
   setOpen: Dispatch<SetStateAction<boolean>>;
 }) {
   const { t } = useTranslation();
@@ -686,11 +688,15 @@ function ModelSelectorOption({
     onModelChange?.(model.id);
     setCookie("chat-model", model.id);
     setOpen(false);
-    setTimeout(() => {
-      document
-        .querySelector<HTMLTextAreaElement>("[data-testid='multimodal-input']")
-        ?.focus();
-    }, 50);
+    if (isDesktopPointerDevice()) {
+      setTimeout(() => {
+        document
+          .querySelector<HTMLTextAreaElement>(
+            "[data-testid='multimodal-input']"
+          )
+          ?.focus();
+      }, 50);
+    }
   }, [curated, model.id, onModelChange, setOpen]);
 
   const option = (
@@ -698,8 +704,6 @@ function ModelSelectorOption({
       aria-disabled={!curated}
       className={cn(
         "flex w-full transition-colors",
-        model.id === selectedModelId &&
-          "border-b border-dashed border-foreground/50",
         curated
           ? "data-[selected=true]:bg-muted data-[selected=true]:text-foreground"
           : "cursor-not-allowed opacity-40 data-[selected=true]:bg-transparent data-[selected=true]:opacity-60 data-[selected=true]:ring-1 data-[selected=true]:ring-muted-foreground/30 data-[selected=true]:ring-inset"
@@ -788,7 +792,14 @@ function PureModelSelectorCompact({
           <ModelSelectorName>{t("chat.model")}</ModelSelectorName>
         </Button>
       </ModelSelectorTrigger>
-      <ModelSelectorContent commandDefaultValue={selectedModel.id}>
+      <ModelSelectorContent
+        commandDefaultValue={selectedModel.id}
+        onOpenAutoFocus={(event) => {
+          if (!isDesktopPointerDevice()) {
+            event.preventDefault();
+          }
+        }}
+      >
         <ModelSelectorInput placeholder={t("chat.searchModels")} />
         <ModelSelectorList>
           {(() => {
@@ -865,7 +876,6 @@ function PureModelSelectorCompact({
                     key={model.id}
                     model={model}
                     onModelChange={onModelChange}
-                    selectedModelId={selectedModel.id}
                     setOpen={setOpen}
                   />
                 ))}
