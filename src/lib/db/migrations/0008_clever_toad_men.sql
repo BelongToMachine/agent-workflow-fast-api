@@ -40,6 +40,7 @@ ON CONFLICT ("id") DO NOTHING;--> statement-breakpoint
 WITH ranked_users AS (
   SELECT
     "id",
+    "email",
     "isAnonymous",
     row_number() OVER (
       ORDER BY CASE WHEN "email" LIKE 'guest-%' THEN 1 ELSE 0 END, "createdAt", "id"
