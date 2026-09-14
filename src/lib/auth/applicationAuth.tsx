@@ -139,9 +139,18 @@ export function ApplicationAuthProvider({ children }: { children: ReactNode }) {
     (currentUserQuery.error as BackendRequestError | null);
 
   useEffect(() => {
-    if (previousIdentity.current && previousIdentity.current !== identity) {
-      queryClient.removeQueries({ queryKey: ["backend"] });
+    const previous = previousIdentity.current;
+
+    if (
+      previous &&
+      previous !== "anonymous" &&
+      previous !== identity
+    ) {
+      queryClient.removeQueries({
+        queryKey: ["backend", "user", previous],
+      });
     }
+
     previousIdentity.current = identity;
     setBlockedStatus(null);
   }, [identity, queryClient]);
