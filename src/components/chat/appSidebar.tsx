@@ -9,6 +9,7 @@ import {
   PenSquareIcon,
   ShieldCheckIcon,
   TrashIcon,
+  UploadCloudIcon,
 } from "lucide-react";
 import type { User } from "@/lib/auth";
 import { Link, useRouter } from "@/lib/router";
@@ -193,6 +194,21 @@ export function AppSidebar({
                       <Link href="/settings/knowledge-bases">
                         <KeyRoundIcon className="size-4" />
                         <span className="text-[13px]">{t("sidebar.knowledgeAccess")}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ) : null}
+                {canManageKnowledgeBases ? (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                      onClick={closeMobile}
+                      tooltip={t("sidebar.upload")}
+                    >
+                      <Link href="/upload">
+                        <UploadCloudIcon className="size-4" />
+                        <span className="text-[13px]">{t("sidebar.upload")}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

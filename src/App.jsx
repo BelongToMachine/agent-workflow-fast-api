@@ -22,6 +22,7 @@ import { KnowledgeBaseGrants } from "./components/settings/knowledgeBaseGrants";
 import { MemberPermissions } from "./components/settings/memberPermissions";
 import { AppearanceSettings } from "./components/settings/appearanceSettings";
 import { FastApiConnectionTest } from "./components/fastapiConnectionTest";
+import { UploadPage } from "./components/upload/uploadPage";
 import {
   LocalActivationPage,
   LocalChangePasswordPage,
@@ -40,6 +41,7 @@ function isKnownRoute(pathname) {
     pathname === "/forgot-password" ||
     pathname === "/login" ||
     pathname === "/register" ||
+    pathname === "/upload" ||
     pathname === "/reset-password" ||
     pathname === "/settings/knowledge-bases" ||
     pathname === "/settings/knowledge-bases/files" ||
@@ -247,6 +249,14 @@ function ChatLayout() {
                 </PermissionRoute>
               }
               path="settings/knowledge-bases"
+            />
+            <Route
+              element={
+                <PermissionRoute permission="knowledge.manage">
+                  <UploadPage />
+                </PermissionRoute>
+              }
+              path="upload"
             />
             <Route
               element={
