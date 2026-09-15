@@ -1,8 +1,8 @@
-# Asianode 环境与 CI/CD 流程规范
+# Asianode 环境、CI/CD 与 S3/MinIO 存储规范
 
 ## 1. 文档目的
 
-本文定义 Asianode 的 staging 和 production 环境边界、域名规划、配置隔离、分支策略、CI/CD 流程、数据库迁移、回滚和上线验收标准。
+本文定义 Asianode 的 staging 和 production 环境边界、域名规划、配置隔离、分支策略、CI/CD 流程、S3/MinIO 对象存储、数据库迁移、回滚和上线验收标准。
 
 本文是长期维护规范。具体的 GitHub Actions、VPS 初始化脚本和 Cloudflare 配置属于实施任务，应按照本文执行；现有的 `CICD_AUTOMATION_IMPLEMENTATION_PLAN.md` 是此前的 draft，后续必须按本文修订其中冲突的 staging 部署和数据库配置。
 
@@ -19,6 +19,8 @@
 5. 数据库迁移必须显式执行，不能在应用启动时自动修改 production 数据库。
 6. 所有环境变量和外部服务都必须明确标注所属环境，staging 永远不能持有 production 凭据。
 7. 所有公网 API 只允许通过 HTTPS 和受控的反向代理或 Cloudflare Tunnel 暴露。
+8. 应用服务和持久化对象存储使用独立的 Compose 生命周期；应用发布不得停止、删除或重建 MinIO 数据服务。
+9. 生产默认使用 S3-compatible 对象存储。自建 MinIO 时，MinIO 只作为独立基础设施栈运行，不放在 `releases/<SHA>/` 中。
 
 ## 3. 环境定义
 
@@ -91,7 +93,7 @@ production API  127.0.0.1:18000 -> container:8000
 - 独立 API 容器和容器生命周期；
 - 独立 Redis 容器、网络和数据目录；
 - 独立 `.env.staging` / `.env.production`；
-- 独立知识库和附件存储目录或 bucket；
+- 独立知识库和附件存储 bucket/prefix；使用自建 MinIO 时，每个环境使用独立 MinIO 栈、数据目录和凭据；
 - 独立日志、健康检查和部署记录。
 
 正式 CI/CD 阶段的 production Compose 使用 `image:`，不使用 `build:`。当前 CI/CD 尚未建立时，staging 和 production 都从各自目标 VPS 的源码 checkout 使用 `build:`；接入正式 CI/CD 后再切换为 CI 构建的不可变镜像。
@@ -106,6 +108,104 @@ api-staging.<domain> -> staging VPS `asianode-vps` / http://127.0.0.1:18000
 ```
 
 Tunnel、反向代理和公网 DNS 只负责转发，不负责环境选择。环境选择由 hostname 和对应的后端栈决定。
+
+### 4.4 应用 Compose 与 S3/MinIO 基础设施 Compose
+
+应用和持久化对象存储分成两个 Compose 项目，拥有独立的生命周期：
+
+```text
+应用 Compose 项目：asianode-production / asianode-staging
+  ├── api
+  └── redis
+
+存储 Compose 项目：asianode-minio-production / asianode-minio-staging
+  └── minio
+```
+
+同一 VPS 上自建 MinIO 时，先创建一次共享的外部 Docker network：
+
+```bash
+docker network create asianode-storage
+```
+
+MinIO Compose 和 API Compose 都加入 `asianode-storage`；production API 通过
+`http://minio:9000` 访问 MinIO S3 API。API 仍保留自己的 Compose `default` network
+用于访问 Redis。两个 Compose 项目默认使用不同的 project name，但通过这个显式的外部
+network 通讯；不能依赖 Compose 自动生成的 project-specific network。
+
+两份 Compose 的关键约束如下：
+
+```yaml
+# compose.production.yaml / compose.staging.yaml（API service）
+services:
+  api:
+    networks:
+      - asianode_internal
+      - asianode-storage
+
+networks:
+  asianode_internal:
+    name: asianode-production-internal # staging 使用 asianode-staging-internal
+  asianode-storage:
+    external: true
+    name: asianode-storage
+```
+
+当 `KNOWLEDGE_STORAGE_PROVIDER=s3` 时，API service 不声明
+`/app/storage/knowledge` 的业务文件 bind mount；S3/MinIO 是唯一文件持久化位置。
+如需 local provider，只能通过明确的本地开发 override 或 local profile 加入
+`shared/storage` 挂载，不能让 production/staging 的默认 Compose 在 S3 模式下继续
+无条件创建这个 volume。
+
+```yaml
+# infra/minio/compose.minio.yaml
+services:
+  minio:
+    image: minio/minio:<pinned-version>
+    command: server /data --console-address ':9001'
+    networks:
+      - asianode-storage
+    volumes:
+      - /home/asianode/asianode-production/shared/minio-data:/data
+    ports:
+      - "127.0.0.1:19000:9000" # Caddy S3 upstream；不直接公网开放
+      - "127.0.0.1:19001:9001" # 管理控制台；只供受控管理入口
+
+networks:
+  asianode-storage:
+    external: true
+    name: asianode-storage
+```
+
+staging 的 MinIO 数据挂载路径必须替换为
+`/home/asianode/asianode-staging/shared/minio-data`。应用 Compose 不使用跨 Compose
+的 `depends_on`；API 启动后以 S3 健康检查或首次业务请求验证 MinIO 可用性，MinIO 的
+重启不会触发 Redis 或 API 的重建。
+
+MinIO 的持久化数据不放在 release 目录，建议使用：
+
+```text
+/home/asianode/asianode-production/shared/minio-data/
+/home/asianode/asianode-staging/shared/minio-data/
+```
+
+MinIO 容器内 S3 API 监听 `9000`、管理控制台监听 `9001`；宿主机只将它们分别绑定到
+`127.0.0.1:19000` 和 `127.0.0.1:19001`，不直接暴露公网。本机开发通过 Caddy 的
+HTTPS S3 endpoint 访问，例如 `https://storage.<domain>`；管理控制台使用受控的管理
+入口或 SSH 隧道。
+
+应用发布脚本只能管理 `api` 和必要的 Redis 操作，不执行存储 Compose 的 `down`、
+`down -v`、volume 删除或数据目录清理。MinIO 的升级、备份、恢复和健康检查由独立的
+基础设施流程执行。
+
+仓库提供的 MinIO 基础设施模板位于 `infra/minio/`：包括
+`compose.minio.yaml`、`.env.minio.example`、`deploy-minio.sh`、bucket 最小权限策略
+模板和 Caddy S3 入口示例。部署时将模板复制到对应 VPS 的 `infra/minio/`，只在 VPS
+创建真实的 `.env.minio`；该文件不进入 Git 或应用 release。
+
+本节描述的是目标架构。当前仓库的应用 Compose 仍保留 local provider 的
+`shared/storage` bind mount，因此在完成 P0 的 S3 provider 接入、MinIO Compose 和
+旧文件迁移前，不得把当前运行状态宣称为“已完成 S3/MinIO 架构”。
 
 ## 5. 环境隔离规范
 
@@ -137,16 +237,32 @@ staging 和 production 使用不同的 Redis URL、实例或 database。优先�
 
 ### 5.3 文件和对象存储
 
-知识库文件和聊天附件必须按环境隔离：
+知识库文件和聊天附件使用 S3-compatible object storage，必须按环境隔离 bucket、凭据和
+prefix：
 
 ```text
-staging bucket/prefix
-production bucket/prefix
+staging    -> staging bucket/prefix + staging credentials
+production -> production bucket/prefix + production credentials
 ```
 
-如果使用本地存储，必须挂载明确的持久化目录，并确认容器用户 UID `10001` 有权限。不能把业务文件留在容器可写层，否则重建 API 容器可能造成数据丢失。
+推荐的实现顺序是：production 使用托管 S3/OSS；如果需要自建对象存储，则在对应 VPS
+上单独运行 MinIO。MinIO 不是 API 的子容器，也不属于某一个源码 release，而是独立的
+持久化基础设施服务。两个逻辑环境不得共用 bucket、access key、secret key 或 MinIO
+数据目录。
 
-如果暂时不能提供可靠的持久化存储，staging 和 production 都应保持文件上传功能关闭。
+应用数据库中的 `KnowledgeFile`（以及后续的对象存储元数据）只保存 provider、bucket、
+object key、大小、checksum、MIME type 和来源信息；文件二进制保存在 S3/MinIO。API
+删除或替换文件时，必须先按数据库记录定位对象，再以受控顺序删除/更新数据库记录和
+对象，并记录操作结果，避免只删一侧造成孤儿数据。
+
+`KNOWLEDGE_STORAGE_PROVIDER=local` 和 `KNOWLEDGE_STORAGE_DIR` 仅作为本地开发或
+故障降级方案。若使用 local provider，必须挂载明确的持久化目录，并确认容器用户 UID
+`10001` 有权限；不能把业务文件留在容器可写层。local provider 不得被误认为 MinIO
+的数据目录，普通文件也不会自动出现在 MinIO bucket 中，迁移必须通过 S3 API 或
+`mc` 等工具完成。
+
+如果暂时不能提供可靠的 S3/MinIO 持久化、备份和恢复能力，staging 和 production 都应
+保持文件上传功能关闭。
 
 ### 5.4 密钥和第三方服务
 
@@ -255,10 +371,14 @@ staging VPS `asianode-vps`:
 │   ├── shared/
 │   │   ├── env/.env.production              # runtime 环境变量和 secret，0600
 │   │   ├── build/build.env                  # 构建参数，不放 runtime secret
-│   │   ├── storage/knowledge/
-│   │   ├── storage/attachments/
+│   │   ├── storage/                          # local provider fallback only
+│   │   ├── minio-data/                       # only for self-hosted MinIO
 │   │   ├── backups/
 │   │   └── logs/
+│   ├── infra/
+│   │   └── minio/
+│   │       ├── compose.minio.yaml            # independent storage Compose
+│   │       └── .env.minio                    # MinIO credentials, 0600
 │   ├── deploy/
 │   │   ├── deploy.sh
 │   │   ├── rollback.sh
@@ -283,10 +403,14 @@ staging VPS `asianode-vps`:
     ├── shared/
     │   ├── env/.env.staging
     │   ├── build/build.env
-    │   ├── storage/knowledge/
-    │   ├── storage/attachments/
+    │   ├── storage/                          # local provider fallback only
+    │   ├── minio-data/                       # only for self-hosted MinIO
     │   ├── backups/
     │   └── logs/
+    ├── infra/
+    │   └── minio/
+    │       ├── compose.minio.yaml            # independent storage Compose
+    │       └── .env.minio                    # MinIO credentials, 0600
     ├── deploy/
     │   ├── deploy-staging.sh
     │   └── deploy.lock
@@ -311,8 +435,53 @@ staging VPS `asianode-vps`:
 - `src/` 可以更新，但不能作为正在运行服务的 bind mount。
 - `releases/<sha>/` 一旦开始构建就不再修改；保留最近若干成功 release 供回滚。
 - `current` 只指向最近一次通过健康检查的 release，不作为 Docker volume 挂载。
-- `shared/env/`、`shared/storage/` 和 `shared/backups/` 永远位于 release 之外，发布时不能被源码归档覆盖。
+- `shared/env/`、`shared/storage/`、`shared/minio-data/` 和 `shared/backups/` 永远位于
+  release 之外，发布时不能被源码归档覆盖；`shared/storage/` 只服务于 local provider
+  fallback，MinIO 数据必须使用 `shared/minio-data/`。
+- `infra/minio/` 是稳定的基础设施配置，不随应用 release 变化；MinIO 的 Compose 项目
+  和 API/Redis 的应用 Compose 项目必须分别维护。
 - `app-backup-*`、`app-failed-*` 和无主的临时 `build.*` 不作为标准目录；如需保留现场，应统一放入 `releases/` 或 `shared/logs/` 并带 commit 和时间戳。
+
+### 文件上传存储闭环
+
+默认配置为 `KNOWLEDGE_STORAGE_PROVIDER=s3`。API 不在 release 目录或容器可写层保存
+业务文件，而是把文件上传到对应环境的 bucket，并在数据库中保存对象定位元数据：
+
+```text
+浏览器/客户端
+    -> API
+    -> S3-compatible endpoint
+       ├── production: 托管 S3/OSS，或 sg-vps 上独立 MinIO
+       └── staging:    独立 staging bucket，或 asianode-vps 上独立 MinIO
+    -> 数据库 KnowledgeFile 保存 bucket/key/checksum/来源
+```
+
+自建 MinIO 时，production API 与 MinIO 通过共享的外部 Docker network
+`asianode-storage` 通讯，容器内 endpoint 使用 `http://minio:9000`；staging 使用同样的
+模式但使用 staging 独立栈、数据目录和凭据。MinIO 数据目录分别是：
+
+```text
+/home/asianode/asianode-production/shared/minio-data/
+/home/asianode/asianode-staging/shared/minio-data/
+```
+
+本机 FastAPI 不能直接加入 VPS 的 Docker network。若本地开发需要上传到 VPS，应通过
+Caddy 暴露的 HTTPS S3 endpoint（例如 `https://storage.<domain>`）连接 staging bucket
+和 staging credentials；默认不允许本地开发连接 production bucket。MinIO 的 API/console
+端口 `9000/9001` 不直接开放公网，外部只访问受 TLS 保护的 S3 API 入口，管理控制台使用
+受控管理入口或 SSH 隧道。
+
+只有明确选择 `KNOWLEDGE_STORAGE_PROVIDER=local` 时，API 容器内的
+`KNOWLEDGE_STORAGE_DIR` 才使用 `/app/storage/knowledge`，并将宿主机目录挂载到该路径：
+
+```text
+production fallback: /home/asianode/asianode-production/shared/storage/
+staging fallback:    /home/asianode/asianode-staging/shared/storage/
+```
+
+本地 provider 的文件不会自动同步到 S3/MinIO；切换 provider 或迁移旧文件时，必须通过
+S3 API/`mc` 上传，并把数据库中的 `storageProvider`、bucket 和 `storageKey` 一起更新。
+release、Docker image 和应用 Compose 的短生命周期 volume 都不应保存业务文件。
 
 角色切换前，不直接重命名任一台机器当前正在使用的 `/home/asianode/asianode-preview` 或旧环境目录。应在新的逻辑环境 root 下建立新 release，验证成功后再切换反向代理和 Compose project；旧目录至少保留一个回滚周期。
 
@@ -326,10 +495,11 @@ staging VPS `asianode-vps`:
 /home/asianode/asianode-production/releases/
 /home/asianode/asianode-production/shared/env/
 /home/asianode/asianode-production/shared/build/
-/home/asianode/asianode-production/shared/storage/knowledge/
-/home/asianode/asianode-production/shared/storage/attachments/
+/home/asianode/asianode-production/shared/storage/
+/home/asianode/asianode-production/shared/minio-data/
 /home/asianode/asianode-production/shared/backups/
 /home/asianode/asianode-production/shared/logs/
+/home/asianode/asianode-production/infra/minio/
 /home/asianode/asianode-production/deploy/
 /home/asianode/asianode-production/frontend/releases/
 /home/asianode/asianode-production/frontend/shared/build/
@@ -339,10 +509,11 @@ staging VPS `asianode-vps`:
 /home/asianode/asianode-staging/releases/
 /home/asianode/asianode-staging/shared/env/
 /home/asianode/asianode-staging/shared/build/
-/home/asianode/asianode-staging/shared/storage/knowledge/
-/home/asianode/asianode-staging/shared/storage/attachments/
+/home/asianode/asianode-staging/shared/storage/
+/home/asianode/asianode-staging/shared/minio-data/
 /home/asianode/asianode-staging/shared/backups/
 /home/asianode/asianode-staging/shared/logs/
+/home/asianode/asianode-staging/infra/minio/
 /home/asianode/asianode-staging/deploy/
 /home/asianode/asianode-staging/frontend/releases/
 /home/asianode/asianode-staging/frontend/shared/build/
@@ -794,7 +965,53 @@ BRANCH=main \
 
 该脚本不会停止旧的 `spa_server.py`，也不会修改 Cloudflare Tunnel。新 Nginx 容器在 `127.0.0.1:18100` 健康检查通过后，再由人工将 production 前端 hostname 的 Tunnel upstream 切换到该端口；切换完成并通过登录和核心页面 smoke test 后，旧静态服务才进入回滚保留周期。
 
-### 8.4 镜像命名
+### 8.4 S3/MinIO 基础设施发布
+
+MinIO 不是应用 release 的一部分，必须在 `infra/minio/` 中以独立 Compose project
+维护。应用发布只操作 `asianode-production` 或 `asianode-staging` 的 API/Redis；MinIO
+发布、升级、备份和恢复使用各自的基础设施流程。
+
+自建 MinIO 的首次初始化（每台 VPS 各执行一次）如下：
+
+```bash
+docker network create asianode-storage
+
+docker compose \
+  --project-name asianode-minio-production \
+  --env-file /home/asianode/asianode-production/infra/minio/.env.minio \
+  -f /home/asianode/asianode-production/infra/minio/compose.minio.yaml \
+  config -q
+
+docker compose \
+  --project-name asianode-minio-production \
+  --env-file /home/asianode/asianode-production/infra/minio/.env.minio \
+  -f /home/asianode/asianode-production/infra/minio/compose.minio.yaml \
+  up -d
+```
+
+staging 将 project name、env 文件和路径替换为：
+
+```text
+asianode-minio-staging
+/home/asianode/asianode-staging/infra/minio/.env.minio
+/home/asianode/asianode-staging/infra/minio/compose.minio.yaml
+```
+
+`docker network create` 如果网络已存在会返回错误；部署脚本应先用
+`docker network inspect asianode-storage` 检查，或将“已存在”视为幂等成功。MinIO
+Compose 必须把数据挂载到对应环境的 `shared/minio-data/`，不能使用 release 内相对路径。
+
+MinIO 启动后必须单独完成以下检查：容器 healthcheck、bucket 是否存在、API 专用 key
+是否只能访问本环境 bucket、上传/读取/删除测试对象、备份和恢复演练。应用 API 在
+同一 VPS 时使用 Docker network 内的 `http://minio:9000`；本机开发或 VPS 外部管理
+使用 Caddy 提供的 HTTPS S3 endpoint。`9000` 和 `9001` 不直接开放公网。
+
+如果最终选择托管 S3/OSS，则不部署 MinIO Compose，也不创建 `shared/minio-data/`；只
+在对应环境的 `.env.production` 或 `.env.staging` 中配置 S3 endpoint、bucket、region
+和受限 credentials。无论是托管 S3 还是 MinIO，应用 Compose 和对象存储都保持独立的
+生命周期与权限边界。
+
+### 8.5 镜像命名
 
 推荐使用：
 
@@ -826,6 +1043,19 @@ VPS: /home/asianode/asianode-staging/shared/env/.env.staging
 VPS: /home/asianode/asianode-production/shared/env/.env.production
 ```
 
+若采用自建 MinIO，MinIO 的 root/admin 凭据和服务配置单独保存，不放入应用 runtime
+环境文件，也不放入 release：
+
+```text
+VPS: /home/asianode/asianode-staging/infra/minio/.env.minio
+VPS: /home/asianode/asianode-production/infra/minio/.env.minio
+```
+
+`.env.minio` 权限为 `0600`，只由部署/运维用户读取。应用 API 不使用 MinIO root 凭据，
+而使用只允许访问本环境 bucket/prefix 的专用 access key。托管 S3/OSS 场景不创建
+`.env.minio`、`infra/minio/` 和 `shared/minio-data/`，只在应用的环境文件中配置对应
+的 S3 endpoint、bucket 和受限凭据。
+
 真实 runtime 文件权限应为 `0600`，所有者为部署用户。构建参数文件不包含密钥，可以是 `0640`，但仍只放在目标 VPS。`.gitignore` 应至少包含：
 
 ```gitignore
@@ -841,6 +1071,23 @@ VPS: /home/asianode/asianode-production/shared/env/.env.production
 /home/asianode/asianode-staging/shared/build/build.env
 /home/asianode/asianode-production/shared/build/build.env
 ```
+
+应用 runtime 的 S3 配置示例（字段名以当前代码实际配置为准）如下，production 和
+staging 必须使用不同 bucket、endpoint 或至少不同凭据：
+
+```env
+KNOWLEDGE_STORAGE_PROVIDER=s3
+KNOWLEDGE_S3_BUCKET=asianode-knowledge-staging
+KNOWLEDGE_S3_ENDPOINT_URL=https://storage.<domain>
+KNOWLEDGE_S3_REGION=us-east-1
+KNOWLEDGE_S3_ACCESS_KEY_ID=<staging-scoped-access-key>
+KNOWLEDGE_S3_SECRET_ACCESS_KEY=<staging-scoped-secret-key>
+```
+
+当 API 在同一 VPS 的 Docker network 内访问自建 MinIO 时，
+`KNOWLEDGE_S3_ENDPOINT_URL` 使用 `http://minio:9000`；本机开发或网络外部访问使用
+Caddy 提供的 HTTPS endpoint。不要把 `http://minio:9000` 编译进前端变量，也不要让
+浏览器直接访问 MinIO。
 
 前端使用独立的 build env，放在前端 release 根目录之外：
 
@@ -942,6 +1189,12 @@ SQL review
 - SSH 使用独立的 CI 专用密钥，并固定已核验的 `known_hosts`。
 - staging 日志和测试数据中不得包含 production 用户、Token、API key 或未脱敏业务数据。
 - production 发布和回滚都必须保留 commit、镜像 digest、操作者、审批人和结果。
+- 自建 MinIO 的 S3 API/console 端口 `9000/9001` 不直接暴露公网；公网对象访问只能经过
+  HTTPS 反向代理或受控内网入口，管理控制台不得与业务 API 共用公开入口。
+- MinIO root/admin 凭据只用于基础设施管理；API 使用按环境、按 bucket/prefix 限制的
+  专用 access key，并定期轮换。生产和 staging 的 bucket、key、endpoint 和备份必须隔离。
+- MinIO 数据目录必须纳入独立备份与恢复演练。单 VPS MinIO 不视为高可用方案；需要高可用
+  时，应使用托管 S3/OSS 或多节点、多磁盘的对象存储架构。
 
 ## 13. 当前项目的实施顺序
 
@@ -957,6 +1210,9 @@ SQL review
 - [ ] 创建 staging 独立 workspace。
 - [ ] 创建 `staging.<domain>`、`api-staging.<domain>` DNS/Tunnel 路由。
 - [ ] 修正 `.gitignore`，确保 `.env.production` 和 `.env.staging` 不会入库。
+- [ ] 确定每个环境使用托管 S3/OSS，或在对应 VPS 单独部署 MinIO；不得把两套环境共用同一 bucket、凭据或数据目录。
+- [ ] 自建 MinIO 时，在每台 VPS 创建 `asianode-storage` 外部 Docker network、`infra/minio/compose.minio.yaml`、受限 `.env.minio` 和独立 `shared/minio-data/`。
+- [ ] 将应用 Compose 的 API 接入 S3 provider；local provider 只作为明确的开发/故障降级方案，并完成旧 `shared/storage` 文件迁移计划。
 
 ### P1：建立 production 发布单元
 
@@ -1013,5 +1269,6 @@ SQL review
 ### 数据和恢复
 
 - [ ] production migration 前有备份和 preflight 记录。
-- [ ] 文件存储有明确的持久化方案和备份策略。
+- [ ] 文件存储使用独立 S3 bucket/prefix、最小权限 credentials，并有明确的持久化、备份和恢复策略。
+- [ ] 应用 Compose 与 MinIO Compose 可分别升级/重启；应用发布不会删除 MinIO 数据目录、volume 或容器。
 - [ ] 已完成镜像、配置、数据库 migration 和 VPS 重启恢复演练。

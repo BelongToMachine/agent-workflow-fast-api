@@ -24,6 +24,10 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    # Persist uploaded knowledge files outside the immutable release. The
+    # host directory is supplied by build.env and is never part of the image.
+    volumes:
+      - ${KNOWLEDGE_STORAGE_HOST_DIR:-/home/asianode/asianode-production/shared/storage}:/app/storage/knowledge
     tmpfs:
       - /tmp:size=64m,mode=1777
     stop_grace_period: 30s

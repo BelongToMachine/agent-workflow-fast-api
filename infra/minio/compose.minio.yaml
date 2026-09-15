@@ -1,0 +1,44 @@
+name: ${MINIO_PROJECT_NAME:-asianode-minio}
+
+services:
+  minio:
+    # Keep this version pinned. Upgrade it as an infrastructure change after
+    # testing in staging; do not use the latest tag in production.
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z}
+    command: server /data --console-address ":9001"
+    env_file:
+      # This file is created on the VPS and is never committed to Git.
+      - ${MINIO_ENV_FILE:-.env.minio}
+    volumes:
+      - type: bind
+        source: ${MINIO_DATA_DIR:?MINIO_DATA_DIR must be set}
+        target: /data
+    ports:
+      # Caddy and SSH-only administration reach these loopback ports. Do not
+      # change the bind address to 0.0.0.0 without an explicit security review.
+      - "127.0.0.1:${MINIO_API_HOST_PORT:-19000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-19001}:9001"
+    networks:
+      - asianode-storage
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # The official MinIO image includes mc. Using mc avoids relying on curl,
+      # which is not present in some minimal MinIO image versions.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  asianode-storage:
+    external: true
+    name: asianode-storage

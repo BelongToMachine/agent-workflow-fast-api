@@ -1,0 +1,8 @@
+# Merge this site block into the Caddy configuration on the VPS after the DNS
+# record for storage.asianodeatlas.com points to that VPS.
+# MinIO itself remains bound to 127.0.0.1:19000.
+
+storage.asianodeatlas.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:19000
+}

@@ -5,4 +5,8 @@ __pycache__/
 storage/
 .env
 .env.local
+*.env.minio
+infra/minio/.env.minio
+!.env.example
+!.env.*.example
 *.py[cod]
