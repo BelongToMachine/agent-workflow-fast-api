@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes.admin_knowledge_grants import _write_audit_log
@@ -130,7 +131,13 @@ def knowledge_base_select_query(
         )
     )
     if authorized_source_ids is not None:
-        query = query.bindparams(bindparam("authorized_source_ids", expanding=True))
+        query = query.bindparams(
+            bindparam(
+                "authorized_source_ids",
+                expanding=True,
+                type_=PostgreSQLUUID(as_uuid=True),
+            )
+        )
     return query
 
 
@@ -235,6 +242,8 @@ async def list_knowledge_bases(
         is_guest=workspace_access.is_guest,
         workspace_role=workspace_access.role,
     )
+    if authorized_source_ids == []:
+        return KnowledgeBaseListResponse(knowledgeBases=[])
     params: dict[str, object] = {"workspace_id": workspace_id}
     if authorized_source_ids is not None:
         params["authorized_source_ids"] = authorized_source_ids

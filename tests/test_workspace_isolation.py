@@ -196,6 +196,4 @@ def test_empty_authorized_id_list_cannot_fall_back_to_workspace_wide_results(mon
 
     assert isinstance(response, KnowledgeBaseListResponse)
     assert response.knowledge_bases == []
-    query, params = connection.calls[0]
-    assert 'AND "id" IN' in query
-    assert params["authorized_source_ids"] == []
+    assert connection.calls == []

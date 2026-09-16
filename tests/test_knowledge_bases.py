@@ -143,6 +143,7 @@ def test_knowledge_base_list_query_can_apply_authorized_source_ids() -> None:
     assert 'AND "id" IN' in str(query)
     assert "authorized_source_ids" in str(query)
     assert query._bindparams["authorized_source_ids"].expanding is True
+    assert query._bindparams["authorized_source_ids"].type.as_uuid is True
 
 
 def test_knowledge_base_creation_requires_a_persisted_identity() -> None:
