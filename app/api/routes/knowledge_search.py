@@ -47,6 +47,9 @@ SEARCH_QUERY = text(
         1 - (chunk."embedding" <=> CAST(:embedding AS vector)) AS score
     FROM "KnowledgeChunk" AS chunk
     INNER JOIN "KnowledgeFile" AS file ON file."id" = chunk."fileId"
+    INNER JOIN "KnowledgeParsedDocument" AS parsed
+        ON parsed."fileId" = file."id"
+       AND parsed."chunkStatus" = 'ready'
     WHERE chunk."workspaceId" = :workspace_id
       AND chunk."knowledgeBaseId" = :knowledge_base_id
       AND chunk."embedding" IS NOT NULL

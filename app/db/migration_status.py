@@ -261,6 +261,40 @@ MIGRATION_STATUS_QUERY = text(
             WHERE conrelid = to_regclass('public."KnowledgeChunk"')
               AND conname = 'KnowledgeChunk_workspace_fk'
         ) AS chunks_workspace_fk,
+        to_regclass('public."KnowledgeParsedDocument"') IS NOT NULL
+            AS parsed_document_table,
+        (
+            SELECT COUNT(*) = 17
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'KnowledgeParsedDocument'
+              AND column_name IN (
+                  'blockCount', 'chunkErrorMessage', 'chunkStatus', 'chunkedAt',
+                  'contentType', 'createdAt', 'document', 'fileHash', 'fileId',
+                  'id', 'knowledgeBaseId', 'parser', 'parserVersion',
+                  'schemaVersion', 'updatedAt', 'warningCount', 'workspaceId'
+              )
+        ) AS parsed_document_required_columns,
+        to_regclass('public."KnowledgeParsedDocument_lookup_idx"') IS NOT NULL
+            AS parsed_document_indexes,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('public."KnowledgeParsedDocument"')
+              AND conname = 'KnowledgeParsedDocument_file_fk'
+        ) AS parsed_document_file_fk,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('public."KnowledgeParsedDocument"')
+              AND conname = 'KnowledgeParsedDocument_knowledge_base_fk'
+        ) AS parsed_document_knowledge_base_fk,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('public."KnowledgeParsedDocument"')
+              AND conname = 'KnowledgeParsedDocument_workspace_fk'
+        ) AS parsed_document_workspace_fk,
         EXISTS (
             SELECT 1
             FROM pg_extension
@@ -523,6 +557,17 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "chunks_workspace_fk",
         )
     )
+    parsed_document_applied = all(
+        flag(key)
+        for key in (
+            "parsed_document_table",
+            "parsed_document_required_columns",
+            "parsed_document_indexes",
+            "parsed_document_file_fk",
+            "parsed_document_knowledge_base_fk",
+            "parsed_document_workspace_fk",
+        )
+    )
     embeddings_applied = all(
         flag(key)
         for key in (
@@ -590,6 +635,11 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             canonical_source_relationships_applied
             and canonical_source_relationships_required,
             "KnowledgeFile foreign keys, indexes, and required sourceFileId columns",
+        ),
+        MigrationStatus(
+            "0013_knowledge_parsed_documents",
+            parsed_document_applied,
+            "Persisted ParsedDocument artifacts and independent chunk-generation state",
         ),
     ]
 

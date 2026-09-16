@@ -74,7 +74,32 @@ KNOWLEDGE_INTEGRITY_QUERY = text(
             INNER JOIN "KnowledgeSource" AS source
                 ON source."id" = knowledge_base."id"
             WHERE knowledge_base."workspaceId" <> source."workspaceId"
-        ) AS backfilled_workspace_mismatches
+        ) AS backfilled_workspace_mismatches,
+        (
+            SELECT COUNT(*)
+            FROM "KnowledgeParsedDocument" AS parsed_document
+            LEFT JOIN "KnowledgeFile" AS knowledge_file
+                ON knowledge_file."id" = parsed_document."fileId"
+            WHERE knowledge_file."id" IS NULL
+        ) AS parsed_documents_without_file,
+        (
+            SELECT COUNT(*)
+            FROM "KnowledgeParsedDocument" AS parsed_document
+            LEFT JOIN "KnowledgeBase" AS knowledge_base
+                ON knowledge_base."id" = parsed_document."knowledgeBaseId"
+            WHERE knowledge_base."id" IS NULL
+        ) AS parsed_documents_without_knowledge_base,
+        (
+            SELECT COUNT(*)
+            FROM "KnowledgeParsedDocument" AS parsed_document
+            INNER JOIN "KnowledgeFile" AS knowledge_file
+                ON knowledge_file."id" = parsed_document."fileId"
+            INNER JOIN "KnowledgeBase" AS knowledge_base
+                ON knowledge_base."id" = parsed_document."knowledgeBaseId"
+            WHERE parsed_document."workspaceId" <> knowledge_file."workspaceId"
+               OR parsed_document."knowledgeBaseId" <> knowledge_file."knowledgeBaseId"
+               OR parsed_document."workspaceId" <> knowledge_base."workspaceId"
+        ) AS parsed_document_scope_mismatches
     """
 )
 
@@ -141,6 +166,21 @@ def build_integrity_checks(row: Mapping[str, object]) -> list[IntegrityCheck]:
             "backfilled_workspace_mismatches",
             _violation_count(row, "backfilled_workspace_mismatches"),
             "backfilled KnowledgeBase rows preserve the source workspace",
+        ),
+        IntegrityCheck(
+            "parsed_documents_without_file",
+            _violation_count(row, "parsed_documents_without_file"),
+            "every ParsedDocument references an existing KnowledgeFile",
+        ),
+        IntegrityCheck(
+            "parsed_documents_without_knowledge_base",
+            _violation_count(row, "parsed_documents_without_knowledge_base"),
+            "every ParsedDocument references an existing KnowledgeBase",
+        ),
+        IntegrityCheck(
+            "parsed_document_scope_mismatches",
+            _violation_count(row, "parsed_document_scope_mismatches"),
+            "ParsedDocument workspace and knowledge-base scope matches its file",
         ),
     ]
 

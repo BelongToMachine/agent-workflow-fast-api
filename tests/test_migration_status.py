@@ -119,6 +119,12 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         "document_source_file_fk": True,
         "operation_source_file_fk": True,
         "price_source_file_fk": True,
+        "parsed_document_table": True,
+        "parsed_document_required_columns": True,
+        "parsed_document_indexes": True,
+        "parsed_document_file_fk": True,
+        "parsed_document_knowledge_base_fk": True,
+        "parsed_document_workspace_fk": True,
     }
 
     statuses = build_migration_statuses(row)
@@ -128,6 +134,7 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         True,
         True,
         False,
+        True,
         True,
         True,
         True,
@@ -168,6 +175,7 @@ def test_migration_status_query_covers_schema_capabilities() -> None:
     assert "chunks_required_columns" in sql
     assert "embedding_index_valid" in sql
     assert "knowledge_base_required_columns" in sql
+    assert "parsed_document_required_columns" in sql
     assert "conrelid = to_regclass" in sql
 
 
@@ -208,8 +216,8 @@ def test_knowledge_migration_runner_uses_dependency_order() -> None:
 
 
 def test_file_provenance_migration_is_last_and_guarded() -> None:
-    assert MIGRATION_NAMES[-1] == "0012_knowledge_file_provenance"
-    sql = MIGRATION_PATHS[-1].read_text(encoding="utf-8")
+    assert MIGRATION_NAMES[-2] == "0012_knowledge_file_provenance"
+    sql = MIGRATION_PATHS[-2].read_text(encoding="utf-8")
     assert "legacy rows could not be matched" in sql
     assert 'ALTER COLUMN "sourceFileId" SET NOT NULL' in sql
 
