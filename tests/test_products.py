@@ -34,7 +34,7 @@ def test_product_query_contains_nextjs_advanced_filters() -> None:
 
     sql = str(query)
     assert 'source."workspaceId" = :workspace_id' in sql
-    assert 'research."sourceId" IN' in sql
+    assert 'research."sourceFileId" IN' in sql
     assert 'operation."operationStatus" = :operation_status' in sql
     assert params["operation_status"] == "review"
     assert params["source_ids"] == [UUID("00000000-0000-0000-0000-000000000002")]
@@ -55,7 +55,7 @@ def test_product_query_can_apply_knowledge_base_grants() -> None:
         authorized_source_ids=[source_id],
     )
 
-    assert 'source."id" IN' in str(query)
+    assert 'source."knowledgeBaseId" IN' in str(query)
     assert params["authorized_source_ids"] == [source_id]
 
 

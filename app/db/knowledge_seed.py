@@ -11,10 +11,10 @@ from sqlalchemy import bindparam, text
 
 from app.core.config import get_settings
 from app.db.knowledge_provenance import (
-    KnowledgeSourceImport,
+    KnowledgeFileImport,
+    attach_file_provenance,
     attach_source_coordinates,
-    attach_source_provenance,
-    ensure_knowledge_source,
+    ensure_knowledge_file,
 )
 from app.db.migration_status import MIGRATION_STATUS_QUERY, build_migration_statuses
 from app.db.migration_utils import migration_apply_error
@@ -68,14 +68,14 @@ TABLE_SPECS: dict[str, SeedTableSpec] = {
             "attachment", "copyText", "copyWriter", "createdAt", "id", "language",
             "notes", "photographer", "plannedAt", "platform", "product", "rawData",
             "recordType", "referenceVideo", "reviewStatus", "revisedCopy", "scriptDocument",
-            "searchText", "shootConfirmed", "shootingScene", "sourceId", "sourceRow",
+            "searchText", "shootConfirmed", "shootingScene", "sourceFileId", "sourceRow",
             "sourceSheet", "submitter", "tags", "targetTopic", "title", "usageStatus",
             "videoType",
         ),
         required_columns=_columns(
             "rawData", "recordType", "searchText", "sourceRow", "sourceSheet"
         ),
-        conflict_columns=("sourceId", "sourceSheet", "sourceRow"),
+        conflict_columns=("sourceFileId", "sourceSheet", "sourceRow"),
         has_source_id=True,
     ),
     "realProductResearch": SeedTableSpec(
@@ -86,17 +86,17 @@ TABLE_SPECS: dict[str, SeedTableSpec] = {
             "productFeatures", "productHighlights", "productImage", "productIntro",
             "productName", "promotionStatus", "proposer", "qualifications", "rawData",
             "relatedDocuments", "sellingPrice", "shippingTime", "singleProductCost",
-            "sourceId", "sourceRow", "sourceSheet", "supplierContact", "targetSalesChannels",
+            "sourceFileId", "sourceRow", "sourceSheet", "supplierContact", "targetSalesChannels",
         ),
         required_columns=_columns("id", "productName", "rawData", "sourceRow", "sourceSheet"),
-        conflict_columns=("sourceId", "sourceSheet", "sourceRow"),
+        conflict_columns=("sourceFileId", "sourceSheet", "sourceRow"),
         has_source_id=True,
     ),
     "productDocuments": SeedTableSpec(
         table_name="ProductDocument",
         allowed_columns=_columns(
             "createdAt", "displayName", "documentType", "fileReference", "id", "rawText",
-            "researchId", "sourceId", "sourceRow", "sourceSheet",
+            "researchId", "sourceFileId", "sourceRow", "sourceSheet",
         ),
         required_columns=_columns(
             "documentType", "fileReference", "rawText", "researchId", "sourceRow", "sourceSheet"
@@ -107,18 +107,18 @@ TABLE_SPECS: dict[str, SeedTableSpec] = {
     "productOperations": SeedTableSpec(
         table_name="ProductOperation",
         allowed_columns=_columns(
-            "id", "researchId", "sourceRow", "sourceSheet", "promotionStatus",
+            "id", "researchId", "sourceFileId", "sourceRow", "sourceSheet", "promotionStatus",
             "operationStatus", "targetChannels", "proposer", "logisticsTerm", "qualifications",
             "nextAction", "notes", "rawData", "updatedAt",
         ),
         required_columns=_columns("researchId", "rawData", "sourceRow", "sourceSheet"),
         conflict_columns=("researchId",),
-        has_source_id=False,
+        has_source_id=True,
     ),
     "productPrices": SeedTableSpec(
         table_name="ProductPrice",
         allowed_columns=_columns(
-            "id", "researchId", "sourceRow", "sourceSheet", "variant", "priceMin", "priceMax",
+            "id", "researchId", "sourceFileId", "sourceRow", "sourceSheet", "variant", "priceMin", "priceMax",
             "currency", "priceType", "rawText",
         ),
         required_columns=_columns(
@@ -126,15 +126,13 @@ TABLE_SPECS: dict[str, SeedTableSpec] = {
             "sourceSheet", "variant",
         ),
         conflict_columns=("researchId", "variant", "priceMin", "currency", "priceType"),
-        has_source_id=False,
+        has_source_id=True,
     ),
 }
 
 
 SEED_MIGRATION_NAMES = frozenset({
-    "0006_knowledge_source_provenance",
-    "0007_knowledge_source_relationships",
-    "0008_knowledge_source_import_key",
+    "0012_knowledge_file_provenance",
 })
 
 
@@ -148,9 +146,14 @@ def normalize_seed_row(
     section: str,
     record: Mapping[str, Any],
     *,
-    source_id: UUID,
+    source_file_id: UUID | None = None,
+    source_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Validate a source row and attach authoritative provenance fields."""
+    """Validate a seed row and attach authoritative file provenance."""
+
+    source_file_id = source_file_id or source_id
+    if source_file_id is None:
+        raise ValueError("A source file ID is required for an imported row.")
 
     try:
         spec = TABLE_SPECS[section]
@@ -166,10 +169,11 @@ def normalize_seed_row(
         )
 
     row.pop("sourceId", None)
+    row.pop("sourceFileId", None)
     row = (
-        attach_source_provenance(
+        attach_file_provenance(
             row,
-            source_id=source_id,
+            source_file_id=source_file_id,
             source_sheet=source_sheet,
             source_row=source_row,
         )
@@ -241,11 +245,15 @@ async def _upsert_rows(
     section: str,
     rows: Sequence[Mapping[str, Any]],
     *,
-    source_id: UUID,
+    source_file_id: UUID,
 ) -> int:
     count = 0
     for record in rows:
-        normalized = normalize_seed_row(section, record, source_id=source_id)
+        normalized = normalize_seed_row(
+            section,
+            record,
+            source_file_id=source_file_id,
+        )
         query = build_upsert_query(section, normalized.keys())
         params = {
             f"value_{index}": normalized[column]
@@ -258,7 +266,7 @@ async def _upsert_rows(
 
 async def _assert_research_links(
     connection,
-    source_id: UUID,
+    source_file_id: UUID,
     sections: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> None:
     dependent_ids = {
@@ -276,10 +284,13 @@ async def _assert_research_links(
             SELECT "id"
             FROM "RealProductResearch"
             WHERE "id" IN :research_ids
-              AND "sourceId" = :source_id
+              AND "sourceFileId" = :source_file_id
             """
         ).bindparams(bindparam("research_ids", expanding=True)),
-        {"research_ids": list(dependent_ids), "source_id": source_id},
+        {
+            "research_ids": list(dependent_ids),
+            "source_file_id": source_file_id,
+        },
     )
     found_ids = {str(row[0]) for row in result}
     missing_ids = sorted(dependent_ids - found_ids)
@@ -292,12 +303,12 @@ async def _assert_research_links(
 
 async def seed_sections(
     connection,
-    source: KnowledgeSourceImport,
+    source: KnowledgeFileImport,
     sections: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> tuple[UUID, SeedCounts]:
     """Seed selected sections in the caller's transaction."""
 
-    source_id = await ensure_knowledge_source(connection, source)
+    source_file_id = await ensure_knowledge_file(connection, source)
     counts = SeedCounts()
     ordered_sections = (
         "realProductResearch",
@@ -313,21 +324,26 @@ async def seed_sections(
                 connection,
                 "realProductResearch",
                 sections["realProductResearch"],
-                source_id=source_id,
+                source_file_id=source_file_id,
             ),
         )
-    await _assert_research_links(connection, source_id, sections)
+    await _assert_research_links(connection, source_file_id, sections)
     for section in ordered_sections[1:]:
         rows = sections.get(section, [])
         if rows:
             counts = counts.add(
                 section,
-                await _upsert_rows(connection, section, rows, source_id=source_id),
+                await _upsert_rows(
+                    connection,
+                    section,
+                    rows,
+                    source_file_id=source_file_id,
+                ),
             )
-    return source_id, counts
+    return source_file_id, counts
 
 
-def load_seed_payload(path: Path) -> tuple[KnowledgeSourceImport, dict[str, list[dict[str, Any]]]]:
+def load_seed_payload(path: Path) -> tuple[KnowledgeFileImport, dict[str, list[dict[str, Any]]]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or not isinstance(payload.get("source"), dict):
         raise ValueError("Seed input must contain a top-level source object.")
@@ -343,15 +359,27 @@ def load_seed_payload(path: Path) -> tuple[KnowledgeSourceImport, dict[str, list
             "Missing source fields: " + ", ".join(missing_source_fields)
         )
 
-    source = KnowledgeSourceImport(
+    source = KnowledgeFileImport(
         workspace_id=UUID(str(source_payload["workspaceId"])),
         display_name=str(source_payload["displayName"]),
         source_type=str(source_payload["sourceType"]),
+        knowledge_base_id=(
+            UUID(str(source_payload["knowledgeBaseId"]))
+            if source_payload.get("knowledgeBaseId")
+            else None
+        ),
         file_hash=str(source_payload["fileHash"]),
         storage_provider=source_payload.get("storageProvider"),
         storage_key=source_payload.get("storageKey"),
         status=str(source_payload.get("status", "ready")),
         version=int(source_payload.get("version", 1)),
+        byte_size=int(source_payload.get("byteSize", 0)),
+        mime_type=source_payload.get("mimeType"),
+        uploaded_by=(
+            UUID(str(source_payload["uploadedBy"]))
+            if source_payload.get("uploadedBy")
+            else None
+        ),
     )
 
     sections: dict[str, list[dict[str, Any]]] = {}
@@ -405,12 +433,12 @@ async def run_cli(fixed_sections: Sequence[str] | None = None) -> int:
         async with get_db_connection() as connection:
             async with connection.begin():
                 await _assert_migrations_ready(connection)
-                source_id, counts = await seed_sections(connection, source, sections)
+                source_file_id, counts = await seed_sections(connection, source, sections)
     except (OSError, ValueError, RuntimeError) as error:
         print(f"Seed failed: {error}")
         return 1
 
-    print(f"Source: {source_id}")
+    print(f"Source file: {source_file_id}")
     print(counts)
     return 0
 

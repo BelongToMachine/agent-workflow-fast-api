@@ -11,7 +11,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.knowledge_access import get_authorized_source_ids
-from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.core.knowledge_citation import SourceCitation, build_source_citation
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
@@ -50,6 +49,7 @@ class ProductSummary(BaseModel):
     has_documents: bool = Field(default=False, alias="hasDocuments")
     document_count: int = Field(default=0, alias="documentCount")
     source_id: str | None = Field(default=None, alias="sourceId")
+    source_file_id: str | None = Field(default=None, alias="sourceFileId")
     source_file_name: str | None = Field(default=None, alias="sourceFileName")
     source_sheet: str | None = Field(default=None, alias="sourceSheet")
     source_row: int | None = Field(default=None, alias="sourceRow")
@@ -86,7 +86,7 @@ PRODUCT_SEARCH_SELECT_TEMPLATE = """
         research."productIntro" AS product_intro,
         research."productName" AS product_name,
         research."shippingTime" AS shipping_time,
-        research."sourceId" AS source_id,
+        research."sourceFileId" AS source_id,
         research."sourceSheet" AS source_sheet,
         research."sourceRow" AS source_row,
         research."supplierContact" AS supplier_contact,
@@ -96,10 +96,12 @@ PRODUCT_SEARCH_SELECT_TEMPLATE = """
         operation."proposer" AS proposer,
         operation."qualifications" AS qualifications,
         operation."targetChannels" AS target_channels,
-        source."displayName" AS source_file_name
+        source."originalName" AS source_file_name
     FROM "RealProductResearch" AS research
-    INNER JOIN {knowledge_base_table} AS source
-        ON source."id" = research."sourceId"
+    INNER JOIN "KnowledgeFile" AS source
+        ON source."id" = research."sourceFileId"
+    INNER JOIN "KnowledgeBase" AS knowledge_base
+        ON knowledge_base."id" = source."knowledgeBaseId"
     LEFT JOIN "ProductOperation" AS operation
         ON operation."researchId" = research."id"
     WHERE {conditions}
@@ -108,25 +110,27 @@ PRODUCT_SEARCH_SELECT_TEMPLATE = """
 
 SOURCE_NAMES_QUERY_TEMPLATE = """
     SELECT
-        "displayName" AS display_name,
-        "id" AS source_id
-    FROM {knowledge_base_table}
-    WHERE "workspaceId" = :workspace_id
-      AND "status" = 'ready'
-      AND "displayName" IN :source_file_names
+        source."originalName" AS display_name,
+        source."id" AS source_id,
+        source."knowledgeBaseId" AS knowledge_base_id
+    FROM "KnowledgeFile" AS source
+    INNER JOIN "KnowledgeBase" AS knowledge_base
+        ON knowledge_base."id" = source."knowledgeBaseId"
+    WHERE source."workspaceId" = :workspace_id
+      AND source."status" = 'ready'
+      AND source."originalName" IN :source_file_names
     """
 
 
 def source_names_query(settings: Settings | None = None) -> object:
-    return text(
-        render_knowledge_base_query(SOURCE_NAMES_QUERY_TEMPLATE, settings)
-    ).bindparams(bindparam("source_file_names", expanding=True))
+    return text(SOURCE_NAMES_QUERY_TEMPLATE).bindparams(
+        bindparam("source_file_names", expanding=True)
+    )
 
 
-# Import-time compatibility constants keep the legacy query available to unit
-# tests and callers that have not enabled the independent entity yet.
+# Keep import-time constants for callers that import these query builders.
 PRODUCT_SEARCH_SELECT = PRODUCT_SEARCH_SELECT_TEMPLATE.replace(
-    "{knowledge_base_table}", '"KnowledgeSource"'
+    "{knowledge_base_table}", '"KnowledgeFile"'
 )
 SOURCE_NAMES_QUERY = source_names_query()
 
@@ -243,19 +247,16 @@ def _build_product_search_query(
         params["operation_status"] = _normalize_operation_status(operation_status)
 
     if source_ids:
-        conditions.append('research."sourceId" IN :source_ids')
+        conditions.append('research."sourceFileId" IN :source_ids')
         params["source_ids"] = source_ids
 
     if authorized_source_ids is not None:
-        conditions.append('source."id" IN :authorized_source_ids')
+        conditions.append('source."knowledgeBaseId" IN :authorized_source_ids')
         params["authorized_source_ids"] = authorized_source_ids
 
     query_text = text(
-        render_knowledge_base_query(
-            PRODUCT_SEARCH_SELECT_TEMPLATE.replace(
-                "{conditions}", " AND ".join(conditions)
-            ),
-            settings,
+        PRODUCT_SEARCH_SELECT_TEMPLATE.replace(
+            "{conditions}", " AND ".join(conditions)
         )
     )
     bind_params = []
@@ -335,7 +336,7 @@ async def search_products(
                     source_rows = [
                         row
                         for row in source_rows
-                        if row["source_id"] in authorized_source_id_set
+                        if row["knowledge_base_id"] in authorized_source_id_set
                     ]
                 found_source_names = {row["display_name"] for row in source_rows}
                 source_ids = [row["source_id"] for row in source_rows]
@@ -475,6 +476,7 @@ async def search_products(
             hasDocuments=document_count > 0,
             documentCount=document_count,
             sourceId=_string_value(row["source_id"]),
+            sourceFileId=_string_value(row["source_id"]),
             sourceFileName=row["source_file_name"],
             sourceSheet=row["source_sheet"],
             sourceRow=row["source_row"],

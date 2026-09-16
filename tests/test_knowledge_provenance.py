@@ -72,7 +72,7 @@ def test_normalize_seed_row_attaches_source_and_rejects_untrusted_columns() -> N
         source_id=source_id,
     )
 
-    assert result["sourceId"] == source_id
+    assert result["sourceFileId"] == source_id
     assert result["rawData"] == '{"product":"chair"}'
 
     with pytest.raises(ValueError, match="Unsupported columns"):
@@ -94,12 +94,19 @@ def test_build_upsert_query_uses_source_scoped_conflict_key() -> None:
     sql = str(
         build_upsert_query(
             "contentRecords",
-            {"recordType", "rawData", "searchText", "sourceId", "sourceSheet", "sourceRow"},
+            {
+                "recordType",
+                "rawData",
+                "searchText",
+                "sourceFileId",
+                "sourceSheet",
+                "sourceRow",
+            },
         )
     )
 
     assert 'INSERT INTO "ContentRecord"' in sql
-    assert 'ON CONFLICT ("sourceId", "sourceSheet", "sourceRow")' in sql
+    assert 'ON CONFLICT ("sourceFileId", "sourceSheet", "sourceRow")' in sql
 
 
 def test_load_seed_payload_requires_source_metadata(tmp_path: Path) -> None:

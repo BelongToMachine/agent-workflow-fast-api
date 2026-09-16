@@ -45,6 +45,6 @@ def test_knowledge_source_query_can_apply_knowledge_base_grants() -> None:
     source_id = UUID("00000000-0000-0000-0000-000000000002")
     query, params = _build_knowledge_sources_query(workspace_id, [source_id])
 
-    assert 'source."id" IN' in str(query)
+    assert 'source."knowledgeBaseId" IN' in str(query)
     assert params["workspace_id"] == str(workspace_id)
     assert params["authorized_source_ids"] == [source_id]

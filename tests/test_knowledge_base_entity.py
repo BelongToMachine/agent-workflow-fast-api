@@ -59,7 +59,7 @@ def test_knowledge_queries_share_the_independent_entity() -> None:
         None,
         settings,
     )
-    assert 'FROM "KnowledgeBase"' in str(source_query)
+    assert 'FROM "KnowledgeFile"' in str(source_query)
     assert source_params["workspace_id"] == workspace_id
 
     product_query, _ = _build_product_search_query(
@@ -74,8 +74,8 @@ def test_knowledge_queries_share_the_independent_entity() -> None:
         source_ids=[],
         settings=settings,
     )
-    assert '"KnowledgeBase" AS source' in str(product_query)
-    assert 'FROM "KnowledgeBase"' in str(source_names_query(settings))
+    assert '"KnowledgeFile" AS source' in str(product_query)
+    assert 'FROM "KnowledgeFile"' in str(source_names_query(settings))
 
     content_query, _ = _build_content_search_query(
         workspace_id=workspace_id,
@@ -90,8 +90,8 @@ def test_knowledge_queries_share_the_independent_entity() -> None:
         limit=10,
         settings=settings,
     )
-    assert '"KnowledgeBase" AS source' in str(content_query)
-    assert 'FROM "KnowledgeBase"' in str(content_source_names_query(settings))
+    assert '"KnowledgeFile" AS source' in str(content_query)
+    assert 'FROM "KnowledgeFile"' in str(content_source_names_query(settings))
 
 
 def test_knowledge_base_migration_backfills_and_repoints_dependencies() -> None:

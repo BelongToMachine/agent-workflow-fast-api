@@ -10,7 +10,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.knowledge_access import get_authorized_source_ids
-from app.core.knowledge_base_entity import knowledge_base_table_name, render_knowledge_base_query
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 
@@ -43,20 +42,23 @@ class KnowledgeSourceListResponse(BaseModel):
 KNOWLEDGE_SOURCES_SELECT_TEMPLATE = """
     SELECT
         source."id" AS source_id,
-        source."displayName" AS display_name,
-        source."sourceType" AS source_type,
+        source."originalName" AS display_name,
+        source."mimeType" AS source_type,
         source."status" AS status,
-        source."version" AS version,
+        1 AS version,
         source."fileHash" AS file_hash,
         source."storageProvider" AS storage_provider,
         source."workspaceId" AS workspace_id,
         source."createdAt" AS created_at,
         source."updatedAt" AS updated_at
-    FROM {knowledge_base_table} AS source
+    FROM "KnowledgeFile" AS source
+    INNER JOIN "KnowledgeBase" AS knowledge_base
+        ON knowledge_base."id" = source."knowledgeBaseId"
     WHERE source."workspaceId" = :workspace_id
       AND source."status" = 'ready'
+      AND knowledge_base."status" = 'ready'
     {authorization_condition}
-    ORDER BY source."displayName" ASC
+    ORDER BY source."originalName" ASC
 """
 
 
@@ -68,15 +70,12 @@ def _build_knowledge_sources_query(
     params: dict[str, object] = {"workspace_id": str(workspace_id)}
     authorization_condition = ""
     if authorized_source_ids is not None:
-        authorization_condition = 'AND source."id" IN :authorized_source_ids'
+        authorization_condition = 'AND source."knowledgeBaseId" IN :authorized_source_ids'
         params["authorized_source_ids"] = authorized_source_ids
 
     query = text(
-        render_knowledge_base_query(
-            KNOWLEDGE_SOURCES_SELECT_TEMPLATE.replace(
-                "{authorization_condition}", authorization_condition
-            ),
-            settings,
+        KNOWLEDGE_SOURCES_SELECT_TEMPLATE.replace(
+            "{authorization_condition}", authorization_condition
         )
     )
     if authorized_source_ids is not None:
@@ -148,5 +147,5 @@ async def list_knowledge_sources(
             )
             for row in rows
         ],
-        sourceTable=knowledge_base_table_name(settings),
+        sourceTable="KnowledgeFile",
     )

@@ -104,6 +104,21 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         "grants_repointed": True,
         "files_repointed": False,
         "chunks_repointed": True,
+        "content_source_file_idx": True,
+        "research_source_file_idx": True,
+        "document_source_file_idx": True,
+        "operation_source_file_idx": True,
+        "price_source_file_idx": True,
+        "content_source_file_non_null": True,
+        "research_source_file_non_null": True,
+        "document_source_file_non_null": True,
+        "operation_source_file_non_null": True,
+        "price_source_file_non_null": True,
+        "content_source_file_fk": True,
+        "research_source_file_fk": True,
+        "document_source_file_fk": True,
+        "operation_source_file_fk": True,
+        "price_source_file_fk": True,
     }
 
     statuses = build_migration_statuses(row)
@@ -113,6 +128,7 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         True,
         True,
         False,
+        True,
         True,
         True,
         True,
@@ -191,11 +207,11 @@ def test_knowledge_migration_runner_uses_dependency_order() -> None:
     assert all(path.is_file() for path in MIGRATION_PATHS)
 
 
-def test_required_source_migration_is_last_and_guarded() -> None:
-    assert MIGRATION_NAMES[-1] == "0009_knowledge_source_relationships_required"
+def test_file_provenance_migration_is_last_and_guarded() -> None:
+    assert MIGRATION_NAMES[-1] == "0012_knowledge_file_provenance"
     sql = MIGRATION_PATHS[-1].read_text(encoding="utf-8")
-    assert "legacy rows still need backfill" in sql
-    assert 'ALTER COLUMN "sourceId" SET NOT NULL' in sql
+    assert "legacy rows could not be matched" in sql
+    assert 'ALTER COLUMN "sourceFileId" SET NOT NULL' in sql
 
 
 def test_knowledge_migration_runner_only_selects_pending_migrations() -> None:

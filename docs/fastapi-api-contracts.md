@@ -59,13 +59,13 @@ validation error 的标准结构由 FastAPI 生成：
 | GET | `/api/v1/me` | authenticated | token/bridge context | `CurrentUserResponse`：用户、active memberships、role、effective permissions、overrides |
 | GET | `/api/v1/products` | `knowledge.read` | query：`workspace_id`、`query`、`category`、`maxPriceUsd`、`maxLeadDays`、`maxMoqUnits`、`operationStatus`、`targetChannel`、`proposer`、`logistics`、`qualification`、`hasDocument`、`missingField`、`limit`、`sourceFileNames` | `ProductSearchResponse` |
 | POST | `/api/v1/content/search` | `knowledge.read` | body：`workspaceId`、`query`、`account`、`language`、`product`、`recordType`、`status`、`submitter`、`sourceFileNames`、`limit` | `ContentSearchResponse` |
-| GET | `/api/v1/knowledge-sources` | `knowledge.read` | query：`workspace_id` | `KnowledgeSourceListResponse`，包含授权过滤后的 sources |
+| GET | `/api/v1/knowledge-sources` | `knowledge.read` | query：`workspace_id` | `KnowledgeSourceListResponse`，当前返回 `KnowledgeFile` 文件来源；`sourceId` 为 `KnowledgeFile.id` |
 | GET | `/api/v1/knowledge-bases` | `knowledge.read` | query：`workspace_id` | `{knowledgeBases:[KnowledgeBaseSummary]}` |
 | POST | `/api/v1/knowledge-bases` | `knowledge.manage` | query：`workspace_id`；body：`{displayName,sourceType?}` | `201 KnowledgeBaseSummary` |
 | PATCH | `/api/v1/knowledge-bases/{knowledge_base_id}` | `knowledge.manage` | query：`workspace_id`；body：`{displayName,sourceType?}` | `KnowledgeBaseSummary` |
 | DELETE | `/api/v1/knowledge-bases/{knowledge_base_id}` | knowledge-base `manage` | query：`workspace_id` | `{deleted:true,storageCleanup}`；对象清理失败时返回 `202` 和 `failedFileCount` |
 | GET | `/api/v1/knowledge-bases/{knowledge_base_id}/files` | knowledge-base `read` + `KNOWLEDGE_INGESTION_ENABLED` | query：`workspace_id` | `{files:[KnowledgeFileSummary]}` |
-| POST | `/api/v1/knowledge-bases/{knowledge_base_id}/files` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | multipart `file`；query：`workspace_id` | `202 {file:KnowledgeFileSummary}`，PDF/XLSX 会先校验 magic bytes，后台处理为 `ready`/`failed` |
+| POST | `/api/v1/knowledge-bases/{knowledge_base_id}/files` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | multipart `file`；query：`workspace_id` | `202 {file:KnowledgeFileSummary}`，PDF/XLSX/PPTX 会先校验 magic bytes，后台处理为 `ready`/`failed`；后续业务记录使用返回的 `fileId` 作为 `sourceFileId` |
 | DELETE | `/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | query：`workspace_id` | `{deleted:true}` |
 | POST | `/api/v1/knowledge-bases/{knowledge_base_id}/search` | knowledge-base `read` + `KNOWLEDGE_EMBEDDINGS_ENABLED` | query：`workspace_id`；body：`{query,limit?}` | `{results:[{chunkId,content,fileId,fileName,score}]}`；Embedding provider 请求受 `EMBEDDING_PROVIDER_TIMEOUT_SECONDS`（1–300 秒）限制 |
 | GET | `/api/v1/admin/members` | `members.read` | query：`workspace_id` | `MembersResponse` |

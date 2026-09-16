@@ -11,7 +11,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.knowledge_access import get_authorized_source_ids
-from app.core.knowledge_base_entity import render_knowledge_base_query
 from app.core.knowledge_citation import SourceCitation, build_source_citation
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
@@ -65,6 +64,7 @@ class ContentRecordSummary(BaseModel):
     source_row: int = Field(alias="sourceRow")
     source_sheet: str = Field(alias="sourceSheet")
     source_id: str = Field(alias="sourceId")
+    source_file_id: str | None = Field(default=None, alias="sourceFileId")
     source_file_name: str | None = Field(default=None, alias="sourceFileName")
     citation: SourceCitation
     submitter: str | None = None
@@ -109,8 +109,8 @@ CONTENT_SEARCH_SELECT_TEMPLATE = """
         record."shootingScene" AS shooting_scene,
         record."sourceRow" AS source_row,
         record."sourceSheet" AS source_sheet,
-        record."sourceId" AS source_id,
-        source."displayName" AS source_file_name,
+        record."sourceFileId" AS source_id,
+        source."originalName" AS source_file_name,
         record."submitter" AS submitter,
         record."tags" AS tags,
         record."targetTopic" AS target_topic,
@@ -118,8 +118,10 @@ CONTENT_SEARCH_SELECT_TEMPLATE = """
         record."usageStatus" AS usage_status,
         record."videoType" AS video_type
     FROM "ContentRecord" AS record
-    INNER JOIN {knowledge_base_table} AS source
-        ON source."id" = record."sourceId"
+    INNER JOIN "KnowledgeFile" AS source
+        ON source."id" = record."sourceFileId"
+    INNER JOIN "KnowledgeBase" AS knowledge_base
+        ON knowledge_base."id" = source."knowledgeBaseId"
     WHERE {conditions}
     ORDER BY record."plannedAt" ASC, record."sourceRow" ASC
     LIMIT :limit
@@ -127,25 +129,27 @@ CONTENT_SEARCH_SELECT_TEMPLATE = """
 
 SOURCE_NAMES_QUERY_TEMPLATE = """
     SELECT
-        "displayName" AS display_name,
-        "id" AS source_id
-    FROM {knowledge_base_table}
-    WHERE "workspaceId" = :workspace_id
-      AND "status" = 'ready'
-      AND "displayName" IN :source_file_names
+        source."originalName" AS display_name,
+        source."id" AS source_id,
+        source."knowledgeBaseId" AS knowledge_base_id
+    FROM "KnowledgeFile" AS source
+    INNER JOIN "KnowledgeBase" AS knowledge_base
+        ON knowledge_base."id" = source."knowledgeBaseId"
+    WHERE source."workspaceId" = :workspace_id
+      AND source."status" = 'ready'
+      AND source."originalName" IN :source_file_names
     """
 
 
 def source_names_query(settings: Settings | None = None) -> object:
-    return text(
-        render_knowledge_base_query(SOURCE_NAMES_QUERY_TEMPLATE, settings)
-    ).bindparams(bindparam("source_file_names", expanding=True))
+    return text(SOURCE_NAMES_QUERY_TEMPLATE).bindparams(
+        bindparam("source_file_names", expanding=True)
+    )
 
 
-# Import-time compatibility constants keep the legacy query available to unit
-# tests and callers that have not enabled the independent entity yet.
+# Keep import-time constants for callers that import these query builders.
 CONTENT_SEARCH_SELECT = CONTENT_SEARCH_SELECT_TEMPLATE.replace(
-    "{knowledge_base_table}", '"KnowledgeSource"'
+    "{knowledge_base_table}", '"KnowledgeFile"'
 )
 SOURCE_NAMES_QUERY = source_names_query()
 
@@ -180,11 +184,11 @@ def _build_content_search_query(
     }
 
     if source_ids:
-        conditions.append('record."sourceId" IN :source_ids')
+        conditions.append('record."sourceFileId" IN :source_ids')
         params["source_ids"] = source_ids
 
     if authorized_source_ids is not None:
-        conditions.append('record."sourceId" IN :authorized_source_ids')
+        conditions.append('source."knowledgeBaseId" IN :authorized_source_ids')
         params["authorized_source_ids"] = authorized_source_ids
 
     text_filters = {
@@ -243,11 +247,8 @@ def _build_content_search_query(
         params["query_pattern"] = query_pattern
 
     query_text = text(
-        render_knowledge_base_query(
-            CONTENT_SEARCH_SELECT_TEMPLATE.replace(
-                "{conditions}", " AND ".join(conditions)
-            ),
-            settings,
+        CONTENT_SEARCH_SELECT_TEMPLATE.replace(
+            "{conditions}", " AND ".join(conditions)
         )
     )
     bind_params = []
@@ -319,7 +320,7 @@ async def search_content(
                     source_rows = [
                         row
                         for row in source_rows
-                        if row["source_id"] in authorized_source_id_set
+                        if row["knowledge_base_id"] in authorized_source_id_set
                     ]
                 found_source_names = {row["display_name"] for row in source_rows}
                 source_ids = [row["source_id"] for row in source_rows]
@@ -367,6 +368,7 @@ async def search_content(
                 **row,
                 "planned_at": _iso_timestamp(row["planned_at"]),
                 "source_id": str(row["source_id"]),
+                "source_file_id": str(row["source_id"]),
                 "citation": build_source_citation(
                     source_id=row["source_id"],
                     file_name=row["source_file_name"],

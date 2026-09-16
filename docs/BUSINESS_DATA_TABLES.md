@@ -12,7 +12,8 @@
 | --- | --- |
 | `id` | 当前表记录的唯一 ID。不同表的 `id` 不能直接混用。 |
 | `workspaceId` | 工作区 ID，用于多租户隔离。查询业务数据时必须限制工作区。 |
-| `sourceId` | 结构化业务数据的来源记录 ID，用于追溯来自哪个导入来源。它通常指向 `KnowledgeSource` 或 `KnowledgeBase`，不是文件文本片段 ID。 |
+| `sourceFileId` | 结构化业务数据的来源文件 ID，直接指向 `KnowledgeFile.id`。这是当前规范中的唯一来源追溯字段。 |
+| `sourceId` | 旧版来源字段，迁移后仅为兼容历史数据保留；新代码不再写入，也不应作为查询依据。 |
 | `knowledgeBaseId` | 知识库 ID，表示文件或文本片段属于哪个知识库。 |
 | `fileId` | 文件 ID，通常指向 `KnowledgeFile.id`。 |
 | `researchId` | 产品相关表指向 `RealProductResearch.id` 的外键。 |
@@ -31,14 +32,15 @@ RealProductResearch
 ├── ProductOperation   产品的运营状态，通常为一条或少量记录
 └── ProductDocument    产品关联的文档记录
 
-RealProductResearch.sourceId
-        └── KnowledgeSource.id 或 KnowledgeBase.id
+RealProductResearch.sourceFileId
+        └── KnowledgeFile.id
+                    └── KnowledgeBase.knowledgeBaseId
 ```
 
 ### 3.2 文件知识数据
 
 ```text
-KnowledgeSource / KnowledgeBase
+KnowledgeBase
 └── KnowledgeFile
     └── KnowledgeChunk
 ```
@@ -77,7 +79,7 @@ KnowledgeBase
 | `shippingTime` | 发货时间、交期或物流时效。 |
 | `contactPerson` | 产品或供应商联系人。 |
 | `supplierContact` | 供应商联系方式或供应商相关说明。 |
-| `sourceId` | 该产品记录来自哪个导入来源。 |
+| `sourceFileId` | 该产品记录来自哪个上传文件，直接指向 `KnowledgeFile.id`。 |
 | `sourceSheet` | 产品来自哪个 Excel 工作表。 |
 | `sourceRow` | 产品来自 Excel 的哪一行。 |
 
@@ -97,6 +99,7 @@ KnowledgeBase
 | 字段 | 业务含义 |
 | --- | --- |
 | `researchId` | 对应 `RealProductResearch.id`。 |
+| `sourceFileId` | 报价来自哪个上传文件，直接指向 `KnowledgeFile.id`。 |
 | `variant` | 产品规格或变体，例如颜色、尺寸、功率、包装规格。 |
 | `priceMin` | 最低报价。当前实现中可能以文本形式保存。 |
 | `priceMax` | 最高报价。当前实现中可能以文本形式保存。 |
@@ -119,6 +122,7 @@ KnowledgeBase
 | 字段 | 业务含义 |
 | --- | --- |
 | `researchId` | 对应产品记录。 |
+| `sourceFileId` | 运营记录来自哪个上传文件，直接指向 `KnowledgeFile.id`。 |
 | `logisticsTerm` | 物流或贸易条款，例如 FOB、EXW、DDP。 |
 | `operationStatus` | 产品运营状态。 |
 | `promotionStatus` | 产品推广状态。 |
@@ -143,6 +147,7 @@ KnowledgeBase
 | 关键字段 | 业务含义 |
 | --- | --- |
 | `researchId` | 对应 `RealProductResearch.id`。 |
+| `sourceFileId` | 文档记录来自哪个上传文件，直接指向 `KnowledgeFile.id`。 |
 | 其他文档关联字段 | 由实际数据库表结构决定，当前产品搜索合同不依赖这些字段。 |
 
 ## 5. 内容业务表
@@ -196,7 +201,7 @@ KnowledgeBase
 | `reviewStatus` | 内容审核状态。 |
 | `usageStatus` | 内容使用状态。 |
 | `submitter` | 内容提交人。 |
-| `sourceId` | 数据来源记录 ID。 |
+| `sourceFileId` | 数据来源文件 ID，直接指向 `KnowledgeFile.id`。 |
 | `sourceSheet` | Excel 来源工作表。 |
 | `sourceRow` | Excel 来源行号。 |
 | `searchText` | 为搜索生成的合并文本。 |
@@ -211,28 +216,21 @@ KnowledgeBase
 
 ## 6. 文件和知识库表
 
-### 6.1 `KnowledgeSource` / `KnowledgeBase`：知识库或数据来源
+### 6.1 `KnowledgeBase`：知识库容器和权限边界
 
-这两张表代表文件导入的来源边界。
-
-- `KnowledgeSource`：旧的兼容表；
-- `KnowledgeBase`：新的知识库实体表。
-
-当前代码通过 `knowledge_base_entity_enabled` 配置决定使用哪一张表。实际使用哪张表，以部署环境变量为准。
+`KnowledgeBase` 是知识库容器，负责工作区归属、生命周期和授权边界；它不再承担具体文件来源记录的职责。
+旧的 `KnowledgeSource` 表仅为迁移回滚保留，当前代码不向其中写入新数据。
 
 | 字段 | 业务含义 |
 | --- | --- |
 | `id` | 知识库或来源 ID。 |
-| `displayName` | 知识库名称或来源显示名称。 |
-| `sourceType` | 来源类型，例如 manual、xlsx、pdf。 |
-| `status` | 来源状态，例如 pending、ready。 |
-| `fileHash` | 文件哈希，用于识别重复文件。 |
-| `storageProvider` | 文件存储方式，例如 local、s3。 |
-| `version` | 来源版本。 |
+| `displayName` | 知识库名称。 |
+| `sourceType` | 知识库创建方式或业务类型，例如 manual。 |
+| `status` | 知识库状态，例如 ready。 |
+| `version` | 知识库元数据版本。 |
 | `workspaceId` | 所属工作区。 |
 | `createdAt` | 创建时间。 |
 | `updatedAt` | 最后更新时间。 |
-| `storageKey` | 文件存储路径。`KnowledgeSource` 旧表中存在，不能假设新表一定有该字段。 |
 
 ### 6.2 `KnowledgeFile`：上传文件元数据
 
@@ -383,13 +381,12 @@ KnowledgeChunk
 RealProductResearch / ProductPrice / ProductOperation / ProductDocument / ContentRecord
 ```
 
-结构化记录进入业务表时，应尽量保留：
+结构化记录进入业务表时，应保留：
 
-- `sourceId`：来源数据源；
+- `sourceFileId`：来源文件；
 - `sourceSheet`：Excel 工作表；
 - `sourceRow`：Excel 行号；
-- 文件或文本片段关联 ID；
-- 导入批次或版本信息。
+- `researchId`：产品子表回指产品主记录；
+- 后续可增加 `sourceChunkId` 或导入批次 ID，但不影响当前关系。
 
 这样在源文件被删除、替换或重新解析时，才能定位哪些业务记录受到影响，而不是依靠产品名称等不稳定文本进行猜测。
-

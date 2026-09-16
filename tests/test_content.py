@@ -63,7 +63,7 @@ def test_content_query_contains_nextjs_filters() -> None:
 
     sql = str(query)
     assert 'source."workspaceId" = :workspace_id' in sql
-    assert 'record."sourceId" IN' in sql
+    assert 'record."sourceFileId" IN' in sql
     assert 'record."searchText" ILIKE :query_pattern' in sql
     assert params["record_type"] == "copy"
     assert params["source_ids"] == [source_id]
@@ -86,7 +86,7 @@ def test_content_query_can_apply_knowledge_base_grants() -> None:
         authorized_source_ids=[source_id],
     )
 
-    assert 'record."sourceId" IN' in str(query)
+    assert 'source."knowledgeBaseId" IN' in str(query)
     assert params["authorized_source_ids"] == [source_id]
 
 

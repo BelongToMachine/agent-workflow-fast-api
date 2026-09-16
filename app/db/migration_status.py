@@ -323,6 +323,92 @@ MIGRATION_STATUS_QUERY = text(
             WHERE conrelid = to_regclass('public."KnowledgeChunk"')
               AND conname = 'KnowledgeChunk_knowledge_base_entity_fk'
         ) AS chunks_repointed
+        ,
+        to_regclass('public."ContentRecord_sourceFileId_idx"') IS NOT NULL
+            AS content_source_file_idx,
+        to_regclass('public."RealProductResearch_sourceFileId_idx"') IS NOT NULL
+            AS research_source_file_idx,
+        to_regclass('public."ProductDocument_sourceFileId_idx"') IS NOT NULL
+            AS document_source_file_idx,
+        to_regclass('public."ProductOperation_sourceFileId_idx"') IS NOT NULL
+            AS operation_source_file_idx,
+        to_regclass('public."ProductPrice_sourceFileId_idx"') IS NOT NULL
+            AS price_source_file_idx,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ContentRecord'
+              AND column_name = 'sourceFileId'
+              AND is_nullable = 'NO'
+        ) AS content_source_file_non_null,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'RealProductResearch'
+              AND column_name = 'sourceFileId'
+              AND is_nullable = 'NO'
+        ) AS research_source_file_non_null,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ProductDocument'
+              AND column_name = 'sourceFileId'
+              AND is_nullable = 'NO'
+        ) AS document_source_file_non_null,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ProductOperation'
+              AND column_name = 'sourceFileId'
+              AND is_nullable = 'NO'
+        ) AS operation_source_file_non_null,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ProductPrice'
+              AND column_name = 'sourceFileId'
+              AND is_nullable = 'NO'
+        ) AS price_source_file_non_null,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('public."ContentRecord"')
+              AND conname = 'ContentRecord_source_file_fk'
+              AND confrelid = to_regclass('public."KnowledgeFile"')
+        ) AS content_source_file_fk,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('public."RealProductResearch"')
+              AND conname = 'RealProductResearch_source_file_fk'
+              AND confrelid = to_regclass('public."KnowledgeFile"')
+        ) AS research_source_file_fk,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('public."ProductDocument"')
+              AND conname = 'ProductDocument_source_file_fk'
+              AND confrelid = to_regclass('public."KnowledgeFile"')
+        ) AS document_source_file_fk,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('public."ProductOperation"')
+              AND conname = 'ProductOperation_source_file_fk'
+              AND confrelid = to_regclass('public."KnowledgeFile"')
+        ) AS operation_source_file_fk,
+        EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('public."ProductPrice"')
+              AND conname = 'ProductPrice_source_file_fk'
+              AND confrelid = to_regclass('public."KnowledgeFile"')
+        ) AS price_source_file_fk
     """
 )
 
@@ -347,7 +433,7 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "source_workspace_fk",
         )
     )
-    source_relationships_applied = all(
+    legacy_source_relationships_applied = all(
         flag(key)
         for key in (
             "content_table",
@@ -368,14 +454,47 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "document_source_fk",
         )
     )
+    canonical_source_relationships_applied = all(
+        flag(key)
+        for key in (
+            "content_source_file_idx",
+            "research_source_file_idx",
+            "document_source_file_idx",
+            "operation_source_file_idx",
+            "price_source_file_idx",
+            "content_source_file_fk",
+            "research_source_file_fk",
+            "document_source_file_fk",
+            "operation_source_file_fk",
+            "price_source_file_fk",
+        )
+    )
+    source_relationships_applied = (
+        legacy_source_relationships_applied
+        or canonical_source_relationships_applied
+    )
     source_import_key_applied = flag("source_import_key_idx")
-    source_relationships_required = all(
+    legacy_source_relationships_required = all(
         flag(key)
         for key in (
             "content_source_non_null",
             "research_source_non_null",
             "document_source_non_null",
         )
+    )
+    canonical_source_relationships_required = all(
+        flag(key)
+        for key in (
+            "content_source_file_non_null",
+            "research_source_file_non_null",
+            "document_source_file_non_null",
+            "operation_source_file_non_null",
+            "price_source_file_non_null",
+        )
+    )
+    source_relationships_required = (
+        legacy_source_relationships_required
+        or canonical_source_relationships_required
     )
     grants_applied = all(
         flag(key)
@@ -464,7 +583,13 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
         MigrationStatus(
             "0009_knowledge_source_relationships_required",
             source_relationships_required,
-            "non-null sourceId columns after legacy provenance backfill",
+            "non-null legacy sourceId or canonical sourceFileId columns",
+        ),
+        MigrationStatus(
+            "0012_knowledge_file_provenance",
+            canonical_source_relationships_applied
+            and canonical_source_relationships_required,
+            "KnowledgeFile foreign keys, indexes, and required sourceFileId columns",
         ),
     ]
 
