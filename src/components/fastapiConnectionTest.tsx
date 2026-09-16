@@ -7,6 +7,7 @@ import {
   isFastApiDirectMode,
   isFastApiProxyMode,
 } from "@/lib/backend/mode";
+import { Spinner } from "@/components/ui/spinner";
 
 type ConnectionState =
   | { status: "checking" }
@@ -89,9 +90,14 @@ export function FastApiConnectionTest() {
                 : "border-destructive/30 bg-destructive/10 text-destructive"
           }`}
         >
-          {connection.status === "checking"
-            ? t("settings.checkingConnection")
-            : connection.message}
+          {connection.status === "checking" ? (
+            <span className="flex items-center gap-2">
+              <Spinner />
+              {t("settings.checkingConnection")}
+            </span>
+          ) : (
+            connection.message
+          )}
         </div>
 
         {connection.status !== "checking" && connection.payload ? (
@@ -106,6 +112,7 @@ export function FastApiConnectionTest() {
           onClick={handleCheckConnection}
           type="button"
         >
+          {connection.status === "checking" ? <Spinner /> : null}
           {t("settings.retest")}
         </button>
       </section>

@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { InlineLoadingState } from "@/components/ui/loadingState";
 import {
   Select,
   SelectContent,
@@ -34,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import {
   backendQueryKeys,
   useBackendIdentity,
@@ -580,7 +582,7 @@ export function MemberPermissions() {
   const visibleError = error ?? loadError;
 
   if (isLoading) {
-    return <LoadingState />;
+    return <InlineLoadingState message={t("common.loading")} />;
   }
 
   if (visibleError && !data) {
@@ -637,6 +639,7 @@ export function MemberPermissions() {
                     {t("settings.workEmail")}
                     <Input
                       autoComplete="email"
+                      disabled={isCreatingInvitation}
                       id="invite-email"
                       onChange={(event) => setInviteEmail(event.target.value)}
                       placeholder="colleague@company.com"
@@ -669,7 +672,7 @@ export function MemberPermissions() {
                     </Select>
                   </label>
                   <Button disabled={!inviteEmail.trim() || isCreatingInvitation} type="submit">
-                    <LinkIcon />
+                    {isCreatingInvitation ? <Spinner /> : <LinkIcon />}
                     {isCreatingInvitation
                       ? t("settings.creating")
                       : t("settings.createLink")}
@@ -720,7 +723,8 @@ export function MemberPermissions() {
                       </p>
                     </div>
                     {invitationsQuery.isFetching ? (
-                      <span className="text-muted-foreground text-xs">
+                      <span className="flex items-center gap-2 text-muted-foreground text-xs">
+                        <Spinner className="size-3" />
                         {t("settings.invitationsRefresh")}
                       </span>
                     ) : null}
@@ -763,7 +767,11 @@ export function MemberPermissions() {
                                   type="button"
                                   variant="outline"
                                 >
-                                  <RefreshCwIcon />
+                                  {isRegeneratingInvitation ? (
+                                    <Spinner />
+                                  ) : (
+                                    <RefreshCwIcon />
+                                  )}
                                   {t("settings.newLink")}
                                 </Button>
                               ) : null}
@@ -775,7 +783,11 @@ export function MemberPermissions() {
                                   type="button"
                                   variant="ghost"
                                 >
-                                  <XCircleIcon />
+                                  {isRevokingInvitation ? (
+                                    <Spinner />
+                                  ) : (
+                                    <XCircleIcon />
+                                  )}
                                   {t("settings.revoke")}
                                 </Button>
                               ) : null}
@@ -822,6 +834,7 @@ export function MemberPermissions() {
                               : t("settings.selectUser")
                         }
                       />
+                      {candidatesQuery.isLoading ? <Spinner className="size-3.5" /> : null}
                     </SelectTrigger>
                     <SelectContent>
                       {candidates.map((candidate) => (
@@ -853,7 +866,7 @@ export function MemberPermissions() {
                   </SelectContent>
                 </Select>
                 <Button disabled={!candidateId || isAdding} onClick={addMember}>
-                  <UserPlusIcon />
+                  {isAdding ? <Spinner /> : <UserPlusIcon />}
                   {isAdding ? t("settings.adding") : t("settings.addMember")}
                 </Button>
               </div>
@@ -961,7 +974,7 @@ export function MemberPermissions() {
                       onClick={changeMemberStatus}
                       variant="outline"
                     >
-                      <PowerIcon />
+                      {isChangingStatus ? <Spinner /> : <PowerIcon />}
                       {isChangingStatus
                         ? t("settings.updating")
                         : selectedMember.status === "active"
@@ -969,7 +982,7 @@ export function MemberPermissions() {
                           : t("settings.restoreMember")}
                     </Button>
                     <Select
-                      disabled={!canManageMembers}
+                      disabled={!canManageMembers || isSaving || isChangingStatus}
                       onValueChange={changeRole}
                       value={role}
                     >
@@ -991,7 +1004,7 @@ export function MemberPermissions() {
                       disabled={!canManageMembers || !isDirty || isSaving}
                       onClick={save}
                     >
-                      <SaveIcon />
+                      {isSaving ? <Spinner /> : <SaveIcon />}
                       {isSaving ? t("common.saving") : t("common.saveChanges")}
                     </Button>
                   </div>
@@ -1066,20 +1079,6 @@ export function MemberPermissions() {
               </>
             ) : null}
           </section>
-        </div>
-      </div>
-    </main>
-  );
-}
-
-function LoadingState() {
-  return (
-    <main className="min-h-full bg-background px-4 py-10 md:px-8">
-      <div className="mx-auto max-w-6xl animate-pulse space-y-6">
-        <div className="h-9 w-72 rounded-lg bg-muted" />
-        <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
-          <div className="h-96 rounded-2xl bg-muted/60" />
-          <div className="h-96 rounded-2xl bg-muted/60" />
         </div>
       </div>
     </main>

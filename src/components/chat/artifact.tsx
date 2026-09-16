@@ -24,6 +24,7 @@ import type { Document } from "@/lib/db/schema";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { fetcher } from "@/lib/utils";
 import { useSidebar } from "../ui/sidebar";
+import { Spinner } from "../ui/spinner";
 import { ArtifactActions } from "./artifactActions";
 import { ArtifactCloseButton } from "./artifactCloseButton";
 import { LoaderIcon } from "./icons";
@@ -331,7 +332,7 @@ function PureArtifact({
               <div className="flex items-center gap-2">
                 {isContentDirty ? (
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <div className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+                    <Spinner className="size-3 text-amber-500" />
                     {t("artifacts.saving")}
                   </div>
                 ) : document ? (

@@ -10,7 +10,7 @@ import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import type { User } from "@/lib/auth";
 import { usePathname, useRouter } from "@/lib/router";
-import { useCallback, useMemo, useState } from "react";
+import { type MouseEvent, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -40,7 +40,7 @@ import {
   getLocalChatHistoryQueryKey,
 } from "@/lib/backend/chatHistoryCache";
 import { requestBackend } from "@/lib/backend/request";
-import { LoaderIcon } from "./icons";
+import { Spinner } from "../ui/spinner";
 import { ChatItem } from "./sidebarHistoryItem";
 
 type GroupedChats = {
@@ -160,6 +160,7 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
 
   const router = useRouter();
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const hasReachedEnd = paginatedChatHistories
@@ -170,11 +171,15 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
 
   const hasEmptyChatHistory = !isLoading && chatsFromHistory.length === 0;
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (!deleteId || isDeleting) {
+      return;
+    }
+
     const chatToDelete = deleteId;
     const isCurrentChat = pathname === `/chat/${chatToDelete}`;
-
-    setShowDeleteDialog(false);
+    setIsDeleting(true);
 
     if (isCurrentChat) {
       router.replace("/");
@@ -200,13 +205,19 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
       (chats) => chats?.filter((chat) => chat.id !== chatToDelete)
     );
 
-    requestBackend(
-      `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat?id=${chatToDelete}`,
-      { method: "DELETE" }
-    ).catch(() => undefined);
-
-    toast.success(t("sidebar.chatDeleted"));
-  }, [deleteId, historyQueryKey, pathname, queryClient, router, t]);
+    try {
+      await requestBackend(
+        `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat?id=${chatToDelete}`,
+        { method: "DELETE" }
+      );
+      toast.success(t("sidebar.chatDeleted"));
+      setShowDeleteDialog(false);
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteId, historyQueryKey, isDeleting, pathname, queryClient, router, t]);
 
   const handleShowDeleteDialog = useCallback((chatId: string) => {
     setDeleteId(chatId);
@@ -238,22 +249,13 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
           {t("sidebar.history")}
         </SidebarGroupLabel>
         <SidebarGroupContent>
-          <div className="flex flex-col gap-0.5 px-1">
-            {[44, 32, 28, 64, 52].map((item) => (
-              <div
-                className="flex h-8 items-center gap-2 rounded-lg px-2"
-                key={item}
-              >
-                <div
-                  className="h-3 max-w-(--skeleton-width) flex-1 animate-pulse rounded-md bg-sidebar-foreground/[0.06]"
-                  style={
-                    {
-                      "--skeleton-width": `${item}%`,
-                    } as React.CSSProperties
-                  }
-                />
-              </div>
-            ))}
+          <div
+            aria-live="polite"
+            className="flex items-center justify-center gap-2 px-2 py-3 text-[11px] text-sidebar-foreground/60"
+            role="status"
+          >
+            <Spinner className="size-3.5" />
+            {t("common.loadingShort")}
           </div>
         </SidebarGroupContent>
       </SidebarGroup>
@@ -375,9 +377,7 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
 
           {hasReachedEnd ? null : (
             <div className="mt-1 flex flex-row items-center gap-2 px-4 py-2 text-sidebar-foreground/50">
-              <div className="animate-spin">
-                <LoaderIcon />
-              </div>
+              <Spinner className="size-3.5" />
               <div className="text-[11px]">{t("common.loadingShort")}</div>
             </div>
           )}
@@ -393,9 +393,10 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete}>
-              {t("common.continue")}
+          <AlertDialogCancel disabled={isDeleting}>{t("common.cancel")}</AlertDialogCancel>
+          <AlertDialogAction disabled={isDeleting} onClick={handleDelete}>
+            {isDeleting ? <Spinner /> : null}
+            {isDeleting ? t("common.deleting") : t("common.continue")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

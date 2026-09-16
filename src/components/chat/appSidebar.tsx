@@ -2,7 +2,7 @@
 
 import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
 import {
-  FilesIcon,
+  DatabaseIcon,
   KeyRoundIcon,
   MessageSquareIcon,
   PanelLeftIcon,
@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import type { User } from "@/lib/auth";
 import { Link, useRouter } from "@/lib/router";
-import { useCallback, useState } from "react";
+import { type MouseEvent, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { SidebarHistory } from "@/components/chat/sidebarHistory";
@@ -55,6 +55,7 @@ import {
   AlertDialogTitle,
 } from "../ui/alertDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { Spinner } from "../ui/spinner";
 
 export function AppSidebar({
   canManageKnowledgeBases,
@@ -71,6 +72,7 @@ export function AppSidebar({
   const queryClient = useQueryClient();
   const identity = useBackendIdentity(user?.id);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   const closeMobile = useCallback(() => {
     setOpenMobile(false);
@@ -89,8 +91,13 @@ export function AppSidebar({
     setShowDeleteAllDialog(true);
   }, []);
 
-  const handleDeleteAll = useCallback(() => {
-    setShowDeleteAllDialog(false);
+  const handleDeleteAll = useCallback(async (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (isDeletingAll) {
+      return;
+    }
+
+    setIsDeletingAll(true);
     router.replace("/");
     const historyQueryKey = backendQueryKeys.chatHistory(identity);
     queryClient.setQueryData<InfiniteData<ChatHistory>>(
@@ -111,12 +118,18 @@ export function AppSidebar({
       []
     );
 
-    requestBackend(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/history`, {
-      method: "DELETE",
-    }).catch(() => undefined);
-
-    toast.success(t("sidebar.allChatsDeleted"));
-  }, [identity, queryClient, router, t]);
+    try {
+      await requestBackend(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/history`, {
+        method: "DELETE",
+      });
+      toast.success(t("sidebar.allChatsDeleted"));
+      setShowDeleteAllDialog(false);
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setIsDeletingAll(false);
+    }
+  }, [identity, isDeletingAll, queryClient, router, t]);
 
   return (
     <>
@@ -219,11 +232,11 @@ export function AppSidebar({
                       asChild
                       className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                       onClick={closeMobile}
-                      tooltip={t("sidebar.knowledgeFiles")}
+                      tooltip={t("sidebar.knowledgeBases")}
                     >
                       <Link href="/settings/knowledge-bases/files">
-                        <FilesIcon className="size-4" />
-                        <span className="text-[13px]">{t("sidebar.knowledgeFiles")}</span>
+                        <DatabaseIcon className="size-4" />
+                        <span className="text-[13px]">{t("sidebar.knowledgeBases")}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -263,9 +276,10 @@ export function AppSidebar({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteAll}>
-              {t("common.deleteAll")}
+            <AlertDialogCancel disabled={isDeletingAll}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction disabled={isDeletingAll} onClick={handleDeleteAll}>
+              {isDeletingAll ? <Spinner /> : null}
+              {isDeletingAll ? t("common.deleting") : t("common.deleteAll")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

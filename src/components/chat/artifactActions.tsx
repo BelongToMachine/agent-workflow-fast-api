@@ -2,6 +2,7 @@ import { memo, type ReactNode, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { artifactDefinitions, type UIArtifact } from "./artifact";
 import type { ArtifactActionContext } from "./createArtifact";
@@ -27,12 +28,14 @@ function ArtifactActionButton({
   actionContext,
   disabled,
   isActive,
+  isLoading,
   setIsLoading,
 }: {
   action: ArtifactAction;
   actionContext: ArtifactActionContext;
   disabled: boolean;
   isActive: boolean;
+  isLoading: boolean;
   setIsLoading: (isLoading: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -65,7 +68,7 @@ function ArtifactActionButton({
           onClick={handleClick}
           type="button"
         >
-          {action.icon}
+          {isLoading ? <Spinner /> : action.icon}
         </button>
       </TooltipTrigger>
       <TooltipContent side="left" sideOffset={8}>
@@ -120,6 +123,7 @@ function PureArtifactActions({
             actionContext={actionContext}
             disabled={disabled}
             isActive={mode === "diff" && action.description === "View changes"}
+            isLoading={isLoading}
             key={action.description}
             setIsLoading={setIsLoading}
           />
