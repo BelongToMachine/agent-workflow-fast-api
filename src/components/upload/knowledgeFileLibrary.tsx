@@ -2,10 +2,10 @@
 
 import {
   CheckCircle2Icon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   DatabaseIcon,
-  EyeIcon,
   FileArchiveIcon,
   FileClockIcon,
   FileTextIcon,
@@ -66,7 +66,31 @@ type ParsedDocument = {
   warnings: string[];
 };
 
-type ParsedDocumentResponse = {
+type ParsedDocumentListItem = {
+  chunkCount: number;
+  chunkErrorMessage: string | null;
+  chunkStatus: string;
+  createdAt: string;
+  fileByteSize: number;
+  fileHash: string;
+  fileId: string;
+  fileMimeType: string;
+  fileName: string;
+  fileStatus: string;
+  parsedDocument: ParsedDocument;
+  parsedDocumentId: string;
+  updatedAt: string;
+};
+
+type ParsedDocumentListResponse = {
+  items: ParsedDocumentListItem[];
+  limit: number;
+  nextOffset: number | null;
+  offset: number;
+  total: number;
+};
+
+type ParsedDocumentTaskResponse = {
   chunkCount: number;
   chunkErrorMessage: string | null;
   chunkStatus: string;
@@ -82,7 +106,8 @@ type Props = {
   refreshKey?: number;
 };
 
-const PARSED_DOCUMENT_PAGE_SIZE = 30;
+const PARSED_DOCUMENT_PAGE_SIZE = 20;
+const PARSED_BLOCK_PAGE_SIZE = 30;
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) {
@@ -121,6 +146,16 @@ function chunkStatusVariant(
   return "outline";
 }
 
+function formatLocator(locator: Record<string, string | number>) {
+  return Object.entries(locator)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(" · ");
+}
+
+function shortHash(value: string) {
+  return value.length > 20 ? `${value.slice(0, 12)}…${value.slice(-8)}` : value;
+}
+
 export function KnowledgeFileLibrary({
   disabled = false,
   knowledgeBaseId,
@@ -135,14 +170,11 @@ export function KnowledgeFileLibrary({
   const [isParsing, setIsParsing] = useState(false);
   const [isGeneratingChunks, setIsGeneratingChunks] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedParsedFileId, setSelectedParsedFileId] = useState<string | null>(
-    null
-  );
-  const [parsedDocument, setParsedDocument] =
-    useState<ParsedDocumentResponse | null>(null);
-  const [parsedDocumentOffset, setParsedDocumentOffset] = useState(0);
-  const [isLoadingParsedDocument, setIsLoadingParsedDocument] = useState(false);
-  const [parsedDocumentError, setParsedDocumentError] = useState<string | null>(
+  const [isParsedDocumentsOpen, setIsParsedDocumentsOpen] = useState(false);
+  const [parsedDocuments, setParsedDocuments] =
+    useState<ParsedDocumentListResponse | null>(null);
+  const [isLoadingParsedDocuments, setIsLoadingParsedDocuments] = useState(false);
+  const [parsedDocumentsError, setParsedDocumentsError] = useState<string | null>(
     null
   );
 
@@ -175,9 +207,53 @@ export function KnowledgeFileLibrary({
     }
   }, [knowledgeBaseId, t]);
 
+  const loadParsedDocuments = useCallback(
+    async (offset = 0) => {
+      if (!knowledgeBaseId) {
+        setParsedDocuments(null);
+        return;
+      }
+
+      setIsLoadingParsedDocuments(true);
+      setParsedDocumentsError(null);
+      try {
+        const data = await requestBackend<ParsedDocumentListResponse>(
+          `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/parsed-documents?offset=${offset}&limit=${PARSED_DOCUMENT_PAGE_SIZE}&block_offset=0&block_limit=${PARSED_BLOCK_PAGE_SIZE}`
+        );
+        setParsedDocuments(data);
+      } catch (loadError) {
+        setParsedDocuments(null);
+        if (loadError instanceof BackendRequestError && loadError.status === 409) {
+          setParsedDocumentsError(t("settings.ingestionDisabled"));
+        } else {
+          setParsedDocumentsError(
+            loadError instanceof Error
+              ? loadError.message
+              : t("settings.unableToLoadParsedDocuments")
+          );
+        }
+      } finally {
+        setIsLoadingParsedDocuments(false);
+      }
+    },
+    [knowledgeBaseId, t]
+  );
+
   useEffect(() => {
     void loadFiles();
   }, [loadFiles, refreshKey]);
+
+  useEffect(() => {
+    if (!knowledgeBaseId) {
+      setIsParsedDocumentsOpen(false);
+      setParsedDocuments(null);
+      setParsedDocumentsError(null);
+      return;
+    }
+    setIsParsedDocumentsOpen(false);
+    setParsedDocuments(null);
+    setParsedDocumentsError(null);
+  }, [knowledgeBaseId]);
 
   useEffect(() => {
     const availableIds = new Set(files.map(({ fileId }) => fileId));
@@ -195,9 +271,25 @@ export function KnowledgeFileLibrary({
     }
     const intervalId = window.setInterval(() => {
       void loadFiles();
+      if (isParsedDocumentsOpen) {
+        void loadParsedDocuments(parsedDocuments?.offset ?? 0);
+      }
     }, 1500);
     return () => window.clearInterval(intervalId);
-  }, [files, loadFiles]);
+  }, [files, isParsedDocumentsOpen, loadFiles, loadParsedDocuments, parsedDocuments?.offset]);
+
+  useEffect(() => {
+    if (
+      !isParsedDocumentsOpen ||
+      !parsedDocuments?.items.some(({ chunkStatus }) => isProcessing(chunkStatus))
+    ) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      void loadParsedDocuments(parsedDocuments.offset);
+    }, 1500);
+    return () => window.clearInterval(intervalId);
+  }, [isParsedDocumentsOpen, loadParsedDocuments, parsedDocuments]);
 
   const selectableFiles = useMemo(
     () => files.filter(({ status }) => !isProcessing(status)),
@@ -232,46 +324,6 @@ export function KnowledgeFileLibrary({
       return new Set(selectableFiles.map(({ fileId }) => fileId));
     });
   }, [selectableFiles]);
-
-  const loadParsedDocument = useCallback(
-    async (fileId: string, offset: number) => {
-      setSelectedParsedFileId(fileId);
-      setParsedDocumentOffset(offset);
-      setIsLoadingParsedDocument(true);
-      setParsedDocumentError(null);
-      try {
-        const data = await requestBackend<ParsedDocumentResponse>(
-          `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/files/${encodeURIComponent(fileId)}/parsed-document?offset=${offset}&limit=${PARSED_DOCUMENT_PAGE_SIZE}`
-        );
-        setParsedDocument(data);
-      } catch (documentError) {
-        setParsedDocument(null);
-        setParsedDocumentError(
-          documentError instanceof Error
-            ? documentError.message
-            : t("settings.unableToLoadParsedDocument")
-        );
-      } finally {
-        setIsLoadingParsedDocument(false);
-      }
-    },
-    [knowledgeBaseId, t]
-  );
-
-  useEffect(() => {
-    if (!selectedParsedFileId || parsedDocument?.chunkStatus !== "processing") {
-      return;
-    }
-    const intervalId = window.setInterval(() => {
-      void loadParsedDocument(selectedParsedFileId, parsedDocumentOffset);
-    }, 1500);
-    return () => window.clearInterval(intervalId);
-  }, [
-    loadParsedDocument,
-    parsedDocument?.chunkStatus,
-    parsedDocumentOffset,
-    selectedParsedFileId,
-  ]);
 
   const parseSelectedFiles = useCallback(async () => {
     if (isParsing || disabled || selectedFileIds.size === 0) {
@@ -308,6 +360,9 @@ export function KnowledgeFileLibrary({
     setSelectedFileIds(new Set());
     setIsParsing(false);
     await loadFiles();
+    if (isParsedDocumentsOpen) {
+      await loadParsedDocuments(parsedDocuments?.offset ?? 0);
+    }
     if (failedCount === 0) {
       toast.success(
         t("settings.parseKnowledgeFilesStarted", { count: startedCount })
@@ -319,75 +374,82 @@ export function KnowledgeFileLibrary({
     } else {
       toast.error(t("settings.parseKnowledgeFileFailed"));
     }
-  }, [disabled, isParsing, knowledgeBaseId, loadFiles, selectedFileIds, t]);
-
-  const generateChunks = useCallback(async () => {
-    if (
-      isGeneratingChunks ||
-      disabled ||
-      selectedChunkableFiles.length === 0
-    ) {
-      return;
-    }
-
-    setIsGeneratingChunks(true);
-    setError(null);
-    let startedCount = 0;
-    let failedCount = 0;
-    for (const file of selectedChunkableFiles) {
-      try {
-        await requestBackend<ParsedDocumentResponse>(
-          `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/files/${encodeURIComponent(file.fileId)}/chunks`,
-          { method: "POST" }
-        );
-        startedCount += 1;
-      } catch (chunkError) {
-        failedCount += 1;
-        setError(
-          chunkError instanceof Error
-            ? chunkError.message
-            : t("settings.generateKnowledgeChunksFailed")
-        );
-      }
-    }
-
-    setSelectedFileIds(new Set());
-    setIsGeneratingChunks(false);
-    if (
-      selectedParsedFileId &&
-      selectedChunkableFiles.some(
-        ({ fileId }) => fileId === selectedParsedFileId
-      )
-    ) {
-      await loadParsedDocument(selectedParsedFileId, parsedDocumentOffset);
-    }
-    if (failedCount === 0) {
-      toast.success(
-        t("settings.generateKnowledgeChunksStarted", { count: startedCount })
-      );
-    } else if (startedCount > 0) {
-      toast.warning(
-        t("settings.generateKnowledgeChunksPartial", { count: startedCount })
-      );
-    } else {
-      toast.error(t("settings.generateKnowledgeChunksFailed"));
-    }
   }, [
     disabled,
-    isGeneratingChunks,
+    isParsedDocumentsOpen,
+    isParsing,
     knowledgeBaseId,
-    loadParsedDocument,
-    parsedDocumentOffset,
-    selectedChunkableFiles,
-    selectedParsedFileId,
+    loadFiles,
+    loadParsedDocuments,
+    parsedDocuments?.offset,
+    selectedFileIds,
     t,
   ]);
+
+  const generateChunksForFiles = useCallback(
+    async (fileIds: string[]) => {
+      if (isGeneratingChunks || disabled || fileIds.length === 0) {
+        return;
+      }
+
+      const uniqueFileIds = [...new Set(fileIds)];
+      setIsGeneratingChunks(true);
+      setError(null);
+      let startedCount = 0;
+      let failedCount = 0;
+      for (const fileId of uniqueFileIds) {
+        try {
+          await requestBackend<ParsedDocumentTaskResponse>(
+            `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/files/${encodeURIComponent(fileId)}/chunks`,
+            { method: "POST" }
+          );
+          startedCount += 1;
+        } catch (chunkError) {
+          failedCount += 1;
+          setError(
+            chunkError instanceof Error
+              ? chunkError.message
+              : t("settings.generateKnowledgeChunksFailed")
+          );
+        }
+      }
+
+      setSelectedFileIds(new Set());
+      setIsGeneratingChunks(false);
+      await loadFiles();
+      if (isParsedDocumentsOpen) {
+        await loadParsedDocuments(parsedDocuments?.offset ?? 0);
+      }
+      if (failedCount === 0) {
+        toast.success(
+          t("settings.generateKnowledgeChunksStarted", { count: startedCount })
+        );
+      } else if (startedCount > 0) {
+        toast.warning(
+          t("settings.generateKnowledgeChunksPartial", { count: startedCount })
+        );
+      } else {
+        toast.error(t("settings.generateKnowledgeChunksFailed"));
+      }
+    },
+    [
+      disabled,
+      isGeneratingChunks,
+      isParsedDocumentsOpen,
+      knowledgeBaseId,
+      loadFiles,
+      loadParsedDocuments,
+      parsedDocuments?.offset,
+      t,
+    ]
+  );
 
   const allSelectableSelected =
     selectableFiles.length > 0 && selectedFileIds.size === selectableFiles.length;
 
   return (
-    <section className="mt-6 rounded-2xl border border-border/70 bg-card/50 shadow-[var(--shadow-card)]">
+    <div className="space-y-6">
+    <section className="rounded-2xl border border-border/70 bg-card/50 shadow-[var(--shadow-card)]">
       <div className="flex flex-col gap-4 border-b border-border/70 p-5 md:flex-row md:items-start md:justify-between md:p-7">
         <div className="flex items-start gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -405,7 +467,7 @@ export function KnowledgeFileLibrary({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 self-start">
+        <div className="flex flex-wrap items-center gap-2 self-start">
           <Badge className="gap-1.5 px-3 py-1.5" variant="outline">
             <FileTextIcon className="size-3.5" />
             {t("settings.fileCount", {
@@ -414,13 +476,29 @@ export function KnowledgeFileLibrary({
             })}
           </Badge>
           <Button
-            aria-label={t("settings.refreshKnowledgeFiles")}
             disabled={isLoading || isParsing || isGeneratingChunks}
             onClick={() => void loadFiles()}
             size="icon-sm"
             variant="outline"
+            aria-label={t("settings.refreshKnowledgeFiles")}
           >
             <RefreshCwIcon className={cn(isLoading && "animate-spin")} />
+          </Button>
+          <Button
+            disabled={isParsing || isGeneratingChunks}
+            onClick={() => {
+              setIsParsedDocumentsOpen((current) => !current);
+              if (!isParsedDocumentsOpen) {
+                void loadParsedDocuments(0);
+              }
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <DatabaseIcon />
+            {isParsedDocumentsOpen
+              ? t("settings.hideParsedDocuments")
+              : t("settings.viewParsedDocuments")}
           </Button>
         </div>
       </div>
@@ -492,7 +570,11 @@ export function KnowledgeFileLibrary({
                     isGeneratingChunks ||
                     selectedChunkableFiles.length === 0
                   }
-                  onClick={() => void generateChunks()}
+                  onClick={() =>
+                    void generateChunksForFiles(
+                      selectedChunkableFiles.map(({ fileId }) => fileId)
+                    )
+                  }
                   size="sm"
                   variant="outline"
                 >
@@ -514,44 +596,42 @@ export function KnowledgeFileLibrary({
                   i18nLanguage={i18n.language}
                   key={file.fileId}
                   onToggle={toggleFile}
-                  onViewParsedDocument={(fileId) =>
-                    void loadParsedDocument(fileId, 0)
-                  }
                   selected={selectedFileIds.has(file.fileId)}
                   t={t}
-                  viewing={selectedParsedFileId === file.fileId}
                 />
               ))}
             </div>
           </>
         )}
 
-        {selectedParsedFileId ? (
-          <ParsedDocumentPanel
-            error={parsedDocumentError}
-            hasPrevious={parsedDocumentOffset > 0}
-            i18nLanguage={i18n.language}
-            isLoading={isLoadingParsedDocument}
-            onNext={() => {
-              if (parsedDocument?.parsedDocument.nextCursor !== null) {
-                void loadParsedDocument(
-                  selectedParsedFileId,
-                  parsedDocument.parsedDocument.nextCursor
-                );
-              }
-            }}
-            onPrevious={() =>
-              void loadParsedDocument(
-                selectedParsedFileId,
-                Math.max(0, parsedDocumentOffset - PARSED_DOCUMENT_PAGE_SIZE)
-              )
-            }
-            parsedDocument={parsedDocument}
-            t={t}
-          />
-        ) : null}
       </div>
     </section>
+    {isParsedDocumentsOpen ? (
+      <ParsedDocumentLibrary
+        data={parsedDocuments}
+        error={parsedDocumentsError}
+        i18nLanguage={i18n.language}
+        isLoading={isLoadingParsedDocuments}
+        onGenerateChunks={(fileId) =>
+          void generateChunksForFiles([fileId])
+        }
+        onNext={() => {
+          if (parsedDocuments?.nextOffset !== null && parsedDocuments) {
+            void loadParsedDocuments(parsedDocuments.nextOffset);
+          }
+        }}
+        onPrevious={() => {
+          if (parsedDocuments && parsedDocuments.offset > 0) {
+            void loadParsedDocuments(
+              Math.max(0, parsedDocuments.offset - parsedDocuments.limit)
+            );
+          }
+        }}
+        t={t}
+        isGeneratingChunks={isGeneratingChunks}
+      />
+    ) : null}
+    </div>
   );
 }
 
@@ -559,18 +639,14 @@ function StoredFileRow({
   file,
   i18nLanguage,
   onToggle,
-  onViewParsedDocument,
   selected,
   t,
-  viewing,
 }: {
   file: KnowledgeFile;
   i18nLanguage: string;
   onToggle: (fileId: string) => void;
-  onViewParsedDocument: (fileId: string) => void;
   selected: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
-  viewing: boolean;
 }) {
   const processing = isProcessing(file.status);
   const ready = file.status === "ready";
@@ -589,7 +665,6 @@ function StoredFileRow({
       className={cn(
         "flex flex-col gap-3 rounded-xl border border-border/70 bg-background/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
         selected && "border-primary/50 bg-primary/[0.04]",
-        viewing && "ring-1 ring-primary/30",
         processing && "opacity-75"
       )}
     >
@@ -620,47 +695,37 @@ function StoredFileRow({
           ) : null}
         </span>
       </label>
-      <div className="flex items-center justify-end gap-2 self-end sm:self-auto">
-        {ready ? (
-          <Button
-            onClick={() => onViewParsedDocument(file.fileId)}
-            size="sm"
-            variant={viewing ? "secondary" : "ghost"}
-          >
-            <EyeIcon />
-            {t("settings.viewParsedDocument")}
-          </Button>
-        ) : null}
-        <Badge variant={file.status === "failed" ? "destructive" : "outline"}>
-          {processing ? <LoaderCircleIcon className="animate-spin" /> : null}
-          {statusText}
-        </Badge>
-      </div>
+      <Badge variant={file.status === "failed" ? "destructive" : "outline"}>
+        {processing ? <LoaderCircleIcon className="animate-spin" /> : null}
+        {statusText}
+      </Badge>
     </div>
   );
 }
 
-function ParsedDocumentPanel({
+function ParsedDocumentLibrary({
+  data,
   error,
-  hasPrevious,
   i18nLanguage,
   isLoading,
+  isGeneratingChunks,
+  onGenerateChunks,
   onNext,
   onPrevious,
-  parsedDocument,
   t,
 }: {
+  data: ParsedDocumentListResponse | null;
   error: string | null;
-  hasPrevious: boolean;
   i18nLanguage: string;
   isLoading: boolean;
+  isGeneratingChunks: boolean;
+  onGenerateChunks: (fileId: string) => void;
   onNext: () => void;
   onPrevious: () => void;
-  parsedDocument: ParsedDocumentResponse | null;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   return (
-    <div className="mt-6 rounded-2xl border border-primary/20 bg-primary/[0.025]">
+    <section className="rounded-2xl border border-primary/20 bg-primary/[0.025]">
       <div className="flex flex-col gap-3 border-b border-border/70 p-5 md:flex-row md:items-start md:justify-between">
         <div className="flex items-start gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -668,29 +733,20 @@ function ParsedDocumentPanel({
           </span>
           <div>
             <p className="text-muted-foreground text-xs uppercase tracking-[0.14em]">
-              {t("settings.parsedDocumentTitle")}
+              {t("settings.parsedDocumentsTitle")}
             </p>
-            <h3 className="mt-1 font-semibold text-lg tracking-tight">
-              {parsedDocument?.parsedDocument.originalName ?? t("common.loading")}
-            </h3>
+            <h2 className="mt-1 font-semibold text-lg tracking-tight">
+              {t("settings.parsedDocumentsHeading")}
+            </h2>
             <p className="mt-1 text-muted-foreground text-sm">
-              {t("settings.parsedDocumentDescription")}
+              {t("settings.parsedDocumentsDescription")}
             </p>
           </div>
         </div>
-        {parsedDocument ? (
-          <div className="flex flex-wrap gap-2">
-            <Badge variant={chunkStatusVariant(parsedDocument.chunkStatus)}>
-              {t(`settings.chunkStatus.${parsedDocument.chunkStatus}`)}
-            </Badge>
-            <Badge variant="outline">
-              {t("settings.parsedDocumentBlockCount", {
-                count:
-                  parsedDocument.parsedDocument.totalBlocks ??
-                  parsedDocument.parsedDocument.blocks.length,
-              })}
-            </Badge>
-          </div>
+        {data ? (
+          <Badge variant="outline">
+            {t("settings.parsedDocumentsCount", { count: data.total })}
+          </Badge>
         ) : null}
       </div>
 
@@ -701,49 +757,168 @@ function ParsedDocumentPanel({
         >
           {error}
         </div>
-      ) : isLoading ? (
+      ) : isLoading && !data ? (
         <div className="p-5">
-          <InlineLoadingState message={t("settings.loadingParsedDocument")} />
+          <InlineLoadingState message={t("settings.loadingParsedDocuments")} />
         </div>
-      ) : parsedDocument ? (
+      ) : !data || data.items.length === 0 ? (
+        <p className="m-5 rounded-xl border border-dashed border-border/80 px-4 py-10 text-center text-muted-foreground text-sm">
+          {t("settings.noParsedDocuments")}
+        </p>
+      ) : (
         <>
-          <div className="grid gap-3 border-b border-border/70 p-5 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <div className="space-y-4 p-5">
+            {data.items.map((item) => (
+              <ParsedDocumentCard
+                i18nLanguage={i18nLanguage}
+                isGeneratingChunks={isGeneratingChunks}
+                item={item}
+                key={item.parsedDocumentId}
+                onGenerateChunks={onGenerateChunks}
+                t={t}
+              />
+            ))}
+          </div>
+          <div className="flex flex-col gap-3 border-t border-border/70 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-muted-foreground text-xs">
+              {t("settings.parsedDocumentsPage", {
+                from: data.offset + 1,
+                to: Math.min(data.offset + data.items.length, data.total),
+                total: data.total,
+              })}
+            </span>
+            <div className="flex gap-2 self-end">
+              <Button
+                disabled={data.offset === 0 || isLoading}
+                onClick={onPrevious}
+                size="sm"
+                variant="outline"
+              >
+                <ChevronLeftIcon />
+                {t("settings.previousParsedDocuments")}
+              </Button>
+              <Button
+                disabled={data.nextOffset === null || isLoading}
+                onClick={onNext}
+                size="sm"
+                variant="outline"
+              >
+                {t("settings.nextParsedDocuments")}
+                <ChevronRightIcon />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function ParsedDocumentCard({
+  i18nLanguage,
+  isGeneratingChunks,
+  item,
+  onGenerateChunks,
+  t,
+}: {
+  i18nLanguage: string;
+  isGeneratingChunks: boolean;
+  item: ParsedDocumentListItem;
+  onGenerateChunks: (fileId: string) => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const document = item.parsedDocument;
+  const [isExpanded, setIsExpanded] = useState(false);
+  const detailsId = `parsed-document-details-${item.parsedDocumentId}`;
+
+  return (
+    <article className="overflow-hidden rounded-xl border border-border/70 bg-background/60">
+      <div className="flex flex-col gap-3 border-b border-border/70 p-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <h4 className="truncate font-semibold text-base">{item.fileName}</h4>
+          <p className="mt-1 text-muted-foreground text-xs">
+            {formatBytes(item.fileByteSize)} · {item.fileMimeType} · {t("common.uploaded")} {formatDate(item.createdAt, i18nLanguage, t("common.unknownDate"))}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={item.fileStatus === "failed" ? "destructive" : "outline"}>
+            {item.fileStatus}
+          </Badge>
+          <Badge variant={chunkStatusVariant(item.chunkStatus)}>
+            {t(`settings.chunkStatus.${item.chunkStatus}`)}
+          </Badge>
+          <Button
+            aria-controls={detailsId}
+            aria-expanded={isExpanded}
+            onClick={() => setIsExpanded((current) => !current)}
+            size="sm"
+            variant="ghost"
+          >
+            <ChevronDownIcon
+              className={cn(
+                "transition-transform duration-200",
+                isExpanded && "rotate-180"
+              )}
+            />
+            {t(
+              isExpanded
+                ? "settings.collapseParsedDocument"
+                : "settings.expandParsedDocument"
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {isExpanded ? (
+        <div id={detailsId}>
+          <div className="grid gap-3 border-b border-border/70 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Metadata
               label={t("settings.parser")}
-              value={`${parsedDocument.parsedDocument.parser} · ${parsedDocument.parsedDocument.parserVersion}`}
+              value={`${document.parser} · ${document.parserVersion}`}
             />
             <Metadata
               label={t("settings.parsedDocumentSchema")}
-              value={parsedDocument.parsedDocument.schemaVersion}
+              value={document.schemaVersion}
             />
             <Metadata
               label={t("settings.parsedDocumentContentType")}
-              value={parsedDocument.parsedDocument.contentType}
+              value={document.contentType}
             />
             <Metadata
               label={t("settings.knowledgeChunks")}
-              value={String(parsedDocument.chunkCount)}
+              value={String(item.chunkCount)}
             />
           </div>
-          {parsedDocument.parsedDocument.warnings.length > 0 ? (
-            <div className="border-b border-amber-500/20 bg-amber-500/[0.06] px-5 py-3 text-amber-800 text-sm dark:text-amber-200">
-              {parsedDocument.parsedDocument.warnings.join(" ")}
+
+          <div className="border-b border-border/70 px-4 py-3 text-xs">
+            <p className="text-muted-foreground">
+              {t("settings.parsedDocumentFileHash")}: {shortHash(item.fileHash)}
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              {t("settings.parsedDocumentId")}: {shortHash(item.parsedDocumentId)}
+            </p>
+          </div>
+
+          {document.warnings.length > 0 ? (
+            <div className="border-b border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-amber-800 text-sm dark:text-amber-200">
+              {document.warnings.join(" ")}
             </div>
           ) : null}
-          {parsedDocument.chunkErrorMessage ? (
-            <div className="border-b border-destructive/20 bg-destructive/5 px-5 py-3 text-destructive text-sm">
-              {parsedDocument.chunkErrorMessage}
+          {item.chunkErrorMessage ? (
+            <div className="border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+              {item.chunkErrorMessage}
             </div>
           ) : null}
-          <div className="space-y-3 p-5">
-            {parsedDocument.parsedDocument.blocks.length === 0 ? (
+
+          <div className="space-y-3 p-4">
+            {document.blocks.length === 0 ? (
               <p className="rounded-xl border border-dashed border-border/80 px-4 py-8 text-center text-muted-foreground text-sm">
                 {t("settings.noParsedBlocks")}
               </p>
             ) : (
-              parsedDocument.parsedDocument.blocks.map((block, index) => (
+              document.blocks.map((block, index) => (
                 <article
-                  className="rounded-xl border border-border/70 bg-background/70 p-4"
+                  className="rounded-xl border border-border/70 bg-card/60 p-4"
                   key={block.blockId}
                 >
                   <div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
@@ -763,41 +938,42 @@ function ParsedDocumentPanel({
                 </article>
               ))
             )}
+            {document.truncated ? (
+              <p className="text-muted-foreground text-xs">
+                {t("settings.parsedDocumentTruncated", {
+                  count: document.totalBlocks ?? document.blocks.length,
+                })}
+              </p>
+            ) : null}
           </div>
-          <div className="flex flex-col gap-3 border-t border-border/70 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <span className="text-muted-foreground text-xs">
-              {t("settings.parsedDocumentUpdatedAt", {
-                date: formatDate(
-                  parsedDocument.updatedAt,
-                  i18nLanguage,
-                  t("common.unknownDate")
-                ),
-              })}
-            </span>
-            <div className="flex gap-2 self-end">
-              <Button
-                disabled={!hasPrevious}
-                onClick={onPrevious}
-                size="sm"
-                variant="outline"
-              >
-                <ChevronLeftIcon />
-                {t("settings.previousParsedBlocks")}
-              </Button>
-              <Button
-                disabled={parsedDocument.parsedDocument.nextCursor === null}
-                onClick={onNext}
-                size="sm"
-                variant="outline"
-              >
-                {t("settings.nextParsedBlocks")}
-                <ChevronRightIcon />
-              </Button>
-            </div>
-          </div>
-        </>
+        </div>
       ) : null}
-    </div>
+
+      <div className="flex flex-col gap-3 border-t border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-muted-foreground text-xs">
+          {t("settings.parsedDocumentUpdatedAt", {
+            date: formatDate(item.updatedAt, i18nLanguage, t("common.unknownDate")),
+          })}
+        </span>
+        <Button
+          disabled={
+            isGeneratingChunks ||
+            item.fileStatus !== "ready" ||
+            item.chunkStatus === "processing"
+          }
+          onClick={() => onGenerateChunks(item.fileId)}
+          size="sm"
+          variant="outline"
+        >
+          {item.chunkStatus === "processing" ? (
+            <LoaderCircleIcon className="animate-spin" />
+          ) : (
+            <Layers3Icon />
+          )}
+          {t("settings.generateKnowledgeChunks")}
+        </Button>
+      </div>
+    </article>
   );
 }
 
@@ -810,10 +986,4 @@ function Metadata({ label, value }: { label: string; value: string }) {
       <p className="mt-1 truncate font-medium">{value}</p>
     </div>
   );
-}
-
-function formatLocator(locator: Record<string, string | number>) {
-  return Object.entries(locator)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join(" · ");
 }
