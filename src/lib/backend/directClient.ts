@@ -208,3 +208,70 @@ export async function apiFetch(
     }),
   );
 }
+
+export type ApiUploadProgressHandler = (loaded: number, total: number) => void;
+
+function xhrResponse(xhr: XMLHttpRequest) {
+  const headers = new Headers();
+  const contentType = xhr.getResponseHeader("content-type");
+  if (contentType) {
+    headers.set("content-type", contentType);
+  }
+  return new Response(xhr.responseText, {
+    headers,
+    status: xhr.status,
+    statusText: xhr.statusText,
+  });
+}
+
+function sendUploadRequest(
+  target: string | URL,
+  formData: FormData,
+  requestHeaders: Headers,
+  withCredentials: boolean,
+  onProgress?: ApiUploadProgressHandler,
+) {
+  return new Promise<Response>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", target.toString(), true);
+    xhr.withCredentials = withCredentials;
+    requestHeaders.forEach((value, key) => xhr.setRequestHeader(key, value));
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) {
+        onProgress?.(event.loaded, event.total);
+      }
+    });
+    xhr.addEventListener("load", () => resolve(xhrResponse(xhr)));
+    xhr.addEventListener("error", () => reject(new TypeError("Network request failed.")));
+    xhr.addEventListener("abort", () => reject(new DOMException("The upload was aborted.", "AbortError")));
+    xhr.send(formData);
+  });
+}
+
+export async function apiUpload(
+  input: RequestInfo | URL,
+  formData: FormData,
+  onProgress?: ApiUploadProgressHandler,
+): Promise<Response> {
+  const method = "POST";
+  const requestHeaders = new Headers(
+    input instanceof Request ? input.headers : undefined,
+  );
+  if (!requestHeaders.has("X-CSRF-Token")) {
+    requestHeaders.set("X-CSRF-Token", await getLocalCsrfToken());
+  }
+
+  let target: string | URL = input instanceof Request ? input.url : input;
+  let withCredentials = false;
+  if (isFastApiProxyMode && typeof window !== "undefined") {
+    target = mapLegacyApiPath(input, method);
+    withCredentials = true;
+  } else if (isFastApiDirectMode && typeof window !== "undefined") {
+    target = mapLegacyApiUrl(input, method);
+    withCredentials = true;
+  }
+
+  const send = () =>
+    sendUploadRequest(target, formData, requestHeaders, withCredentials, onProgress);
+  return sendWithCsrfRecovery(method, requestHeaders, send);
+}

@@ -17,7 +17,7 @@ import { ThemeProvider } from "./components/themeProvider";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { LoadingState } from "./components/ui/loadingState";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
-import { KnowledgeBaseFiles } from "./components/settings/knowledgeBaseFiles";
+import { KnowledgeBaseManagement } from "./components/settings/knowledgeBaseManagement";
 import { KnowledgeBaseGrants } from "./components/settings/knowledgeBaseGrants";
 import { MemberPermissions } from "./components/settings/memberPermissions";
 import { AppearanceSettings } from "./components/settings/appearanceSettings";
@@ -261,8 +261,11 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="knowledge.manage">
-                  <SettingsPage titleKey="settings.knowledgeBaseFiles">
-                    <KnowledgeBaseFiles />
+                  <SettingsPage
+                    descriptionKey="settings.knowledgeBaseManagementDescription"
+                    titleKey="settings.knowledgeBases"
+                  >
+                    <KnowledgeBaseManagement />
                   </SettingsPage>
                 </PermissionRoute>
               }

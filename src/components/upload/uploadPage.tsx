@@ -26,9 +26,15 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BackendRequestError, requestBackend } from "@/lib/backend/request";
+import { InlineLoadingState } from "@/components/ui/loadingState";
+import {
+  BackendRequestError,
+  requestBackend,
+  requestBackendUpload,
+} from "@/lib/backend/request";
 import { Link } from "@/lib/router";
 import { cn } from "@/lib/utils";
+import { KnowledgeFileLibrary } from "./knowledgeFileLibrary";
 
 const ACCEPTED_EXTENSIONS = [
   ".xlsx",
@@ -41,7 +47,6 @@ const ACCEPTED_EXTENSIONS = [
   ".pptx",
 ] as const;
 const ACCEPT_ATTRIBUTE = ACCEPTED_EXTENSIONS.join(",");
-const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 
 type KnowledgeBase = {
   displayName: string;
@@ -57,6 +62,7 @@ type KnowledgeFile = {
   mimeType: string;
   originalName: string;
   status: string;
+  storageProvider: string;
   updatedAt: string;
 };
 
@@ -66,6 +72,7 @@ type UploadItem = {
   errorMessage?: string;
   id: string;
   file: File;
+  progress: number;
   status: UploadItemStatus;
 };
 
@@ -112,6 +119,7 @@ export function UploadPage() {
   const [isLoadingBases, setIsLoadingBases] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [storedFilesRefreshKey, setStoredFilesRefreshKey] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [featureDisabled, setFeatureDisabled] = useState(false);
 
@@ -165,22 +173,13 @@ export function UploadPage() {
             errorMessage: t("upload.unsupportedType", { name: file.name }),
             file,
             id,
+            progress: 0,
             status: "failed",
           });
           continue;
         }
 
-        if (file.size > MAX_FILE_SIZE_BYTES) {
-          nextItems.push({
-            errorMessage: t("upload.fileTooLarge", { name: file.name }),
-            file,
-            id,
-            status: "failed",
-          });
-          continue;
-        }
-
-        nextItems.push({ file, id, status: "ready" });
+        nextItems.push({ file, id, progress: 0, status: "ready" });
       }
 
       if (nextItems.length > 0) {
@@ -241,9 +240,14 @@ export function UploadPage() {
 
     for (const item of readyItems) {
       setItems((current) =>
-        current.map((currentItem) =>
-          currentItem.id === item.id
-            ? { ...currentItem, status: "uploading", errorMessage: undefined }
+          current.map((currentItem) =>
+            currentItem.id === item.id
+            ? {
+                ...currentItem,
+                errorMessage: undefined,
+                progress: 0,
+                status: "uploading",
+              }
             : currentItem
         )
       );
@@ -251,15 +255,27 @@ export function UploadPage() {
       try {
         const formData = new FormData();
         formData.append("file", item.file);
-        await requestBackend<{ file: KnowledgeFile }>(
+        await requestBackendUpload<{ file: KnowledgeFile }>(
           `/api/knowledge-bases/${encodeURIComponent(selectedKnowledgeBaseId)}/files`,
-          { body: formData, method: "POST" }
+          formData,
+          (loaded, total) => {
+            const progress = total
+              ? Math.min(99, Math.round((loaded / total) * 100))
+              : 0;
+            setItems((current) =>
+              current.map((currentItem) =>
+                currentItem.id === item.id
+                  ? { ...currentItem, progress }
+                  : currentItem
+              )
+            );
+          }
         );
         uploadedCount += 1;
         setItems((current) =>
           current.map((currentItem) =>
             currentItem.id === item.id
-              ? { ...currentItem, status: "uploaded" }
+              ? { ...currentItem, progress: 100, status: "uploaded" }
               : currentItem
           )
         );
@@ -277,6 +293,9 @@ export function UploadPage() {
     }
 
     setIsUploading(false);
+    if (uploadedCount > 0) {
+      setStoredFilesRefreshKey((current) => current + 1);
+    }
     if (uploadedCount === readyItems.length) {
       toast.success(t("upload.allUploaded"));
     } else if (uploadedCount > 0) {
@@ -289,19 +308,30 @@ export function UploadPage() {
   const readyCount = items.filter(({ status }) => status === "ready").length;
   const uploadedCount = items.filter(({ status }) => status === "uploaded").length;
   const totalBytes = items.reduce((total, { file }) => total + file.size, 0);
+  const progressItems = items.filter(({ status }) => status !== "failed");
+  const progressTotalBytes = progressItems.reduce(
+    (total, { file }) => total + file.size,
+    0
+  );
+  const progressTransferredBytes = progressItems.reduce(
+    (total, item) =>
+      total +
+      (item.status === "uploaded"
+        ? item.file.size
+        : item.status === "uploading"
+          ? (item.file.size * item.progress) / 100
+          : 0),
+    0
+  );
+  const overallProgress = progressTotalBytes
+    ? Math.min(
+        100,
+        Math.round((progressTransferredBytes / progressTotalBytes) * 100)
+      )
+    : 0;
 
   if (isLoadingBases) {
-    return (
-      <main className="min-h-full bg-background px-4 py-8 md:px-8 md:py-10">
-        <div className="mx-auto max-w-6xl animate-pulse space-y-6">
-          <div className="h-32 rounded-2xl bg-muted/50" />
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
-            <div className="h-[28rem] rounded-2xl bg-muted/50" />
-            <div className="h-[28rem] rounded-2xl bg-muted/50" />
-          </div>
-        </div>
-      </main>
-    );
+    return <InlineLoadingState message={t("common.loading")} />;
   }
 
   return (
@@ -345,8 +375,8 @@ export function UploadPage() {
           </div>
         ) : null}
 
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
-          <section className="min-w-0 rounded-2xl border border-border/70 bg-card/50 shadow-[var(--shadow-card)]">
+        <div className="w-full">
+          <section className="w-full rounded-2xl border border-border/70 bg-card/50 shadow-[var(--shadow-card)]">
             <div className="border-b border-border/70 p-5 md:p-7">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -483,8 +513,28 @@ export function UploadPage() {
 
             {knowledgeBases.length > 0 ? (
               <div className="flex flex-col gap-4 border-t border-border/70 bg-muted/20 px-5 py-4 md:flex-row md:items-center md:justify-between md:px-7">
-                <div className="text-muted-foreground text-xs">
-                  {items.length > 0 ? (
+                <div className="min-w-0 flex-1 text-muted-foreground text-xs">
+                  {isUploading ? (
+                    <div className="max-w-sm space-y-2" role="status">
+                      <div className="flex items-center justify-between gap-3">
+                        <span>{t("upload.overallProgress")}</span>
+                        <span className="font-mono text-foreground">{overallProgress}%</span>
+                      </div>
+                      <div
+                        aria-label={t("upload.overallProgress")}
+                        aria-valuemax={100}
+                        aria-valuemin={0}
+                        aria-valuenow={overallProgress}
+                        className="h-1.5 overflow-hidden rounded-full bg-border"
+                        role="progressbar"
+                      >
+                        <div
+                          className="h-full rounded-full bg-primary transition-[width] duration-200"
+                          style={{ width: `${overallProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : items.length > 0 ? (
                     <>
                       {t("upload.queueSummary", { count: items.length })} · {formatBytes(totalBytes)}
                     </>
@@ -505,31 +555,13 @@ export function UploadPage() {
             ) : null}
           </section>
 
-          <aside className="flex flex-col gap-5">
-            <section className="rounded-2xl border border-border/70 bg-card/50 p-5 shadow-[var(--shadow-card)] md:p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="font-mono text-muted-foreground text-xs">01 / 03</p>
-                  <h2 className="mt-4 font-medium text-base tracking-tight">{t("upload.sideTitle")}</h2>
-                </div>
-                <span className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                  <DatabaseIcon className="size-4" />
-                </span>
-              </div>
-              <p className="mt-3 text-muted-foreground text-sm leading-6">{t("upload.sideDescription")}</p>
-              <div className="mt-5 space-y-3 border-t border-border/70 pt-5">
-                <SideNote label={t("upload.sideFormats")} value="XLSX · CSV · JSON · MD · TXT · PDF · PPT" />
-                <SideNote label={t("upload.sideLimit")} value="25 MB / file" />
-                <SideNote label={t("upload.sideNext")} value={t("upload.sideNextValue")} />
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-border/70 bg-primary/[0.035] p-5 md:p-6">
-              <LockKeyholeIcon className="size-4 text-muted-foreground" />
-              <h2 className="mt-4 font-medium text-base tracking-tight">{t("upload.privacyTitle")}</h2>
-              <p className="mt-2 text-muted-foreground text-sm leading-6">{t("upload.privacyDescription")}</p>
-            </section>
-          </aside>
+          {selectedKnowledgeBaseId ? (
+            <KnowledgeFileLibrary
+              disabled={isUploading}
+              knowledgeBaseId={selectedKnowledgeBaseId}
+              refreshKey={storedFilesRefreshKey}
+            />
+          ) : null}
         </div>
       </div>
     </main>
@@ -590,6 +622,26 @@ function UploadItemRow({
         {item.errorMessage ? (
           <p className="mt-1 text-destructive text-xs leading-5">{item.errorMessage}</p>
         ) : null}
+        {isUploading ? (
+          <div className="mt-2 flex items-center gap-2">
+            <div
+              aria-label={t("upload.fileProgress", { progress: item.progress })}
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={item.progress}
+              className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-border"
+              role="progressbar"
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-[width] duration-200"
+                style={{ width: `${item.progress}%` }}
+              />
+            </div>
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+              {item.progress}%
+            </span>
+          </div>
+        ) : null}
       </div>
       <button
         aria-label={t("upload.removeFile", { name: item.file.name })}
@@ -600,15 +652,6 @@ function UploadItemRow({
       >
         <XIcon className="size-4" />
       </button>
-    </div>
-  );
-}
-
-function SideNote({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-4 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium text-foreground">{value}</span>
     </div>
   );
 }

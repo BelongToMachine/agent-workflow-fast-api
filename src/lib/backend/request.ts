@@ -1,4 +1,4 @@
-import { apiFetch } from "./directClient";
+import { apiFetch, apiUpload, type ApiUploadProgressHandler } from "./directClient";
 
 export type BackendErrorPayload = {
   cause?: string;
@@ -70,6 +70,28 @@ function normalizeInit(init: RequestInit = {}): RequestInit {
   return { ...init, headers };
 }
 
+async function parseBackendResponse<TData>(response: Response): Promise<TData> {
+  const contentType = response.headers.get("content-type") ?? "";
+  const payload = contentType.includes("application/json")
+    ? ((await response.json().catch(() => null)) as unknown)
+    : await response.text();
+
+  if (!response.ok) {
+    const error = new BackendRequestError(
+      response.status,
+      payload && typeof payload === "object"
+        ? (payload as BackendErrorPayload)
+        : null
+    );
+    if (response.status === 401 || response.status === 403) {
+      authorizationFailureHandler?.(error);
+    }
+    throw error;
+  }
+
+  return payload as TData;
+}
+
 export async function requestBackend<TData>(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -108,25 +130,7 @@ export async function requestBackend<TData>(
       })
     );
 
-    const contentType = response.headers.get("content-type") ?? "";
-    const payload = contentType.includes("application/json")
-      ? ((await response.json().catch(() => null)) as unknown)
-      : await response.text();
-
-    if (!response.ok) {
-      const error = new BackendRequestError(
-        response.status,
-        payload && typeof payload === "object"
-          ? (payload as BackendErrorPayload)
-          : null
-      );
-      if (response.status === 401 || response.status === 403) {
-        authorizationFailureHandler?.(error);
-      }
-      throw error;
-    }
-
-    return payload as TData;
+    return parseBackendResponse<TData>(response);
   } catch (error) {
     if (timeoutTriggered) {
       throw new BackendRequestError(504, {
@@ -143,4 +147,13 @@ export async function requestBackend<TData>(
       parentSignal.removeEventListener("abort", abortFromParent);
     }
   }
+}
+
+export async function requestBackendUpload<TData>(
+  input: RequestInfo | URL,
+  formData: FormData,
+  onProgress?: ApiUploadProgressHandler,
+): Promise<TData> {
+  const response = await apiUpload(input, formData, onProgress);
+  return parseBackendResponse<TData>(response);
 }
