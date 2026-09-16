@@ -74,7 +74,7 @@ CPU、内存、磁盘和网络带宽必须在执行前通过实机命令确认�
 
 当前项目不能直接把已有 Docker 文件复制到 VPS 后启动：
 
-1. 当前 `Dockerfile` 只安装 FastAPI、Pydantic Settings 和 Uvicorn，没有安装 `asyncpg`、`redis`、`SQLAlchemy`、`httpx`、`boto3`、`pypdf`、`openpyxl` 等完整运行依赖。
+1. 当前 `Dockerfile` 只安装 FastAPI、Pydantic Settings 和 Uvicorn，没有安装 `asyncpg`、`redis`、`SQLAlchemy`、`httpx`、`boto3`、`rapidocr-pdf`、`openpyxl` 等完整运行依赖。
 2. 当前 `compose.yaml` 只定义 PostgreSQL 和 Redis，没有定义 FastAPI 服务。
 3. 当前 Compose 将 `5432` 和 `6379` 发布到宿主机所有网卡，不适合公网 VPS。
 4. 当前 `/api/v1/healthz` 只检查 FastAPI 进程能否响应，不检查 PostgreSQL、Redis 或模型服务。

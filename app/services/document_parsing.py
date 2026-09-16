@@ -16,13 +16,15 @@ import re
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, time
+from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any, Literal, Protocol
 
 from openpyxl import load_workbook
 from pptx import Presentation
 from pydantic import BaseModel, ConfigDict, Field
-from pypdf import PdfReader
+from rapidocr_pdf import RapidOCRPDF
 
 SUPPORTED_EXTENSIONS = {
     ".csv": "text/csv",
@@ -44,6 +46,7 @@ PARSED_DOCUMENT_SCHEMA_VERSION = "parsed-document.v1"
 MAX_PARSE_BYTES = 100 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+_PDF_OCR_LOCK = Lock()
 
 ContentType = Literal["text", "structured", "mixed"]
 OutputFormat = Literal["text", "structured"]
@@ -392,34 +395,75 @@ def _parse_xlsx(content: bytes) -> _ParserOutput:
     return _ParserOutput("xlsx", "xlsx-1", "structured", blocks, warnings)
 
 
+@lru_cache(maxsize=1)
+def _get_pdf_extractor() -> RapidOCRPDF:
+    """Create one bounded RapidOCRPDF instance and reuse its loaded models."""
+    return RapidOCRPDF(
+        ocr_params={
+            "EngineConfig.onnxruntime.intra_op_num_threads": 2,
+            "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+        }
+    )
+
+
+def _parse_pdf_page_result(result: object) -> tuple[int, str, float | None]:
+    if not isinstance(result, (list, tuple)) or len(result) < 2:
+        raise ValueError("The PDF OCR returned an invalid page result.")
+    try:
+        page_number = int(result[0]) + 1
+    except (TypeError, ValueError) as error:
+        raise ValueError("The PDF OCR returned an invalid page number.") from error
+
+    page_text = "" if result[1] is None else str(result[1])
+    confidence: float | None = None
+    raw_confidence = result[2] if len(result) >= 3 else None
+    if raw_confidence not in (None, "", "N/A", "n/a"):
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError) as error:
+            raise ValueError("The PDF OCR returned an invalid confidence score.") from error
+    return page_number, page_text, confidence
+
+
 def _parse_pdf(content: bytes) -> _ParserOutput:
     try:
-        reader = PdfReader(io.BytesIO(content))
+        # The wrapper uses native PDF text extraction where available and
+        # falls back to RapidOCR for scanned pages.  Serializing calls keeps
+        # the two-vCPU deployment from loading competing OCR jobs at once.
+        with _PDF_OCR_LOCK:
+            page_results = _get_pdf_extractor()(content, force_ocr=False)
+    except ValueError:
+        raise
     except Exception as error:
-        raise ValueError("The PDF document could not be parsed.") from error
+        raise ValueError("The PDF document could not be parsed with RapidOCR.") from error
 
     blocks: list[_RawBlock] = []
     warnings: list[str] = []
-    for page_number, page in enumerate(reader.pages, start=1):
-        try:
-            page_text = page.extract_text() or ""
-        except Exception:
-            warnings.append(f"Page {page_number} could not be read as text.")
-            continue
+    try:
+        results = list(page_results or [])
+    except TypeError as error:
+        raise ValueError("The PDF OCR returned an invalid result.") from error
+
+    for result in results:
+        page_number, page_text, confidence = _parse_pdf_page_result(result)
         paragraphs = _paragraphs(page_text.replace("\r\n", "\n").replace("\r", "\n"))
         if not paragraphs:
-            warnings.append(f"Page {page_number} has no extractable text; OCR is not enabled.")
+            warnings.append(
+                f"Page {page_number} has no extractable text after PDF text extraction and OCR."
+            )
         for paragraph_number, (value, _start, _end) in enumerate(paragraphs, start=1):
             blocks.append(
                 _RawBlock(
                     kind="paragraph",
                     text=value,
                     locator={"page": page_number, "paragraph": paragraph_number},
+                    data={"confidence": confidence} if confidence is not None else None,
+                    extraction_method="rapidocr_pdf",
                 )
             )
     if not blocks and not warnings:
-        warnings.append("The PDF contains no extractable text.")
-    return _ParserOutput("pdf", "pdf-1", "text", blocks, warnings)
+        warnings.append("The PDF contains no extractable text after PDF text extraction and OCR.")
+    return _ParserOutput("pdf-rapidocr", "pdf-rapidocr-1", "text", blocks, warnings)
 
 
 def _parse_pptx_shape(shape: object, slide_number: int, shape_number: int) -> list[_RawBlock]:

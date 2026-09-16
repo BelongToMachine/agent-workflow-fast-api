@@ -1,6 +1,5 @@
 import io
 import json
-from types import SimpleNamespace
 
 import pytest
 from openpyxl import Workbook
@@ -94,26 +93,37 @@ def test_xlsx_documents_emit_sheet_and_row_records() -> None:
     assert document.blocks[2].data == {"name": "Chair", "price": 10}
 
 
-def test_pdf_documents_emit_page_and_paragraph_locators(monkeypatch) -> None:
-    class FakePage:
-        def __init__(self, content: str) -> None:
-            self.content = content
+def test_pdf_documents_use_rapidocr_pdf_and_emit_page_paragraph_metadata(monkeypatch) -> None:
+    class FakeRapidOCRPDF:
+        calls: list[tuple[bytes, bool]] = []
 
-        def extract_text(self) -> str:
-            return self.content
+        def __init__(self, *, ocr_params: dict[str, int]) -> None:
+            assert ocr_params["EngineConfig.onnxruntime.intra_op_num_threads"] == 2
+            assert ocr_params["EngineConfig.onnxruntime.inter_op_num_threads"] == 1
+
+        def __call__(self, content: bytes, *, force_ocr: bool = False):
+            self.calls.append((content, force_ocr))
+            return [
+                [0, "Product brief\n\nChair details", 0.98],
+                [1, "", "N/A"],
+            ]
 
     monkeypatch.setattr(
-        "app.services.document_parsing.PdfReader",
-        lambda _stream: SimpleNamespace(
-            pages=[FakePage("Product brief\n\nChair details"), FakePage("")]
-        ),
+        "app.services.document_parsing.RapidOCRPDF",
+        FakeRapidOCRPDF,
+        raising=False,
     )
 
     document = parse_document("brief.pdf", b"%PDF-fake")
 
     _assert_contract(document)
     assert document.content_type == "text"
+    assert document.parser == "pdf-rapidocr"
+    assert document.parser_version == "pdf-rapidocr-1"
     assert document.blocks[0].locator == {"page": 1, "paragraph": 1}
+    assert document.blocks[0].extraction_method == "rapidocr_pdf"
+    assert document.blocks[0].data == {"confidence": 0.98}
+    assert FakeRapidOCRPDF.calls == [(b"%PDF-fake", False)]
     assert any("no extractable text" in warning for warning in document.warnings)
 
 

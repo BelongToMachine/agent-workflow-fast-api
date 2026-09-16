@@ -86,6 +86,37 @@ class KnowledgeParsedDocumentResponse(BaseModel):
     updated_at: str = Field(alias="updatedAt")
 
 
+class KnowledgeParsedDocumentListItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    chunk_count: int = Field(alias="chunkCount")
+    chunk_error_message: str | None = Field(
+        default=None,
+        alias="chunkErrorMessage",
+    )
+    chunk_status: str = Field(alias="chunkStatus")
+    created_at: str = Field(alias="createdAt")
+    file_byte_size: int = Field(alias="fileByteSize")
+    file_hash: str = Field(alias="fileHash")
+    file_id: str = Field(alias="fileId")
+    file_mime_type: str = Field(alias="fileMimeType")
+    file_name: str = Field(alias="fileName")
+    file_status: str = Field(alias="fileStatus")
+    parsed_document: ParsedDocument = Field(alias="parsedDocument")
+    parsed_document_id: str = Field(alias="parsedDocumentId")
+    updated_at: str = Field(alias="updatedAt")
+
+
+class KnowledgeParsedDocumentListResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    items: list[KnowledgeParsedDocumentListItem]
+    limit: int
+    next_offset: int | None = Field(alias="nextOffset")
+    offset: int
+    total: int
+
+
 FILE_SELECT = text(
     """
     SELECT
@@ -205,6 +236,47 @@ PARSED_DOCUMENT_BY_FILE_QUERY = text(
       AND "knowledgeBaseId" = :knowledge_base_id
       AND "workspaceId" = :workspace_id
     LIMIT 1
+    """
+)
+
+PARSED_DOCUMENT_LIST_QUERY = text(
+    """
+    SELECT
+        parsed."blockCount" AS block_count,
+        (
+            SELECT COUNT(*)
+            FROM "KnowledgeChunk" AS chunk
+            WHERE chunk."fileId" = parsed."fileId"
+              AND chunk."knowledgeBaseId" = parsed."knowledgeBaseId"
+              AND chunk."workspaceId" = parsed."workspaceId"
+        ) AS chunk_count,
+        parsed."chunkErrorMessage" AS chunk_error_message,
+        parsed."chunkStatus" AS chunk_status,
+        parsed."createdAt" AS created_at,
+        parsed."document" AS document,
+        parsed."fileHash" AS file_hash,
+        parsed."fileId" AS file_id,
+        parsed."id" AS parsed_document_id,
+        parsed."updatedAt" AS updated_at,
+        file."byteSize" AS file_byte_size,
+        file."mimeType" AS file_mime_type,
+        file."originalName" AS file_name,
+        file."status" AS file_status
+    FROM "KnowledgeParsedDocument" AS parsed
+    INNER JOIN "KnowledgeFile" AS file ON file."id" = parsed."fileId"
+    WHERE parsed."knowledgeBaseId" = :knowledge_base_id
+      AND parsed."workspaceId" = :workspace_id
+    ORDER BY parsed."updatedAt" DESC, parsed."id" DESC
+    LIMIT :limit OFFSET :offset
+    """
+)
+
+PARSED_DOCUMENT_COUNT_QUERY = text(
+    """
+    SELECT COUNT(*) AS document_count
+    FROM "KnowledgeParsedDocument" AS parsed
+    WHERE parsed."knowledgeBaseId" = :knowledge_base_id
+      AND parsed."workspaceId" = :workspace_id
     """
 )
 
@@ -377,6 +449,39 @@ def _parsed_document_response(
         parsedDocument=ParsedDocument.model_validate(
             _parsed_document_value(row["document"])
         ),
+        parsedDocumentId=str(row["parsed_document_id"]),
+        updatedAt=_iso_timestamp(row["updated_at"]),
+    )
+
+
+def _parsed_document_list_item(
+    row: dict[str, object],
+    chunk_count: int,
+    *,
+    block_offset: int,
+    block_limit: int,
+) -> KnowledgeParsedDocumentListItem:
+    document = paginate_parsed_document(
+        ParsedDocument.model_validate(_parsed_document_value(row["document"])),
+        offset=block_offset,
+        limit=block_limit,
+    )
+    return KnowledgeParsedDocumentListItem(
+        chunkCount=chunk_count,
+        chunkErrorMessage=(
+            row["chunk_error_message"]
+            if isinstance(row.get("chunk_error_message"), str)
+            else None
+        ),
+        chunkStatus=str(row["chunk_status"]),
+        createdAt=_iso_timestamp(row["created_at"]),
+        fileByteSize=int(row["file_byte_size"]),
+        fileHash=str(row["file_hash"]),
+        fileId=str(row["file_id"]),
+        fileMimeType=str(row["file_mime_type"]),
+        fileName=str(row["file_name"]),
+        fileStatus=str(row["file_status"]),
+        parsedDocument=document,
         parsedDocumentId=str(row["parsed_document_id"]),
         updatedAt=_iso_timestamp(row["updated_at"]),
     )
@@ -739,6 +844,82 @@ async def parse_knowledge_file(
     row["status"] = "processing"
     row["error_message"] = None
     return {"file": _file_summary(row)}
+
+
+@router.get(
+    "/{knowledge_base_id}/parsed-documents",
+    response_model=KnowledgeParsedDocumentListResponse,
+)
+async def list_parsed_knowledge_documents(
+    knowledge_base_id: UUID,
+    workspace_id: UUID = Query(..., alias="workspace_id"),
+    offset: int = Query(default=0, ge=0, le=100_000),
+    limit: int = Query(default=20, ge=1, le=100),
+    block_offset: int = Query(default=0, ge=0, le=100_000),
+    block_limit: int = Query(default=30, ge=1, le=100),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> KnowledgeParsedDocumentListResponse | JSONResponse:
+    """Return all persisted ParsedDocuments belonging to one knowledge base."""
+    await require_knowledge_base_permission(
+        current_user,
+        workspace_id,
+        knowledge_base_id,
+        "read",
+    )
+    if not settings.knowledge_ingestion_enabled:
+        return _feature_disabled()
+
+    page_offset = offset if isinstance(offset, int) else 0
+    page_limit = limit if isinstance(limit, int) else 20
+    parsed_block_offset = block_offset if isinstance(block_offset, int) else 0
+    parsed_block_limit = block_limit if isinstance(block_limit, int) else 30
+    query_parameters = {
+        "knowledge_base_id": knowledge_base_id,
+        "workspace_id": workspace_id,
+    }
+    try:
+        async with get_db_connection() as connection:
+            result = await connection.execute(
+                PARSED_DOCUMENT_LIST_QUERY,
+                {
+                    **query_parameters,
+                    "limit": page_limit,
+                    "offset": page_offset,
+                },
+            )
+            rows = result.mappings().all()
+            count_result = await connection.execute(
+                PARSED_DOCUMENT_COUNT_QUERY,
+                query_parameters,
+            )
+            total = int(count_result.mappings().one()["document_count"])
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except (KeyError, TypeError, ValueError, SQLAlchemyError):
+        return _database_error("FastAPI could not list parsed knowledge documents.")
+
+    try:
+        items = [
+            _parsed_document_list_item(
+                dict(row),
+                chunk_count=int(row["chunk_count"]),
+                block_offset=parsed_block_offset,
+                block_limit=parsed_block_limit,
+            )
+            for row in rows
+        ]
+    except (KeyError, TypeError, ValueError):
+        return _database_error("FastAPI could not read parsed knowledge documents.")
+
+    next_offset = page_offset + page_limit if page_offset + page_limit < total else None
+    return KnowledgeParsedDocumentListResponse(
+        items=items,
+        limit=page_limit,
+        nextOffset=next_offset,
+        offset=page_offset,
+        total=total,
+    )
 
 
 @router.get(

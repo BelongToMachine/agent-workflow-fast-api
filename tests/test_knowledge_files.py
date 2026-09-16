@@ -21,6 +21,7 @@ from app.api.routes.knowledge_files import (
     FILE_LIST_QUERY,
     PARSED_DOCUMENT_BY_FILE_QUERY,
     KnowledgeFileSummary,
+    KnowledgeParsedDocumentListResponse,
     KnowledgeParsedDocumentResponse,
     _chunk_text,
     _content_matches_extension,
@@ -28,6 +29,7 @@ from app.api.routes.knowledge_files import (
     _safe_filename,
     _storage_path,
     get_parsed_knowledge_document,
+    list_parsed_knowledge_documents,
     materialize_knowledge_chunks,
     materialize_knowledge_file_chunks,
     parse_knowledge_file,
@@ -126,9 +128,11 @@ class FakeUploadResult:
         self,
         *,
         row: dict[str, object] | None = None,
+        rows: list[dict[str, object]] | None = None,
         scalar_value: object | None = None,
     ) -> None:
         self.row = row
+        self.rows = rows or ([] if row is None else [row])
         self.scalar_value = scalar_value
 
     def mappings(self):
@@ -136,6 +140,9 @@ class FakeUploadResult:
 
     def first(self):
         return self.row
+
+    def all(self):
+        return self.rows
 
     def one(self) -> dict[str, object]:
         assert self.row is not None
@@ -694,6 +701,101 @@ def test_parsed_document_is_readable_and_chunking_is_a_separate_manual_action(
     assert isinstance(chunk_result, KnowledgeParsedDocumentResponse)
     assert chunk_result.chunk_status == "processing"
     assert background_tasks.tasks == [(materialize_knowledge_chunks, (file_id, workspace_id))]
+
+
+def test_knowledge_base_parsed_document_list_returns_all_parsed_files(
+    monkeypatch,
+) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    first_file_id = UUID("00000000-0000-0000-0000-000000000003")
+    second_file_id = UUID("00000000-0000-0000-0000-000000000004")
+    first_document = parse_document(
+        "first.csv",
+        b"name,price\nchair,10",
+        file_id=str(first_file_id),
+        file_hash="hash-first",
+        mime_type="text/csv",
+    )
+    second_document = parse_document(
+        "second.txt",
+        b"A product description.",
+        file_id=str(second_file_id),
+        file_hash="hash-second",
+        mime_type="text/plain",
+    )
+    rows = [
+        {
+            "file_byte_size": 20,
+            "chunk_count": 2,
+            "chunk_error_message": None,
+            "chunk_status": "ready",
+            "created_at": datetime(2026, 8, 17, 12, 30),
+            "document": first_document.model_dump(by_alias=True),
+            "file_hash": "hash-first",
+            "file_id": first_file_id,
+            "file_mime_type": "text/csv",
+            "file_name": "first.csv",
+            "file_status": "ready",
+            "parsed_document_id": UUID("00000000-0000-0000-0000-000000000005"),
+            "updated_at": datetime(2026, 8, 17, 12, 30),
+        },
+        {
+            "file_byte_size": 21,
+            "chunk_count": 0,
+            "chunk_error_message": None,
+            "chunk_status": "pending",
+            "created_at": datetime(2026, 8, 17, 12, 31),
+            "document": second_document.model_dump(by_alias=True),
+            "file_hash": "hash-second",
+            "file_id": second_file_id,
+            "file_mime_type": "text/plain",
+            "file_name": "second.txt",
+            "file_status": "ready",
+            "parsed_document_id": UUID("00000000-0000-0000-0000-000000000006"),
+            "updated_at": datetime(2026, 8, 17, 12, 31),
+        },
+    ]
+
+    class ParsedDocumentListConnection:
+        async def execute(self, query: object, params: dict[str, object]):
+            sql = str(query)
+            if sql.lstrip().startswith("SELECT COUNT(*)"):
+                return FakeUploadResult(row={"document_count": len(rows)})
+            return FakeUploadResult(rows=rows)
+
+    async def fake_require_permission(*_args, **_kwargs):
+        return SimpleNamespace(role="owner")
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(ParsedDocumentListConnection()),
+    )
+
+    result = asyncio.run(
+        list_parsed_knowledge_documents(
+            knowledge_base_id=knowledge_base_id,
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(
+                user_id="00000000-0000-0000-0000-000000000010"
+            ),
+            settings=Settings(knowledge_ingestion_enabled=True),
+        )
+    )
+
+    assert isinstance(result, KnowledgeParsedDocumentListResponse)
+    assert result.total == 2
+    assert [item.file_id for item in result.items] == [
+        str(first_file_id),
+        str(second_file_id),
+    ]
+    assert result.items[0].file_name == "first.csv"
+    assert result.items[0].parsed_document.blocks
+    assert result.items[1].chunk_status == "pending"
 
 
 def test_duplicate_upload_removes_object_after_database_conflict(monkeypatch) -> None:

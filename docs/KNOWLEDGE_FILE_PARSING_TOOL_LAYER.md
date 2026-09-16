@@ -45,6 +45,7 @@ AI Agent / Embedding / RAG
 ```text
 listKnowledgeFilesTool
 inspectKnowledgeFileTool
+listParsedDocumentsTool
 ```
 
 `inspectKnowledgeFileTool` 应返回：
@@ -60,8 +61,9 @@ inspectKnowledgeFileTool
 
 ```text
 extractKnowledgeFileTool
-GET /knowledge-bases/{knowledgeBaseId}/files/{fileId}/parsed-document
 POST /knowledge-bases/{knowledgeBaseId}/files/{fileId}/parse
+GET /knowledge-bases/{knowledgeBaseId}/parsed-documents
+GET /knowledge-bases/{knowledgeBaseId}/files/{fileId}/parsed-document
 ```
 
 解析工具建议支持：
@@ -76,12 +78,13 @@ POST /knowledge-bases/{knowledgeBaseId}/files/{fileId}/parse
 }
 ```
 
-当前 API 的解析任务通过 FastAPI 后台任务执行，结果持久化在 PostgreSQL 的 `KnowledgeParsedDocument.document` JSONB 字段。查看接口默认分页返回 30 个 block，支持 `offset`/`limit`，不会把大文件的原始二进制返回浏览器。生产环境后续可将后台任务替换为 Redis Worker。
+当前 API 的解析任务通过 FastAPI 后台任务执行，结果持久化在 PostgreSQL 的 `KnowledgeParsedDocument.document` JSONB 字段。知识库级接口 `GET /knowledge-bases/{knowledgeBaseId}/parsed-documents` 返回该知识库下所有已保存的 ParsedDocument，并按 `offset`/`limit` 分页 ParsedDocument 记录；每个 ParsedDocument 默认返回前 30 个 block，可用 `block_offset`/`block_limit` 分页 block。原来的文件级接口仍保留，用于兼容和查看单个文件的中间态。接口不会把大文件的原始二进制返回浏览器。生产环境后续可将后台任务替换为 Redis Worker。
 
 ### 3.3 ParsedDocument 审核与切片
 
 ```text
-GET  .../parsed-document       查看分页后的中间态
+GET  .../parsed-documents       查看当前知识库的全部中间态
+GET  .../files/{fileId}/parsed-document  查看单个文件的中间态
 POST .../chunks                 手动触发 ParsedDocument → KnowledgeChunk
 ```
 
@@ -157,19 +160,19 @@ publishApprovedChunks
 | JSON | Python `json` | JSON 和规范化文本 | 保留数组层级和 JSON Path |
 | CSV | Python `csv` 或 Polars | 表头、行数据、JSON rows | 需要处理编码、分隔符、空值和重复表头 |
 | XLSX | `openpyxl` | Sheet、表头、行数据和文本 | 使用只读模式，保留 Sheet 和行号 |
-| PDF | `pypdf` | 按页纯文本 | 扫描件需要额外 OCR |
+| PDF | `rapidocr_pdf`（内部使用 PyMuPDF + RapidOCR/ONNX Runtime） | 按页提取文本，扫描页自动 OCR | 支持普通、扫描和混合 PDF；保留页码与页面置信度 |
 | PPTX | `python-pptx` | 按幻灯片、形状和表格提取文本 | 图片和图表中的文字需要 OCR |
 | PPT | LibreOffice 转换或暂不支持 | — | 旧式二进制格式不建议直接解析 |
 
 当前代码中已经使用或预留：
 
-- `pypdf`：PDF 文本层解析；
+- `rapidocr_pdf`：统一处理 PDF 文本层和扫描页 OCR；底层使用 PyMuPDF 提取原生文本，使用 RapidOCR/ONNX Runtime 识别图片型页面；
 - `openpyxl`：XLSX 只读解析；
 - `python-pptx`：PPTX 文本和表格解析；
 - Python 标准库：CSV、JSON、TXT；
 - 现有 S3/MinIO storage adapter：统一读取原始文件和保存解析产物。
 
-扫描 PDF、图片型 PDF、PPTX 内嵌图片和图表的 OCR 应作为独立 Parser Adapter，不应混入普通文本解析器。
+当前 PDF Adapter 已统一使用 `rapidocr_pdf`：普通 PDF 优先读取原生文本，无法提取文字的页面自动进入 RapidOCR。这样可以覆盖普通、扫描和混合 PDF，同时保留同一个 `ParsedDocument` 输出契约。PPTX 内嵌图片和图表的 OCR 仍应作为独立 Parser Adapter，未来也可以把云端 OCR 作为 PDF 的可选替代实现。
 
 ## 6. PostgreSQL 结构化数据通道
 
@@ -283,6 +286,8 @@ updatedAt
 
 这张表保留的是“确定性解析结果”，不是业务表，也不是向量数据库。它让开发人员可以审核和重跑切片；原始文件仍保存在 S3/MinIO，`KnowledgeFile` 是原文件和业务来源的锚点。
 
+当前阶段暂不做文件版本管理：一个 `KnowledgeFile` 只对应一条当前的 `KnowledgeParsedDocument`，重新解析会更新这条中间态记录；知识库级列表接口返回当前知识库下所有文件的 ParsedDocument。后续如果需要历史版本，再单独引入逻辑文件和版本表。
+
 当前 migration 为 `0013_knowledge_parsed_documents`。它只创建表和索引，不会尝试自动解析历史文件；历史文件需要在 UI 中重新点击“开始解析”。
 
 未来如果单个 ParsedDocument 过大，可以把 `document` 移到 S3/MinIO，只在本表保存 artifact key、哈希和状态；API 和 chunk 流程保持不变。
@@ -357,13 +362,13 @@ sourceLocator
 
 1. 从 S3/MinIO 通过 `KnowledgeFile.id` 安全读取文件；
 2. 建立 Parser Registry；
-3. 实现 TXT、Markdown、JSON、CSV、XLSX、PDF、PPTX Adapter；
+3. 实现 TXT、Markdown、JSON、CSV、XLSX、PDF（`rapidocr_pdf`）、PPTX Adapter；
 4. 统一输出 `ParsedDocument`；
 5. 将解析结果写入 `KnowledgeParsedDocument`，不生成 `KnowledgeChunk`。
 
 ### 第一阶段 b：人工审核后生成 chunk
 
-1. UI 分页展示 `KnowledgeParsedDocument`；
+1. UI 从知识库级接口分页展示 `KnowledgeParsedDocument`；
 2. 开发人员确认解析结果；
 3. 手动调用 `POST .../chunks`；
 4. 后端从已保存的 ParsedDocument 生成 `KnowledgeChunk`；
