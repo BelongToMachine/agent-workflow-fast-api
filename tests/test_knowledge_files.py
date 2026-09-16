@@ -1,7 +1,9 @@
 import asyncio
 import io
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -17,12 +19,18 @@ from starlette.datastructures import Headers
 from app.api.routes.knowledge_files import (
     FILE_INSERT_QUERY,
     FILE_LIST_QUERY,
+    PARSED_DOCUMENT_BY_FILE_QUERY,
     KnowledgeFileSummary,
+    KnowledgeParsedDocumentResponse,
     _chunk_text,
     _content_matches_extension,
     _extract_text,
     _safe_filename,
     _storage_path,
+    get_parsed_knowledge_document,
+    materialize_knowledge_chunks,
+    materialize_knowledge_file_chunks,
+    parse_knowledge_file,
     process_knowledge_file,
     upload_knowledge_file,
 )
@@ -30,20 +38,34 @@ from app.core.auth import AuthenticatedUser
 from app.core.config import MAX_KNOWLEDGE_FILE_BYTES, Settings, get_settings
 from app.db.migrate_knowledge_ingestion import MIGRATION_PATH
 from app.main import app
+from app.services.document_parsing import parse_document
 from app.services.storage import LocalKnowledgeStorage
 
 client = TestClient(app)
 
 
 class FakeResult:
-    def __init__(self, row: dict[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        row: dict[str, object] | None = None,
+        *,
+        scalar_value: object | None = None,
+    ) -> None:
         self.row = row
+        self.scalar_value = scalar_value
 
     def mappings(self):
         return self
 
     def first(self):
         return self.row
+
+    def one(self):
+        assert self.row is not None
+        return self.row
+
+    def scalar_one_or_none(self):
+        return self.scalar_value
 
 
 class FakeTransaction:
@@ -59,11 +81,22 @@ class FakeIngestionConnection:
         self.row = row
         self.status_updates: list[dict[str, object]] = []
         self.inserted_chunks: list[dict[str, object]] = []
+        self.parsed_documents: list[dict[str, object]] = []
+        self.chunk_status_updates: list[dict[str, object]] = []
 
     async def execute(self, statement, parameters=None):
         sql = str(statement)
+        if 'SELECT' in sql and 'KnowledgeParsedDocument' in sql:
+            return FakeResult(self.parsed_documents[-1] if self.parsed_documents else None)
         if sql.lstrip().startswith("SELECT"):
             return FakeResult(self.row)
+        if 'INSERT INTO "KnowledgeParsedDocument"' in sql:
+            self.parsed_documents.append(parameters or {})
+            return FakeResult()
+        if 'UPDATE "KnowledgeParsedDocument"' in sql:
+            self.chunk_status_updates.append(parameters or {})
+            if 'RETURNING "id"' in sql:
+                return FakeResult(scalar_value=parameters.get("parsed_document_id"))
         if 'UPDATE "KnowledgeFile"' in sql:
             self.status_updates.append(parameters or {})
         if 'INSERT INTO "KnowledgeChunk"' in sql:
@@ -72,6 +105,9 @@ class FakeIngestionConnection:
 
     def begin(self):
         return FakeTransaction()
+
+    async def rollback(self) -> None:
+        return None
 
 
 class FakeConnectionContext:
@@ -97,6 +133,9 @@ class FakeUploadResult:
 
     def mappings(self):
         return self
+
+    def first(self):
+        return self.row
 
     def one(self) -> dict[str, object]:
         assert self.row is not None
@@ -148,6 +187,9 @@ class FakeUploadConnection:
 
     def begin(self) -> FakeTransaction:
         return FakeTransaction()
+
+    async def rollback(self) -> None:
+        return None
 
 
 def upload_connection_context(connection: FakeUploadConnection):
@@ -287,7 +329,10 @@ def test_chunking_adds_overlap_without_empty_chunks() -> None:
     assert chunks[0][-120:] == chunks[1][:120]
 
 
-def test_process_knowledge_file_reads_chunks_and_marks_file_ready(monkeypatch, tmp_path) -> None:
+def test_process_knowledge_file_persists_parsed_document_without_chunks(
+    monkeypatch,
+    tmp_path,
+) -> None:
     file_id = UUID("00000000-0000-0000-0000-000000000010")
     workspace_id = UUID("00000000-0000-0000-0000-000000000001")
     knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
@@ -323,10 +368,84 @@ def test_process_knowledge_file_reads_chunks_and_marks_file_ready(monkeypatch, t
         "processing",
         "ready",
     ]
+    assert connection.inserted_chunks == []
+    assert len(connection.parsed_documents) == 1
+    assert connection.parsed_documents[0]["file_id"] == file_id
+    assert len(connection.parsed_documents[0]["file_hash"]) == 64
+    document = json.loads(connection.parsed_documents[0]["document"])
+    assert document["schemaVersion"] == "parsed-document.v1"
+    parsed_text = "\n".join(block["text"] for block in document["blocks"])
+    assert "name\tprice" in parsed_text
+    assert "chair\t10" in parsed_text
+
+
+def test_materialize_knowledge_chunks_is_a_separate_explicit_step(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000010")
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    parsed_document_id = UUID("00000000-0000-0000-0000-000000000011")
+    storage_key = "workspace/knowledge/data.csv"
+    storage = LocalKnowledgeStorage(str(tmp_path))
+    parsed_document = parse_document(
+        "data.csv",
+        b"name,price\nchair,10",
+        file_id=str(file_id),
+        file_hash="hash-123",
+        mime_type="text/csv",
+    )
+    row = {
+        "storage_provider": "local",
+        "storage_key": storage_key,
+        "original_name": "data.csv",
+        "knowledge_base_id": knowledge_base_id,
+        "file_hash": "hash-123",
+    }
+    connection = FakeIngestionConnection(row)
+    connection.parsed_documents.append(
+        {
+            "parsed_document_id": parsed_document_id,
+            "file_id": file_id,
+            "knowledge_base_id": knowledge_base_id,
+            "workspace_id": workspace_id,
+            "document": parsed_document.model_dump(by_alias=True),
+            "file_hash": "hash-123",
+            "parser": parsed_document.parser,
+            "parser_version": parsed_document.parser_version,
+            "chunk_status": "processing",
+            "chunk_error_message": None,
+            "created_at": datetime(2026, 8, 17, 12, 30),
+            "updated_at": datetime(2026, 8, 17, 12, 30),
+        }
+    )
+
+    asyncio.run(storage.put(storage_key, b"name,price\nchair,10"))
+    settings = Settings(
+        knowledge_ingestion_enabled=True,
+        knowledge_embeddings_enabled=False,
+        knowledge_storage_dir=str(tmp_path),
+    )
+    monkeypatch.setattr("app.api.routes.knowledge_files.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_knowledge_storage_for_provider",
+        lambda _settings, _provider: storage,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        lambda: FakeConnectionContext(connection),
+    )
+
+    asyncio.run(materialize_knowledge_chunks(file_id, workspace_id))
+
     assert [chunk["content"] for chunk in connection.inserted_chunks] == [
         "name\tprice\nchair\t10"
     ]
-    assert connection.inserted_chunks[0]["knowledge_base_id"] == knowledge_base_id
+    metadata = json.loads(connection.inserted_chunks[0]["metadata"])
+    assert metadata["fileHash"] == "hash-123"
+    assert metadata["parsedDocumentId"] == str(parsed_document_id)
+    assert connection.chunk_status_updates[-1]["chunk_status"] == "ready"
 
 
 def test_ingestion_migration_is_idempotent_and_contains_chunk_table() -> None:
@@ -336,6 +455,14 @@ def test_ingestion_migration_is_idempotent_and_contains_chunk_table() -> None:
     assert 'CREATE TABLE IF NOT EXISTS "KnowledgeChunk"' in sql
     assert '"workspaceId" = :workspace_id' in str(FILE_LIST_QUERY)
     assert ":storage_provider" in str(FILE_INSERT_QUERY)
+
+    parsed_migration = (
+        Path(__file__).parents[1] / "migrations" / "0013_knowledge_parsed_documents.sql"
+    ).read_text(encoding="utf-8")
+    assert 'CREATE TABLE IF NOT EXISTS "KnowledgeParsedDocument"' in parsed_migration
+    assert '"document" jsonb NOT NULL' in parsed_migration
+    assert '"chunkStatus"' in parsed_migration
+    assert '"fileId" = :file_id' in str(PARSED_DOCUMENT_BY_FILE_QUERY)
 
 
 def test_upload_is_gated_until_ingestion_migration_is_applied(
@@ -351,7 +478,9 @@ def test_upload_is_gated_until_ingestion_migration_is_applied(
     assert response.json()["code"] == "knowledge_ingestion:disabled"
 
 
-def test_upload_route_persists_workspace_scoped_file_and_schedules_processing(monkeypatch) -> None:
+def test_upload_route_persists_workspace_scoped_file_without_scheduling_processing(
+    monkeypatch,
+) -> None:
     workspace_id = UUID("00000000-0000-0000-0000-000000000001")
     knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
     user_id = UUID("00000000-0000-0000-0000-000000000010")
@@ -361,7 +490,6 @@ def test_upload_route_persists_workspace_scoped_file_and_schedules_processing(mo
     )
     connection = FakeUploadConnection()
     storage = FakeUploadStorage()
-    background_tasks = FakeBackgroundTasks()
     permission: dict[str, object] = {}
 
     async def fake_require_permission(
@@ -394,7 +522,6 @@ def test_upload_route_persists_workspace_scoped_file_and_schedules_processing(mo
     result = asyncio.run(
         upload_knowledge_file(
             knowledge_base_id=knowledge_base_id,
-            background_tasks=background_tasks,
             file=UploadFile(
                 file=io.BytesIO(b"name,price\nchair,10"),
                 filename="../data.csv",
@@ -420,12 +547,153 @@ def test_upload_route_persists_workspace_scoped_file_and_schedules_processing(mo
     assert stored_content == b"name,price\nchair,10"
     assert connection.calls[0][1]["workspace_id"] == workspace_id
     assert connection.calls[1][1]["workspace_id"] == workspace_id
-    assert len(background_tasks.tasks) == 1
-    assert background_tasks.tasks[0][0] is process_knowledge_file
-    assert background_tasks.tasks[0][1] == (
-        connection.file_row["file_id"],
-        workspace_id,
+
+
+def test_parse_route_claims_file_and_schedules_processing(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    file_id = UUID("00000000-0000-0000-0000-000000000003")
+    connection = FakeUploadConnection()
+    connection.file_row.update(
+        {
+            "file_id": file_id,
+            "knowledge_base_id": knowledge_base_id,
+            "workspace_id": workspace_id,
+            "status": "pending",
+        }
     )
+    background_tasks = FakeBackgroundTasks()
+
+    class ParseConnection(FakeUploadConnection):
+        async def execute(self, query: object, params: dict[str, object]) -> FakeUploadResult:
+            sql = str(query)
+            if 'UPDATE "KnowledgeFile"' in sql and 'RETURNING "id"' in sql:
+                self.calls.append((sql, params))
+                self.file_row["status"] = "processing"
+                return FakeUploadResult(scalar_value=file_id)
+            return await super().execute(query, params)
+
+    parse_connection = ParseConnection()
+    parse_connection.file_row = connection.file_row
+
+    async def fake_require_permission(*_args, **_kwargs):
+        return SimpleNamespace(role="owner")
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(parse_connection),
+    )
+
+    result = asyncio.run(
+        parse_knowledge_file(
+            knowledge_base_id=knowledge_base_id,
+            file_id=file_id,
+            background_tasks=background_tasks,
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(user_id=str(UUID("00000000-0000-0000-0000-000000000010"))),
+            settings=Settings(knowledge_ingestion_enabled=True),
+        )
+    )
+
+    assert result["file"].status == "processing"
+    assert background_tasks.tasks == [(process_knowledge_file, (file_id, workspace_id))]
+
+
+def test_parsed_document_is_readable_and_chunking_is_a_separate_manual_action(
+    monkeypatch,
+) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    file_id = UUID("00000000-0000-0000-0000-000000000003")
+    parsed_document_id = UUID("00000000-0000-0000-0000-000000000004")
+    document = parse_document(
+        "data.csv",
+        b"name,price\nchair,10",
+        file_id=str(file_id),
+        file_hash="hash-123",
+        mime_type="text/csv",
+    )
+
+    class ParsedDocumentConnection(FakeUploadConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.parsed_row = {
+                "block_count": len(document.blocks),
+                "chunk_error_message": None,
+                "chunk_status": "pending",
+                "created_at": datetime(2026, 8, 17, 12, 30),
+                "document": document.model_dump(by_alias=True),
+                "file_hash": "hash-123",
+                "file_id": file_id,
+                "parsed_document_id": parsed_document_id,
+                "knowledge_base_id": knowledge_base_id,
+                "parser": document.parser,
+                "parser_version": document.parser_version,
+                "schema_version": document.schema_version,
+                "updated_at": datetime(2026, 8, 17, 12, 30),
+                "warning_count": len(document.warnings),
+                "workspace_id": workspace_id,
+            }
+
+        async def execute(self, query: object, params: dict[str, object]) -> FakeUploadResult:
+            sql = str(query)
+            self.calls.append((sql, params))
+            if 'UPDATE "KnowledgeParsedDocument"' in sql:
+                self.parsed_row["chunk_status"] = "processing"
+                return FakeUploadResult(scalar_value=parsed_document_id)
+            if 'SELECT' in sql and 'KnowledgeParsedDocument' in sql:
+                return FakeUploadResult(row=self.parsed_row)
+            if 'COUNT(*)' in sql and 'KnowledgeChunk' in sql:
+                return FakeUploadResult(row={"chunk_count": 0})
+            return await super().execute(query, params)
+
+    connection = ParsedDocumentConnection()
+    background_tasks = FakeBackgroundTasks()
+
+    async def fake_require_permission(*_args, **_kwargs):
+        return SimpleNamespace(role="owner")
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(connection),
+    )
+    settings = Settings(knowledge_ingestion_enabled=True)
+    user = AuthenticatedUser(user_id=str(UUID("00000000-0000-0000-0000-000000000010")))
+
+    parsed_result = asyncio.run(
+        get_parsed_knowledge_document(
+            knowledge_base_id=knowledge_base_id,
+            file_id=file_id,
+            workspace_id=workspace_id,
+            current_user=user,
+            settings=settings,
+        )
+    )
+    assert isinstance(parsed_result, KnowledgeParsedDocumentResponse)
+    assert parsed_result.parsed_document.blocks
+    assert parsed_result.chunk_status == "pending"
+
+    chunk_result = asyncio.run(
+        materialize_knowledge_file_chunks(
+            knowledge_base_id=knowledge_base_id,
+            file_id=file_id,
+            background_tasks=background_tasks,
+            workspace_id=workspace_id,
+            current_user=user,
+            settings=settings,
+        )
+    )
+    assert isinstance(chunk_result, KnowledgeParsedDocumentResponse)
+    assert chunk_result.chunk_status == "processing"
+    assert background_tasks.tasks == [(materialize_knowledge_chunks, (file_id, workspace_id))]
 
 
 def test_duplicate_upload_removes_object_after_database_conflict(monkeypatch) -> None:
@@ -455,7 +723,6 @@ def test_duplicate_upload_removes_object_after_database_conflict(monkeypatch) ->
         asyncio.run(
             upload_knowledge_file(
                 knowledge_base_id=knowledge_base_id,
-                background_tasks=FakeBackgroundTasks(),
                 file=UploadFile(
                     file=io.BytesIO(b"name,price\nchair,10"),
                     filename="data.csv",

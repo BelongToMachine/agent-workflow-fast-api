@@ -1,7 +1,5 @@
 import asyncio
-import csv
 import hashlib
-import io
 import json
 import re
 from pathlib import Path
@@ -18,10 +16,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
-from openpyxl import load_workbook
-from pptx import Presentation
 from pydantic import BaseModel, ConfigDict, Field
-from pypdf import PdfReader
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -29,6 +24,14 @@ from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.knowledge_access import require_knowledge_base_permission
 from app.db.session import get_db_connection
+from app.services.document_parsing import (
+    FILE_SIGNATURES,
+    SUPPORTED_EXTENSIONS,
+    ParsedDocument,
+    paginate_parsed_document,
+    parse_document,
+    render_document_text,
+)
 from app.services.embeddings import embed_texts, vector_literal
 from app.services.storage import (
     LocalKnowledgeStorage,
@@ -40,20 +43,6 @@ from app.services.storage import (
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge"])
 
-SUPPORTED_EXTENSIONS = {
-    ".csv": "text/csv",
-    ".json": "application/json",
-    ".md": "text/markdown",
-    ".pdf": "application/pdf",
-    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ".txt": "text/plain",
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-}
-FILE_SIGNATURES = {
-    ".pdf": (b"%PDF-",),
-    ".pptx": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
-    ".xlsx": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
-}
 SAFE_FILENAME_PATTERN = re.compile(r"[^\w.-]+")
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 120
@@ -80,6 +69,21 @@ class KnowledgeFileListResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     files: list[KnowledgeFileSummary]
+
+
+class KnowledgeParsedDocumentResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    chunk_count: int = Field(alias="chunkCount")
+    chunk_error_message: str | None = Field(
+        default=None,
+        alias="chunkErrorMessage",
+    )
+    chunk_status: str = Field(alias="chunkStatus")
+    created_at: str = Field(alias="createdAt")
+    parsed_document: ParsedDocument = Field(alias="parsedDocument")
+    parsed_document_id: str = Field(alias="parsedDocumentId")
+    updated_at: str = Field(alias="updatedAt")
 
 
 FILE_SELECT = text(
@@ -158,6 +162,125 @@ FILE_STATUS_QUERY = text(
     """
 )
 
+FILE_PARSE_CLAIM_QUERY = text(
+    """
+    UPDATE "KnowledgeFile"
+    SET "errorMessage" = NULL,
+        "status" = 'processing',
+        "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "id" = :file_id
+      AND "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+      AND "status" <> 'processing'
+    RETURNING "id"
+    """
+)
+
+PARSED_DOCUMENT_SELECT = text(
+    """
+    SELECT
+        "blockCount" AS block_count,
+        "chunkErrorMessage" AS chunk_error_message,
+        "chunkStatus" AS chunk_status,
+        "createdAt" AS created_at,
+        "document" AS document,
+        "fileHash" AS file_hash,
+        "fileId" AS file_id,
+        "id" AS parsed_document_id,
+        "knowledgeBaseId" AS knowledge_base_id,
+        "parser" AS parser,
+        "parserVersion" AS parser_version,
+        "schemaVersion" AS schema_version,
+        "updatedAt" AS updated_at,
+        "warningCount" AS warning_count,
+        "workspaceId" AS workspace_id
+    FROM "KnowledgeParsedDocument"
+    """
+)
+
+PARSED_DOCUMENT_BY_FILE_QUERY = text(
+    PARSED_DOCUMENT_SELECT.text
+    + """
+    WHERE "fileId" = :file_id
+      AND "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+    LIMIT 1
+    """
+)
+
+PARSED_DOCUMENT_UPSERT_QUERY = text(
+    """
+    INSERT INTO "KnowledgeParsedDocument"
+        (
+            "blockCount", "chunkErrorMessage", "chunkStatus", "contentType",
+            "document", "fileHash", "fileId", "knowledgeBaseId", "parser",
+            "parserVersion", "schemaVersion", "warningCount", "workspaceId"
+        )
+    VALUES
+        (
+            :block_count, NULL, 'pending', :content_type,
+            CAST(:document AS jsonb), :file_hash, :file_id, :knowledge_base_id,
+            :parser, :parser_version, :schema_version, :warning_count, :workspace_id
+        )
+    ON CONFLICT ("fileId") DO UPDATE SET
+        "blockCount" = EXCLUDED."blockCount",
+        "chunkErrorMessage" = NULL,
+        "chunkStatus" = 'pending',
+        "chunkedAt" = NULL,
+        "contentType" = EXCLUDED."contentType",
+        "document" = EXCLUDED."document",
+        "fileHash" = EXCLUDED."fileHash",
+        "knowledgeBaseId" = EXCLUDED."knowledgeBaseId",
+        "parser" = EXCLUDED."parser",
+        "parserVersion" = EXCLUDED."parserVersion",
+        "schemaVersion" = EXCLUDED."schemaVersion",
+        "warningCount" = EXCLUDED."warningCount",
+        "updatedAt" = CURRENT_TIMESTAMP,
+        "workspaceId" = EXCLUDED."workspaceId"
+    """
+)
+
+PARSED_DOCUMENT_CHUNK_CLAIM_QUERY = text(
+    """
+    UPDATE "KnowledgeParsedDocument"
+    SET "chunkErrorMessage" = NULL,
+        "chunkStatus" = 'processing',
+        "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "id" = :parsed_document_id
+      AND "fileId" = :file_id
+      AND "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+      AND "chunkStatus" <> 'processing'
+    RETURNING "id"
+    """
+)
+
+PARSED_DOCUMENT_CHUNK_STATUS_QUERY = text(
+    """
+    UPDATE "KnowledgeParsedDocument"
+    SET "chunkErrorMessage" = :chunk_error_message,
+        "chunkStatus" = :chunk_status,
+        "chunkedAt" = CASE
+            WHEN :chunk_status = 'ready' THEN CURRENT_TIMESTAMP
+            ELSE NULL
+        END,
+        "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "id" = :parsed_document_id
+      AND "fileId" = :file_id
+      AND "workspaceId" = :workspace_id
+    """
+)
+
+CHUNK_COUNT_BY_FILE_QUERY = text(
+    """
+    SELECT COUNT(*) AS chunk_count
+    FROM "KnowledgeChunk"
+    WHERE "fileId" = :file_id
+      AND "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+    """
+)
+
 CHUNKS_DELETE_QUERY = text('DELETE FROM "KnowledgeChunk" WHERE "fileId" = :file_id')
 CHUNKS_INSERT_QUERY = text(
     """
@@ -232,6 +355,33 @@ def _file_summary(row: dict[str, object]) -> KnowledgeFileSummary:
     )
 
 
+def _parsed_document_value(value: object) -> object:
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _parsed_document_response(
+    row: dict[str, object],
+    chunk_count: int,
+) -> KnowledgeParsedDocumentResponse:
+    return KnowledgeParsedDocumentResponse(
+        chunkCount=chunk_count,
+        chunkErrorMessage=(
+            row["chunk_error_message"]
+            if isinstance(row.get("chunk_error_message"), str)
+            else None
+        ),
+        chunkStatus=str(row["chunk_status"]),
+        createdAt=_iso_timestamp(row["created_at"]),
+        parsedDocument=ParsedDocument.model_validate(
+            _parsed_document_value(row["document"])
+        ),
+        parsedDocumentId=str(row["parsed_document_id"]),
+        updatedAt=_iso_timestamp(row["updated_at"]),
+    )
+
+
 def _database_error(message: str) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -294,63 +444,10 @@ async def _best_effort_delete(settings: Settings, storage_key: str) -> None:
 
 
 def _extract_text(filename: str, content: bytes) -> str:
-    extension = _extension(filename)
-    if extension in {".txt", ".md", ".json"}:
-        return content.decode("utf-8-sig", errors="replace")
-    if extension == ".csv":
-        rows = csv.reader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
-        return "\n".join("\t".join(cell.strip() for cell in row) for row in rows)
-    if extension == ".xlsx":
-        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        lines: list[str] = []
-        try:
-            for worksheet in workbook.worksheets:
-                lines.append(f"[Sheet: {worksheet.title}]")
-                for row in worksheet.iter_rows(values_only=True):
-                    values = ["" if value is None else str(value).strip() for value in row]
-                    if any(values):
-                        lines.append("\t".join(values))
-        finally:
-            workbook.close()
-        return "\n".join(lines)
-    if extension == ".pdf":
-        reader = PdfReader(io.BytesIO(content))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-    if extension == ".pptx":
-        presentation = Presentation(io.BytesIO(content))
-        lines: list[str] = []
-        for slide_index, slide in enumerate(presentation.slides, start=1):
-            slide_lines: list[str] = []
-            for shape_index, shape in enumerate(slide.shapes, start=1):
-                shape_lines = _extract_pptx_shape_text(shape)
-                if shape_lines:
-                    slide_lines.append(f"[Shape: {shape_index}]")
-                    slide_lines.extend(shape_lines)
-            if slide_lines:
-                lines.append(f"[Slide: {slide_index}]")
-                lines.extend(slide_lines)
-        return "\n".join(lines)
-    raise ValueError("Unsupported knowledge file type.")
-
-
-def _extract_pptx_shape_text(shape: object) -> list[str]:
-    if getattr(shape, "has_table", False):
-        lines: list[str] = []
-        for row in shape.table.rows:
-            values = [cell.text.strip() for cell in row.cells]
-            if any(values):
-                lines.append("\t".join(values))
-        return lines
-    if getattr(shape, "has_text_frame", False):
-        text = shape.text.strip()
-        return [text] if text else []
-    nested_shapes = getattr(shape, "shapes", None)
-    if nested_shapes is None:
-        return []
-    lines = []
-    for nested_shape in nested_shapes:
-        lines.extend(_extract_pptx_shape_text(nested_shape))
-    return lines
+    return render_document_text(
+        parse_document(filename, content),
+        include_markers=True,
+    )
 
 
 def _chunk_text(content: str) -> list[str]:
@@ -371,6 +468,7 @@ def _chunk_text(content: str) -> list[str]:
 
 
 async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
+    """Read one stored file and persist its ParsedDocument intermediate state."""
     settings = get_settings()
     try:
         async with get_db_connection() as connection:
@@ -406,47 +504,36 @@ async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
             str(row["storage_provider"]),
         )
         content = await storage.read(str(row["storage_key"]))
-        extracted_text = await asyncio.to_thread(
-            _extract_text,
+        parsed_document = await asyncio.to_thread(
+            parse_document,
             str(row["original_name"]),
             content,
+            file_id=str(file_id),
+            file_hash=str(row.get("file_hash") or ""),
+            mime_type=str(
+                row.get("mime_type")
+                or SUPPORTED_EXTENSIONS[_extension(str(row["original_name"]))]
+            ),
         )
-        chunks = _chunk_text(extracted_text)
-        if not chunks:
-            raise ValueError("No extractable text was found in the uploaded file.")
-        embeddings = (
-            await embed_texts(chunks, settings)
-            if settings.knowledge_embeddings_enabled
-            else None
-        )
+        document = parsed_document.model_dump(by_alias=True)
 
         async with get_db_connection() as connection:
             async with connection.begin():
-                await connection.execute(CHUNKS_DELETE_QUERY, {"file_id": file_id})
                 await connection.execute(
-                    CHUNKS_INSERT_WITH_EMBEDDING_QUERY
-                    if embeddings is not None
-                    else CHUNKS_INSERT_QUERY,
-                    [
-                        {
-                            "chunk_index": index,
-                            "content": chunk,
-                            "embedding": vector_literal(embeddings[index])
-                            if embeddings is not None
-                            else None,
-                            "file_id": file_id,
-                            "knowledge_base_id": row["knowledge_base_id"],
-                            "metadata": json.dumps(
-                                {
-                                    "fileName": row["original_name"],
-                                    "chunkIndex": index,
-                                },
-                                separators=(",", ":"),
-                            ),
-                            "workspace_id": workspace_id,
-                        }
-                        for index, chunk in enumerate(chunks)
-                    ],
+                    PARSED_DOCUMENT_UPSERT_QUERY,
+                    {
+                        "block_count": len(parsed_document.blocks),
+                        "content_type": parsed_document.content_type,
+                        "document": json.dumps(document, separators=(",", ":")),
+                        "file_hash": parsed_document.file_hash,
+                        "file_id": file_id,
+                        "knowledge_base_id": row["knowledge_base_id"],
+                        "parser": parsed_document.parser,
+                        "parser_version": parsed_document.parser_version,
+                        "schema_version": parsed_document.schema_version,
+                        "warning_count": len(parsed_document.warnings),
+                        "workspace_id": workspace_id,
+                    },
                 )
                 await connection.execute(
                     FILE_STATUS_QUERY,
@@ -472,6 +559,338 @@ async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
                     )
         except (RuntimeError, SQLAlchemyError):
             return
+
+
+async def materialize_knowledge_chunks(file_id: UUID, workspace_id: UUID) -> None:
+    """Turn a persisted ParsedDocument into searchable KnowledgeChunk rows."""
+    settings = get_settings()
+    try:
+        async with get_db_connection() as connection:
+            file_result = await connection.execute(
+                FILE_PROCESS_QUERY,
+                {"file_id": file_id, "workspace_id": workspace_id},
+            )
+            file_row = file_result.mappings().first()
+    except (RuntimeError, SQLAlchemyError):
+        return
+
+    if file_row is None:
+        return
+
+    parsed_document_id: UUID | None = None
+    try:
+        async with get_db_connection() as connection:
+            parsed_result = await connection.execute(
+                PARSED_DOCUMENT_BY_FILE_QUERY,
+                {
+                    "file_id": file_id,
+                    "knowledge_base_id": file_row["knowledge_base_id"],
+                    "workspace_id": workspace_id,
+                },
+            )
+            parsed_row = parsed_result.mappings().first()
+        if parsed_row is None:
+            return
+
+        parsed_document_id = UUID(str(parsed_row["parsed_document_id"]))
+        parsed_document = ParsedDocument.model_validate(
+            _parsed_document_value(parsed_row["document"])
+        )
+        extracted_text = render_document_text(parsed_document, include_markers=True)
+        chunks = _chunk_text(extracted_text)
+        if not chunks:
+            raise ValueError("No extractable text was found in the parsed document.")
+        embeddings = (
+            await embed_texts(chunks, settings)
+            if settings.knowledge_embeddings_enabled
+            else None
+        )
+
+        async with get_db_connection() as connection:
+            async with connection.begin():
+                await connection.execute(CHUNKS_DELETE_QUERY, {"file_id": file_id})
+                await connection.execute(
+                    CHUNKS_INSERT_WITH_EMBEDDING_QUERY
+                    if embeddings is not None
+                    else CHUNKS_INSERT_QUERY,
+                    [
+                        {
+                            "chunk_index": index,
+                            "content": chunk,
+                            "embedding": vector_literal(embeddings[index])
+                            if embeddings is not None
+                            else None,
+                            "file_id": file_id,
+                            "knowledge_base_id": file_row["knowledge_base_id"],
+                            "metadata": json.dumps(
+                                {
+                                    "fileName": file_row["original_name"],
+                                    "chunkIndex": index,
+                                    "fileHash": parsed_document.file_hash,
+                                    "parsedDocumentId": str(parsed_document_id),
+                                    "parser": parsed_document.parser,
+                                    "parserVersion": parsed_document.parser_version,
+                                },
+                                separators=(",", ":"),
+                            ),
+                            "workspace_id": workspace_id,
+                        }
+                        for index, chunk in enumerate(chunks)
+                    ],
+                )
+                await connection.execute(
+                    PARSED_DOCUMENT_CHUNK_STATUS_QUERY,
+                    {
+                        "chunk_error_message": None,
+                        "chunk_status": "ready",
+                        "file_id": file_id,
+                        "parsed_document_id": parsed_document_id,
+                        "workspace_id": workspace_id,
+                    },
+                )
+    except Exception as error:
+        if parsed_document_id is None:
+            return
+        try:
+            async with get_db_connection() as connection:
+                async with connection.begin():
+                    await connection.execute(
+                        PARSED_DOCUMENT_CHUNK_STATUS_QUERY,
+                        {
+                            "chunk_error_message": str(error)[:1000],
+                            "chunk_status": "failed",
+                            "file_id": file_id,
+                            "parsed_document_id": parsed_document_id,
+                            "workspace_id": workspace_id,
+                        },
+                    )
+        except (RuntimeError, SQLAlchemyError):
+            return
+
+
+@router.post(
+    "/{knowledge_base_id}/files/{file_id}/parse",
+    response_model=None,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def parse_knowledge_file(
+    knowledge_base_id: UUID,
+    file_id: UUID,
+    background_tasks: BackgroundTasks,
+    workspace_id: UUID = Query(..., alias="workspace_id"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, KnowledgeFileSummary] | JSONResponse:
+    """Explicitly queue parsing for an already uploaded knowledge file."""
+    await require_knowledge_base_permission(
+        current_user,
+        workspace_id,
+        knowledge_base_id,
+        "manage",
+    )
+    if not settings.knowledge_ingestion_enabled:
+        return _feature_disabled()
+
+    try:
+        async with get_db_connection() as connection:
+            result = await connection.execute(
+                FILE_BY_ID_QUERY,
+                {
+                    "file_id": file_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            row = result.mappings().first()
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except SQLAlchemyError:
+        return _database_error("FastAPI could not find the knowledge file to parse.")
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Knowledge file not found.",
+        )
+
+    if str(row["status"]) == "processing":
+        return {"file": _file_summary(dict(row))}
+
+    try:
+        async with get_db_connection() as connection:
+            async with connection.begin():
+                claim = await connection.execute(
+                    FILE_PARSE_CLAIM_QUERY,
+                    {
+                        "file_id": file_id,
+                        "knowledge_base_id": knowledge_base_id,
+                        "workspace_id": workspace_id,
+                    },
+                )
+                claimed_id = claim.scalar_one_or_none()
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except SQLAlchemyError:
+        return _database_error("FastAPI could not start knowledge file parsing.")
+
+    if claimed_id is not None:
+        background_tasks.add_task(process_knowledge_file, file_id, workspace_id)
+    row = dict(row)
+    row["status"] = "processing"
+    row["error_message"] = None
+    return {"file": _file_summary(row)}
+
+
+@router.get(
+    "/{knowledge_base_id}/files/{file_id}/parsed-document",
+    response_model=KnowledgeParsedDocumentResponse,
+)
+async def get_parsed_knowledge_document(
+    knowledge_base_id: UUID,
+    file_id: UUID,
+    workspace_id: UUID = Query(..., alias="workspace_id"),
+    offset: int = Query(default=0, ge=0, le=100_000),
+    limit: int = Query(default=30, ge=1, le=100),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> KnowledgeParsedDocumentResponse | JSONResponse:
+    """Return the persisted parser output without exposing the storage object key."""
+    await require_knowledge_base_permission(
+        current_user,
+        workspace_id,
+        knowledge_base_id,
+        "read",
+    )
+    if not settings.knowledge_ingestion_enabled:
+        return _feature_disabled()
+
+    try:
+        async with get_db_connection() as connection:
+            parsed_result = await connection.execute(
+                PARSED_DOCUMENT_BY_FILE_QUERY,
+                {
+                    "file_id": file_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            parsed_row = parsed_result.mappings().first()
+            if parsed_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Parsed document not found. Parse the file first.",
+                )
+            count_result = await connection.execute(
+                CHUNK_COUNT_BY_FILE_QUERY,
+                {
+                    "file_id": file_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            chunk_count = int(count_result.mappings().one()["chunk_count"])
+    except HTTPException:
+        raise
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except (KeyError, ValueError, SQLAlchemyError):
+        return _database_error("FastAPI could not load the parsed knowledge document.")
+
+    response_row = dict(parsed_row)
+    document = ParsedDocument.model_validate(_parsed_document_value(response_row["document"]))
+    page_offset = offset if isinstance(offset, int) else 0
+    page_limit = limit if isinstance(limit, int) else 30
+    response_row["document"] = paginate_parsed_document(
+        document,
+        offset=page_offset,
+        limit=page_limit,
+    ).model_dump(by_alias=True, exclude_none=True)
+    return _parsed_document_response(response_row, chunk_count)
+
+
+@router.post(
+    "/{knowledge_base_id}/files/{file_id}/chunks",
+    response_model=KnowledgeParsedDocumentResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def materialize_knowledge_file_chunks(
+    knowledge_base_id: UUID,
+    file_id: UUID,
+    background_tasks: BackgroundTasks,
+    workspace_id: UUID = Query(..., alias="workspace_id"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> KnowledgeParsedDocumentResponse | JSONResponse:
+    """Explicitly queue ParsedDocument -> KnowledgeChunk materialization."""
+    await require_knowledge_base_permission(
+        current_user,
+        workspace_id,
+        knowledge_base_id,
+        "manage",
+    )
+    if not settings.knowledge_ingestion_enabled:
+        return _feature_disabled()
+
+    try:
+        async with get_db_connection() as connection:
+            parsed_result = await connection.execute(
+                PARSED_DOCUMENT_BY_FILE_QUERY,
+                {
+                    "file_id": file_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            parsed_row = parsed_result.mappings().first()
+            if parsed_row is None:
+                return JSONResponse(
+                    status_code=status.HTTP_409_CONFLICT,
+                    content={
+                        "code": "knowledge:parsed_document_required",
+                        "message": "Parse the knowledge file before generating chunks.",
+                    },
+            )
+
+            if str(parsed_row["chunk_status"]) != "processing":
+                # The scoped SELECT starts an implicit read transaction. Close it
+                # before opening the atomic claim transaction below.
+                await connection.rollback()
+                async with connection.begin():
+                    claim = await connection.execute(
+                        PARSED_DOCUMENT_CHUNK_CLAIM_QUERY,
+                        {
+                            "file_id": file_id,
+                            "knowledge_base_id": knowledge_base_id,
+                            "parsed_document_id": parsed_row["parsed_document_id"],
+                            "workspace_id": workspace_id,
+                        },
+                    )
+                    claimed_id = claim.scalar_one_or_none()
+            else:
+                claimed_id = None
+
+            count_result = await connection.execute(
+                CHUNK_COUNT_BY_FILE_QUERY,
+                {
+                    "file_id": file_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            chunk_count = int(count_result.mappings().one()["chunk_count"])
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except SQLAlchemyError:
+        return _database_error("FastAPI could not start knowledge chunk generation.")
+
+    if claimed_id is not None:
+        background_tasks.add_task(materialize_knowledge_chunks, file_id, workspace_id)
+        row = dict(parsed_row)
+        row["chunk_status"] = "processing"
+        row["chunk_error_message"] = None
+    else:
+        row = dict(parsed_row)
+    return _parsed_document_response(row, chunk_count)
 
 
 @router.get("/{knowledge_base_id}/files", response_model=KnowledgeFileListResponse)
@@ -511,7 +930,6 @@ async def list_knowledge_files(
 @router.post("/{knowledge_base_id}/files", response_model=None, status_code=202)
 async def upload_knowledge_file(
     knowledge_base_id: UUID,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
@@ -624,7 +1042,6 @@ async def upload_knowledge_file(
         await _best_effort_delete(settings, storage_key)
         return _database_error("FastAPI could not create the knowledge file record.")
 
-    background_tasks.add_task(process_knowledge_file, file_id, workspace_id)
     return {"file": _file_summary(dict(row))}
 
 

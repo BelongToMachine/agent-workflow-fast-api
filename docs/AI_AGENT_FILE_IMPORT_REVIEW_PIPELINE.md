@@ -172,6 +172,8 @@ retiredBy         执行退出操作的用户
 
 原始文件状态和导入任务状态应分开。`KnowledgeFile.status` 表示文件是否可用，具体解析和入库进度由 `ImportJob.status` 表示。
 
+当前最小闭环先使用 `KnowledgeParsedDocument` 保存解析后的 JSONB 中间态，并由 `chunkStatus` 跟踪手动生成 `KnowledgeChunk` 的进度；`ImportJob` 可在后续把 FastAPI 后台任务替换成可恢复的独立 Worker。
+
 ### 6.2 ImportJob
 
 一条记录代表一次文件解析和提案生成任务。
@@ -662,9 +664,9 @@ knowledge/
 
 ## 17. 与未来 RAG 的兼容方式
 
-当前流程不创建、不依赖 `KnowledgeChunk`，也不要求 Embedding provider。
+当前流程已经支持手动的 `ParsedDocument → KnowledgeChunk` 阶段，但解析任务本身不会自动创建 chunk，也不要求 Embedding provider。只有开发人员确认后，调用手动 chunk 接口，文件的 `chunkStatus` 才会进入处理流程。
 
-只需要保证 `ParsedArtifact.blocks` 包含：
+需要保证 `ParsedDocument.blocks` 包含：
 
 ```text
 稳定 blockId
@@ -677,7 +679,7 @@ sourceFileId
 以后可以增加独立流水线：
 
 ```text
-ParsedArtifact
+KnowledgeParsedDocument
     ↓
 Chunk Worker
     ↓
@@ -686,7 +688,7 @@ KnowledgeChunk
 Embedding / RAG
 ```
 
-RAG 流水线只消费已有解析产物，不改变 `ImportJob`、`ImportProposal`、`ImportedFact` 和业务表的职责。
+RAG 流水线只消费已有解析产物或已确认的 `KnowledgeChunk`，不改变 `ImportJob`、`ImportProposal`、`ImportedFact` 和业务表的职责。
 
 ## 18. 第一阶段实施顺序
 
@@ -734,8 +736,10 @@ RAG 流水线只消费已有解析产物，不改变 `ImportJob`、`ImportPropos
 
 - 支持上传 CSV、XLSX、JSON、Markdown、TXT、PDF 和 PPTX；
 - 文件原件存入 S3，数据库不保存二进制正文；
-- API 在上传后立即返回 `202` 和 `jobId`；
-- Worker 重启后可以继续处理 PostgreSQL 中的未完成任务；
+- 上传接口保存原始文件并返回文件记录，不会自动解析；
+- 用户显式点击解析后，解析结果写入 `KnowledgeParsedDocument`；
+- 审核人员显式点击生成 chunk 后，才会生成 `KnowledgeChunk`；
+- 后续可把当前 FastAPI 后台任务替换为独立 Worker；
 - 所有解析结果都能定位到原文件中的页、Sheet、行、JSONPath 或幻灯片；
 - Agent 不能直接访问 SQL 或修改业务表；
 - Agent 只能提交符合 Schema Registry 的 ImportProposal；
@@ -745,5 +749,5 @@ RAG 流水线只消费已有解析产物，不改变 `ImportJob`、`ImportPropos
 - 重复调用 apply 不会重复创建数据；
 - 业务数据发生并发变化时，旧提案不会静默覆盖新值；
 - 每个导入字段可以追踪到文件和具体位置；
-- 当前实现不依赖 KnowledgeChunk、Embedding 或 RAG；
-- ParsedArtifact 可以在未来被独立的 RAG 流水线消费。
+- 解析失败和 chunk 生成失败分别记录状态，并可独立重试；
+- `KnowledgeParsedDocument` 可以被未来的 RAG 流水线消费。
