@@ -20,6 +20,7 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 AgentToolName = Literal[
     "getKnowledgeBaseTool",
     "getKnowledgeFileTool",
+    "extractKnowledgeFileTool",
     "listKnowledgeFilesTool",
     "listKnowledgeBasesTool",
     "searchProductsTool",

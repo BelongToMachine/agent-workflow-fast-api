@@ -22,6 +22,7 @@ from app.services.agent_tools import (
     ContentToolInput,
     KnowledgeBaseLookupToolInput,
     KnowledgeBaseToolInput,
+    KnowledgeFileExtractToolInput,
     KnowledgeFileListToolInput,
     KnowledgeFileLookupToolInput,
     ProductToolInput,
@@ -80,6 +81,7 @@ def test_agent_tools_expose_only_read_only_enterprise_search_tools() -> None:
         "listKnowledgeFilesTool",
         "getKnowledgeBaseTool",
         "getKnowledgeFileTool",
+        "extractKnowledgeFileTool",
         "searchKnowledgeBaseTool",
     ]
     assert all(item["function"]["parameters"]["type"] == "object" for item in definitions)
@@ -122,6 +124,7 @@ def test_disabled_knowledge_embeddings_do_not_expose_knowledge_base_tool() -> No
         "listKnowledgeFilesTool",
         "getKnowledgeBaseTool",
         "getKnowledgeFileTool",
+        "extractKnowledgeFileTool",
     ]
 
 
@@ -239,6 +242,30 @@ def test_knowledge_file_list_tool_requires_a_valid_knowledge_base_id() -> None:
         )
 
 
+def test_knowledge_file_extract_tool_validates_scoped_arguments() -> None:
+    payload = KnowledgeFileExtractToolInput.model_validate(
+        {
+            "fileId": str(FILE_A),
+            "knowledgeBaseId": str(KNOWLEDGE_BASE_A),
+            "output": "text",
+            "limit": 10,
+        }
+    )
+
+    assert payload.file_id == FILE_A
+    assert payload.knowledge_base_id == KNOWLEDGE_BASE_A
+    assert payload.output == "text"
+
+    with pytest.raises(ValueError):
+        KnowledgeFileExtractToolInput.model_validate(
+            {
+                "fileId": str(FILE_A),
+                "knowledgeBaseId": str(KNOWLEDGE_BASE_A),
+                "output": "xml",
+            }
+        )
+
+
 def test_knowledge_base_lookup_tools_require_valid_ids() -> None:
     with pytest.raises(ValueError):
         KnowledgeBaseLookupToolInput.model_validate({"knowledgeBaseId": "invalid"})
@@ -336,6 +363,84 @@ def test_list_knowledge_files_tool_calls_permission_checked_listing(monkeypatch)
         "00000000-0000-0000-0000-000000000002"
     )
     assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
+
+
+def test_extract_knowledge_file_tool_reads_only_the_scoped_source(monkeypatch) -> None:
+    row = {
+        "byte_size": 24,
+        "file_hash": "a" * 64,
+        "file_id": FILE_A,
+        "knowledge_base_id": KNOWLEDGE_BASE_A,
+        "mime_type": "text/csv",
+        "original_name": "products.csv",
+        "storage_key": "workspace/base/file-products.csv",
+        "storage_provider": "s3",
+        "workspace_id": WORKSPACE_A,
+    }
+
+    class FileResult:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return row
+
+    class FileConnection:
+        def __init__(self):
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute(self, query, params):
+            self.calls.append((str(query), params))
+            return FileResult()
+
+    connection = FileConnection()
+
+    @asynccontextmanager
+    async def connection_context():
+        yield connection
+
+    class FakeStorage:
+        async def read(self, storage_key: str) -> bytes:
+            assert storage_key == row["storage_key"]
+            return b"name,price\nChair,10"
+
+    monkeypatch.setattr(
+        "app.services.agent_tools.get_db_connection",
+        connection_context,
+    )
+    monkeypatch.setattr(
+        "app.services.agent_tools.get_knowledge_storage_for_provider",
+        lambda _settings, _provider: FakeStorage(),
+    )
+
+    result = asyncio.run(
+        execute_agent_tool(
+            "extractKnowledgeFileTool",
+            {
+                "fileId": str(FILE_A),
+                "knowledgeBaseId": str(KNOWLEDGE_BASE_A),
+                "output": "structured",
+                "limit": 10,
+            },
+            current_user=AuthenticatedUser(
+                user_id="development-user",
+                is_development=True,
+            ),
+            workspace_id=WORKSPACE_A,
+            can_query_knowledge=True,
+        )
+    )
+
+    document = result["parsedDocument"]
+    assert document["fileId"] == str(FILE_A)
+    assert document["originalName"] == "products.csv"
+    assert document["blocks"][1]["data"] == {"name": "Chair", "price": "10"}
+    assert "storageKey" not in document
+    assert connection.calls[0][1] == {
+        "file_id": FILE_A,
+        "knowledge_base_id": KNOWLEDGE_BASE_A,
+        "workspace_id": WORKSPACE_A,
+    }
 
 
 def test_get_knowledge_base_tool_returns_only_the_authorized_resource(monkeypatch) -> None:
