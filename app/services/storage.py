@@ -2,8 +2,10 @@ import asyncio
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import Settings
@@ -15,6 +17,19 @@ class StorageConfigurationError(Exception):
 
 class StorageError(Exception):
     """Raised when an object cannot be written, read, or deleted."""
+
+
+def _s3_client_config(endpoint_url: str | None) -> Config | None:
+    """Keep local S3-compatible traffic out of any inherited HTTP proxy."""
+    if not endpoint_url:
+        return None
+    try:
+        hostname = urlsplit(endpoint_url).hostname
+    except ValueError:
+        hostname = None
+    if hostname in {"127.0.0.1", "::1", "localhost"}:
+        return Config(proxies={})
+    return None
 
 
 class LocalKnowledgeStorage:
@@ -68,13 +83,16 @@ class S3KnowledgeStorage:
             self._client = client
             return
         try:
-            self._client = boto3.client(
-                "s3",
-                aws_access_key_id=access_key_id,
-                aws_secret_access_key=secret_access_key,
-                endpoint_url=endpoint_url,
-                region_name=region,
-            )
+            client_kwargs = {
+                "aws_access_key_id": access_key_id,
+                "aws_secret_access_key": secret_access_key,
+                "endpoint_url": endpoint_url,
+                "region_name": region,
+            }
+            client_config = _s3_client_config(endpoint_url)
+            if client_config is not None:
+                client_kwargs["config"] = client_config
+            self._client = boto3.client("s3", **client_kwargs)
         except (BotoCoreError, ClientError) as error:
             raise StorageConfigurationError(
                 "The S3 knowledge storage client could not be configured."

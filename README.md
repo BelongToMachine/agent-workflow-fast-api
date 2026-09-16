@@ -308,7 +308,7 @@ make migrate-knowledge-bases
 KNOWLEDGE_INGESTION_ENABLED=1
 KNOWLEDGE_STORAGE_DIR=storage/knowledge
 KNOWLEDGE_STORAGE_PROVIDER=local
-KNOWLEDGE_MAX_FILE_BYTES=26214400
+KNOWLEDGE_MAX_FILE_BYTES=104857600
 KNOWLEDGE_EMBEDDINGS_ENABLED=1
 EMBEDDING_API_KEY=your-embedding-provider-key
 EMBEDDING_BASE_URL=https://api.openai.com/v1
@@ -329,11 +329,11 @@ make migrate-knowledge-ingestion
 make migrate-knowledge-embeddings
 ```
 
-上传接口目前支持 PDF、Excel (`.xlsx`)、CSV、JSON、Markdown 和纯文本。接口先保存
+上传接口目前支持 PDF、PowerPoint (`.pptx`)、Excel (`.xlsx`)、CSV、JSON、Markdown 和纯文本。接口先保存
 文件元数据并返回 `pending`，再由 FastAPI background task 解析、按固定窗口切片并更新为
 `ready` 或 `failed`。打开 Embedding 开关后，切片会调用 OpenAI-compatible `/embeddings`
 接口并写入 pgvector；搜索接口会先验证 workspace/知识库权限，再执行 cosine search。
-PDF 和 XLSX 会在写入对象存储前校验文件签名，不能仅通过伪造扩展名进入解析任务。
+PDF、PPTX 和 XLSX 会在写入对象存储前校验文件签名，不能仅通过伪造扩展名进入解析任务。
 后台入库流水线的单测会验证对象读取、`processing`/`ready` 状态流转和 chunk 写入。
 Embedding provider 请求默认在 60 秒后超时，可通过 `EMBEDDING_PROVIDER_TIMEOUT_SECONDS`
 调整（范围 1–300 秒），避免解析任务或搜索请求无限等待上游服务。

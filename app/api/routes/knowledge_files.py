@@ -19,6 +19,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from openpyxl import load_workbook
+from pptx import Presentation
 from pydantic import BaseModel, ConfigDict, Field
 from pypdf import PdfReader
 from sqlalchemy import text
@@ -44,11 +45,13 @@ SUPPORTED_EXTENSIONS = {
     ".json": "application/json",
     ".md": "text/markdown",
     ".pdf": "application/pdf",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".txt": "text/plain",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 FILE_SIGNATURES = {
     ".pdf": (b"%PDF-",),
+    ".pptx": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
     ".xlsx": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
 }
 SAFE_FILENAME_PATTERN = re.compile(r"[^\w.-]+")
@@ -313,7 +316,41 @@ def _extract_text(filename: str, content: bytes) -> str:
     if extension == ".pdf":
         reader = PdfReader(io.BytesIO(content))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if extension == ".pptx":
+        presentation = Presentation(io.BytesIO(content))
+        lines: list[str] = []
+        for slide_index, slide in enumerate(presentation.slides, start=1):
+            slide_lines: list[str] = []
+            for shape_index, shape in enumerate(slide.shapes, start=1):
+                shape_lines = _extract_pptx_shape_text(shape)
+                if shape_lines:
+                    slide_lines.append(f"[Shape: {shape_index}]")
+                    slide_lines.extend(shape_lines)
+            if slide_lines:
+                lines.append(f"[Slide: {slide_index}]")
+                lines.extend(slide_lines)
+        return "\n".join(lines)
     raise ValueError("Unsupported knowledge file type.")
+
+
+def _extract_pptx_shape_text(shape: object) -> list[str]:
+    if getattr(shape, "has_table", False):
+        lines: list[str] = []
+        for row in shape.table.rows:
+            values = [cell.text.strip() for cell in row.cells]
+            if any(values):
+                lines.append("\t".join(values))
+        return lines
+    if getattr(shape, "has_text_frame", False):
+        text = shape.text.strip()
+        return [text] if text else []
+    nested_shapes = getattr(shape, "shapes", None)
+    if nested_shapes is None:
+        return []
+    lines = []
+    for nested_shape in nested_shapes:
+        lines.extend(_extract_pptx_shape_text(nested_shape))
+    return lines
 
 
 def _chunk_text(content: str) -> list[str]:
@@ -507,7 +544,7 @@ async def upload_knowledge_file(
     if extension not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Supported file types are PDF, CSV, XLSX, JSON, Markdown, and text.",
+            detail="Supported file types are PDF, PPTX, CSV, XLSX, JSON, Markdown, and text.",
         )
 
     content = await file.read(settings.knowledge_max_file_bytes + 1)

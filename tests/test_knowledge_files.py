@@ -9,6 +9,8 @@ import pytest
 from fastapi import UploadFile
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
+from pptx import Presentation
+from pptx.util import Inches
 from pydantic import ValidationError
 from starlette.datastructures import Headers
 
@@ -25,7 +27,7 @@ from app.api.routes.knowledge_files import (
     upload_knowledge_file,
 )
 from app.core.auth import AuthenticatedUser
-from app.core.config import Settings, get_settings
+from app.core.config import MAX_KNOWLEDGE_FILE_BYTES, Settings, get_settings
 from app.db.migrate_knowledge_ingestion import MIGRATION_PATH
 from app.main import app
 from app.services.storage import LocalKnowledgeStorage
@@ -224,12 +226,42 @@ def test_file_parser_supports_csv_and_xlsx() -> None:
     assert "chair\t10" in extracted
 
 
+def test_file_parser_supports_pptx_text_and_tables() -> None:
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    textbox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+    textbox.text = "Riboton product brief"
+    table = slide.shapes.add_table(2, 2, Inches(1), Inches(2), Inches(4), Inches(1)).table
+    table.cell(0, 0).text = "Product"
+    table.cell(0, 1).text = "Price"
+    table.cell(1, 0).text = "Riboton"
+    table.cell(1, 1).text = "99"
+
+    output = io.BytesIO()
+    presentation.save(output)
+
+    extracted = _extract_text("2026 Riboton.pptx", output.getvalue())
+    assert "[Slide: 1]" in extracted
+    assert "Riboton product brief" in extracted
+    assert "Product\tPrice" in extracted
+    assert "Riboton\t99" in extracted
+
+
 def test_binary_file_signatures_match_the_declared_extension() -> None:
     assert _content_matches_extension(".pdf", b"%PDF-1.7 content")
     assert _content_matches_extension(".xlsx", b"PK\x03\x04workbook")
+    assert _content_matches_extension(".pptx", b"PK\x03\x04presentation")
     assert not _content_matches_extension(".pdf", b"not-a-pdf")
     assert not _content_matches_extension(".xlsx", b"not-a-workbook")
     assert _content_matches_extension(".csv", b"name,price\nchair,10")
+
+
+def test_knowledge_file_limit_is_100_mib_and_cannot_be_raised_further() -> None:
+    assert Settings(
+        knowledge_max_file_bytes=MAX_KNOWLEDGE_FILE_BYTES
+    ).knowledge_max_file_bytes == 100 * 1024 * 1024
+    with pytest.raises(ValidationError):
+        Settings(knowledge_max_file_bytes=MAX_KNOWLEDGE_FILE_BYTES + 1)
 
 
 def test_file_name_and_storage_path_are_sandboxed(tmp_path) -> None:

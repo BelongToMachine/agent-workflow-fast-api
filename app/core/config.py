@@ -8,6 +8,7 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
+MAX_KNOWLEDGE_FILE_BYTES = 100 * 1024 * 1024
 
 
 class SettingsConfigurationError(RuntimeError):
@@ -244,7 +245,7 @@ class Settings(BaseSettings):
         ),
     )
     knowledge_base_entity_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices(
             "KNOWLEDGE_BASE_ENTITY_ENABLED",
             "ASIANODE_KNOWLEDGE_BASE_ENTITY_ENABLED",
@@ -307,8 +308,9 @@ class Settings(BaseSettings):
         ),
     )
     knowledge_max_file_bytes: int = Field(
-        default=25 * 1024 * 1024,
+        default=MAX_KNOWLEDGE_FILE_BYTES,
         ge=1,
+        le=MAX_KNOWLEDGE_FILE_BYTES,
         validation_alias=AliasChoices(
             "KNOWLEDGE_MAX_FILE_BYTES",
             "ASIANODE_KNOWLEDGE_MAX_FILE_BYTES",

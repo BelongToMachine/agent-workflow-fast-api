@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+import app.services.storage as storage_module
 from app.core.config import Settings
 from app.services.storage import (
     LocalKnowledgeStorage,
@@ -64,6 +65,28 @@ def test_s3_storage_round_trip() -> None:
     assert asyncio.run(storage.read("workspace/file.txt")) == b"hello"
     asyncio.run(storage.delete("workspace/file.txt"))
     assert client.objects == {}
+
+
+def test_s3_storage_bypasses_proxy_for_loopback_endpoint(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_boto_client(service_name: str, **kwargs):
+        captured["service_name"] = service_name
+        captured.update(kwargs)
+        return FakeS3Client()
+
+    monkeypatch.setattr(storage_module.boto3, "client", fake_boto_client)
+
+    storage_module.S3KnowledgeStorage(
+        access_key_id="access-key",
+        bucket="knowledge",
+        endpoint_url="http://127.0.0.1:29000",
+        region="us-east-1",
+        secret_access_key="secret-key",
+    )
+
+    assert captured["service_name"] == "s3"
+    assert captured["config"].proxies == {}
 
 
 def test_s3_storage_requires_a_bucket() -> None:
