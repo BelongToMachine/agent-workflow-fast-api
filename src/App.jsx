@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { AppSidebar } from "./components/chat/appSidebar";
@@ -30,12 +30,19 @@ import {
 import { Link, usePathname, useRouter } from "./lib/router";
 import { applyAccentColor, getStoredAccentColor } from "./lib/accentColor";
 
+const BusinessDataTablesPage = lazy(() =>
+  import("./components/businessTables/businessDataTablesPage").then((module) => ({
+    default: module.BusinessDataTablesPage,
+  }))
+);
+
 function isKnownRoute(pathname) {
   if (
     pathname === "/" ||
     pathname === "/activate" ||
     pathname === "/access-pending" ||
     pathname === "/account-suspended" ||
+    pathname === "/admin/data-tables" ||
     pathname === "/fastapi-test" ||
     pathname === "/forbidden" ||
     pathname === "/forgot-password" ||
@@ -230,6 +237,16 @@ function ChatLayout() {
           <Routes>
             <Route element={<ChatPage />} index />
             <Route element={<ChatPage />} path="chat/:id" />
+            <Route
+              element={
+                <PermissionRoute permission="knowledge.manage">
+                  <Suspense fallback={<LoadingState message={t("app.loadingAccess")} />}>
+                    <BusinessDataTablesPage />
+                  </Suspense>
+                </PermissionRoute>
+              }
+              path="admin/data-tables"
+            />
             <Route
               element={
                 <PermissionRoute permission="members.read">

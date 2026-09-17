@@ -67,7 +67,7 @@ export function AppSidebar({
   user: User | undefined;
 }) {
   const router = useRouter();
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
   const { setOpenMobile, toggleSidebar } = useSidebar();
   const queryClient = useQueryClient();
   const identity = useBackendIdentity(user?.id);
@@ -237,6 +237,23 @@ export function AppSidebar({
                       <Link href="/settings/knowledge-bases/files">
                         <DatabaseIcon className="size-4" />
                         <span className="text-[13px]">{t("sidebar.knowledgeBases")}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ) : null}
+                {canManageKnowledgeBases ? (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                      onClick={closeMobile}
+                      tooltip={i18n.language.toLowerCase().startsWith("zh") ? "业务数据表" : "Business data tables"}
+                    >
+                      <Link href="/admin/data-tables">
+                        <DatabaseIcon className="size-4" />
+                        <span className="text-[13px]">
+                          {i18n.language.toLowerCase().startsWith("zh") ? "业务数据表" : "Business data"}
+                        </span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
