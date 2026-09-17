@@ -10,6 +10,7 @@ from app.api.routes.auth_invitations import router as auth_invitations_admin_rou
 from app.api.routes.auth_local import router as auth_local_router
 from app.api.routes.auth_password_resets import router as auth_password_resets_router
 from app.api.routes.auth_passwords import router as auth_passwords_router
+from app.api.routes.business_data_tables import router as business_data_tables_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.chats import router as chats_router
 from app.api.routes.content import router as content_router
@@ -36,6 +37,7 @@ api_router.include_router(auth_passwords_router)
 api_router.include_router(auth_password_resets_router)
 api_router.include_router(auth_invitations_admin_router)
 api_router.include_router(admin_knowledge_grants_router)
+api_router.include_router(business_data_tables_router)
 api_router.include_router(admin_members_router)
 api_router.include_router(chat_router)
 api_router.include_router(chats_router)
