@@ -202,7 +202,7 @@ def test_knowledge_base_create_and_update_routes_keep_workspace_and_audit_scope(
         knowledge_base_row=knowledge_base_row(),
         update_result=KNOWLEDGE_BASE_A,
     )
-    settings = Settings(knowledge_base_entity_enabled=True)
+    settings = Settings()
 
     async def fake_require_workspace_permission(*_args, **_kwargs):
         return SimpleNamespace(role="owner", permissions=["knowledge.manage"])
@@ -248,8 +248,8 @@ def test_knowledge_base_create_and_update_routes_keep_workspace_and_audit_scope(
         for _sql, params in connection.calls
         if "workspace_id" in params
     )
-    assert sum("INSERT INTO \"KnowledgeBase\"" in sql for sql, _ in connection.calls) == 1
-    assert sum("UPDATE \"KnowledgeBase\"" in sql for sql, _ in connection.calls) == 1
+    assert sum('INSERT INTO "KnowledgeBase"' in sql for sql, _ in connection.calls) == 1
+    assert sum('UPDATE "KnowledgeBase"' in sql for sql, _ in connection.calls) == 1
 
 
 def test_knowledge_base_delete_route_cascades_and_cleans_storage(monkeypatch) -> None:
@@ -267,7 +267,6 @@ def test_knowledge_base_delete_route_cascades_and_cleans_storage(monkeypatch) ->
         delete_row={"id": KNOWLEDGE_BASE_A},
     )
     settings = Settings(
-        knowledge_base_entity_enabled=True,
         knowledge_ingestion_enabled=True,
     )
 

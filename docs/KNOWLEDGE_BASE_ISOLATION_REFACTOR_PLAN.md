@@ -60,10 +60,9 @@ Workspace（公司，目前只有一个）
 | `0001`–`0004` knowledge migrations | 全部 pending |
 | `0005_auth_identity` | applied |
 
-因此当前不能直接启用：
+因此当前不能直接启用 grant、ingestion 或 embedding 功能：
 
 ```env
-KNOWLEDGE_BASE_ENTITY_ENABLED=1
 KNOWLEDGE_GRANTS_ENABLED=1
 KNOWLEDGE_INGESTION_ENABLED=1
 KNOWLEDGE_EMBEDDINGS_ENABLED=1
@@ -390,11 +389,11 @@ knowledge:feature_disabled
 
 ### Phase B6：Feature flag 收敛
 
-- [ ] `KNOWLEDGE_BASE_ENTITY_ENABLED` 仅用于 legacy → 新实体切换；
+- [x] FastAPI 查询固定使用 `KnowledgeBase`；应用 `0004_knowledge_bases.sql` 后不再保留 legacy 表切换开关。
 - [ ] `KNOWLEDGE_GRANTS_ENABLED` 仅用于 migration 前灰度，正式隔离上线后不得通过关闭它来回滚；
 - [ ] enforce 模式下缺表或缺列应在启动检查中失败或让知识 API 返回 503/409；
 - [ ] 禁止“授权系统故障时默认放行”；
-- [ ] 稳定后规划删除双轨 query renderer 和 legacy flag。
+- [ ] 稳定后清理其余过渡期授权逻辑。
 
 ## 6. 前端实施计划
 
@@ -491,13 +490,12 @@ Knowledge bases
 6. [ ] 运行 knowledge integrity；
 7. [ ] 核对 `KnowledgeBase` 仍是 2 行、UUID 与 KnowledgeSource 相同；
 8. [ ] 核对产品 47 行、内容 46 行仍可通过 sourceId 查询；
-9. [ ] 设置 `KNOWLEDGE_BASE_ENTITY_ENABLED=1`；
-10. [ ] 保持现有两个知识库为 `workspace`，验证行为与切换前一致；
-11. [ ] 设置 `KNOWLEDGE_GRANTS_ENABLED=1`/enforce；
-12. [ ] 通过 UI 将需要隔离的知识库改为 `restricted` 并配置 grant；
-13. [ ] 使用 admin/editor/viewer/employee 账户执行验收矩阵；
-14. [ ] 观察 API 403/404、空检索和 Agent tool 日志；
-15. [ ] 确认无数据泄露后再准备 production。
+9. [ ] 保持现有两个知识库为 `workspace`，验证行为与切换前一致；
+10. [ ] 设置 `KNOWLEDGE_GRANTS_ENABLED=1`/enforce；
+11. [ ] 通过 UI 将需要隔离的知识库改为 `restricted` 并配置 grant；
+12. [ ] 使用 admin/editor/viewer/employee 账户执行验收矩阵；
+13. [ ] 观察 API 403/404、空检索和 Agent tool 日志；
+14. [ ] 确认无数据泄露后再准备 production。
 
 当前 `app/db/migrate_knowledge.py` 会把知识 migration 放在一个事务中执行；新增 `0006` 后继续保持
 all-or-nothing。远程数据库必须通过正式部署 migration 流程或明确审核后的 `--allow-remote`，不把本地

@@ -57,8 +57,8 @@ POSTGRES_URL=postgresql://asianode:asianode@127.0.0.1:5432/asianode make migrate
 ```
 
 确认四个 migration 都成功后，才在本地开发环境开启对应的
-`KNOWLEDGE_GRANTS_ENABLED`、`KNOWLEDGE_INGESTION_ENABLED`、
-`KNOWLEDGE_EMBEDDINGS_ENABLED` 和 `KNOWLEDGE_BASE_ENTITY_ENABLED`。`make infra-down` 只停止并
+`KNOWLEDGE_GRANTS_ENABLED`、`KNOWLEDGE_INGESTION_ENABLED` 和
+`KNOWLEDGE_EMBEDDINGS_ENABLED`。FastAPI 固定使用 `KnowledgeBase` 实体。`make infra-down` 只停止并
 移除容器，不带 `-v`，因此不会删除本地数据库或 Redis volume。
 
 发布移除聊天反馈功能的版本前，应由正式部署迁移流程执行
@@ -270,11 +270,8 @@ runner 在 staging/production 环境会拒绝执行；共享环境应通过正�
 
 `migrations/0004_knowledge_bases.sql` 会把现有 `KnowledgeSource` 以原 ID 回填到独立的
 `KnowledgeBase` 表，并将 `KnowledgeBaseGrant`、`KnowledgeFile` 和 `KnowledgeChunk` 的
-外键切换到新表。旧表会保留，方便旧 Next.js 路径回滚；FastAPI 通过开关选择查询边界：
-
-```env
-KNOWLEDGE_BASE_ENTITY_ENABLED=1
-```
+外键切换到新表。旧表会保留，方便旧 Next.js 路径回滚；FastAPI 始终以 `KnowledgeBase` 为知识库
+实体，因此使用知识库 API 前必须先完成此迁移。
 
 先执行只读预检：
 
@@ -291,9 +288,7 @@ HNSW 索引有效性；独立知识库迁移还会检查 backfill 后的依赖�
 make migrate-knowledge-bases
 ```
 
-迁移应用前不要打开 `KNOWLEDGE_BASE_ENTITY_ENABLED`；开关关闭时 FastAPI 继续使用
-`KnowledgeSource` 兼容路径。runner 在 staging/production 环境会拒绝本地执行，正式环境
-应通过部署系统审查并应用 SQL。
+runner 在 staging/production 环境会拒绝本地执行，正式环境应通过部署系统审查并应用 SQL。
 
 知识库删除是数据库优先的幂等流程：FastAPI 先验证知识库级 `manage` 权限，再删除知识库
 记录，让数据库级联清理 grant、文件元数据和切片，最后按每个文件记录的 provider 清理本地

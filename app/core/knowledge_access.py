@@ -99,17 +99,15 @@ KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE = """
     """
 
 AUTHORIZED_SOURCE_IDS_QUERY = text(
-    AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE.replace("{knowledge_base_table}", '"KnowledgeSource"')
+    render_knowledge_base_query(AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE)
 ).bindparams(bindparam("roles", expanding=True))
 
 KNOWLEDGE_BASE_ACCESS_QUERY = text(
-    KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE
-    .replace("{knowledge_base_table}", '"KnowledgeSource"')
+    render_knowledge_base_query(KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE)
 ).bindparams(bindparam("roles", expanding=True))
 
 KNOWLEDGE_BASE_EXISTS_QUERY = text(
-    KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE
-    .replace("{knowledge_base_table}", '"KnowledgeSource"')
+    render_knowledge_base_query(KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE)
 )
 
 
@@ -125,13 +123,15 @@ def _is_restricted_knowledge_user(
     is_guest: bool | None,
 ) -> bool:
     normalized_roles = {role.lower() for role in roles}
-    return bool(is_guest) or current_user.is_guest or bool(
-        normalized_roles & RESTRICTED_KNOWLEDGE_ROLES
+    return (
+        bool(is_guest)
+        or current_user.is_guest
+        or bool(normalized_roles & RESTRICTED_KNOWLEDGE_ROLES)
     )
 
 
-def _knowledge_authorization_query(template: str, settings: object) -> object:
-    return text(render_knowledge_base_query(template, settings)).bindparams(
+def _knowledge_authorization_query(template: str) -> object:
+    return text(render_knowledge_base_query(template)).bindparams(
         bindparam("roles", expanding=True)
     )
 
@@ -146,8 +146,6 @@ async def get_authorized_source_ids(
     """Return allowed source IDs, or None while the grant rollout is disabled."""
     if not get_settings().knowledge_grants_enabled or current_user.is_development:
         return None
-    settings = get_settings()
-
     try:
         user_id = UUID(current_user.user_id)
     except ValueError as error:
@@ -155,8 +153,8 @@ async def get_authorized_source_ids(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The authenticated user is not linked to a local workspace.",
         ) from error
-    role = workspace_role or current_user.role or (
-        current_user.roles[0] if current_user.roles else ""
+    role = (
+        workspace_role or current_user.role or (current_user.roles[0] if current_user.roles else "")
     )
     roles = _knowledge_roles(current_user, role)
     is_restricted = _is_restricted_knowledge_user(
@@ -169,7 +167,6 @@ async def get_authorized_source_ids(
             result = await connection.execute(
                 _knowledge_authorization_query(
                     AUTHORIZED_SOURCE_IDS_QUERY_TEMPLATE,
-                    settings,
                 ),
                 {
                     "role": role,
@@ -222,12 +219,7 @@ async def require_knowledge_base_permission(
         try:
             async with get_db_connection() as connection:
                 result = await connection.execute(
-                    text(
-                        render_knowledge_base_query(
-                            KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE,
-                            settings,
-                        )
-                    ),
+                    text(render_knowledge_base_query(KNOWLEDGE_BASE_EXISTS_QUERY_TEMPLATE)),
                     {
                         "knowledge_base_id": knowledge_base_id,
                         "workspace_id": workspace_id,
@@ -265,7 +257,6 @@ async def require_knowledge_base_permission(
             result = await connection.execute(
                 _knowledge_authorization_query(
                     KNOWLEDGE_BASE_ACCESS_QUERY_TEMPLATE,
-                    settings,
                 ),
                 {
                     "is_restricted": is_restricted,

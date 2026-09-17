@@ -116,7 +116,6 @@ KNOWLEDGE_BASE_DELETE_TEMPLATE = """
 
 
 def knowledge_base_select_query(
-    settings: Settings | None = None,
     authorized_source_ids: list[UUID] | None = None,
 ) -> object:
     authorization_condition = ""
@@ -127,7 +126,6 @@ def knowledge_base_select_query(
             KNOWLEDGE_BASE_SELECT_TEMPLATE.replace(
                 "{authorization_condition}", authorization_condition
             ),
-            settings,
         )
     )
     if authorized_source_ids is not None:
@@ -141,20 +139,19 @@ def knowledge_base_select_query(
     return query
 
 
-def knowledge_base_insert_query(settings: Settings | None = None) -> object:
-    return text(render_knowledge_base_query(KNOWLEDGE_BASE_INSERT_TEMPLATE, settings))
+def knowledge_base_insert_query() -> object:
+    return text(render_knowledge_base_query(KNOWLEDGE_BASE_INSERT_TEMPLATE))
 
 
-def knowledge_base_update_query(settings: Settings | None = None) -> object:
-    return text(render_knowledge_base_query(KNOWLEDGE_BASE_UPDATE_TEMPLATE, settings))
+def knowledge_base_update_query() -> object:
+    return text(render_knowledge_base_query(KNOWLEDGE_BASE_UPDATE_TEMPLATE))
 
 
-def knowledge_base_delete_query(settings: Settings | None = None) -> object:
-    return text(render_knowledge_base_query(KNOWLEDGE_BASE_DELETE_TEMPLATE, settings))
+def knowledge_base_delete_query() -> object:
+    return text(render_knowledge_base_query(KNOWLEDGE_BASE_DELETE_TEMPLATE))
 
 
-# Keep import-time query constants for callers and tests that still exercise the
-# transitional KnowledgeSource path directly.
+# Keep import-time query constants for compatibility with existing callers.
 KNOWLEDGE_BASE_SELECT = knowledge_base_select_query()
 KNOWLEDGE_BASE_INSERT = knowledge_base_insert_query()
 KNOWLEDGE_BASE_UPDATE = knowledge_base_update_query()
@@ -250,7 +247,7 @@ async def list_knowledge_bases(
     try:
         async with get_db_connection() as connection:
             result = await connection.execute(
-                knowledge_base_select_query(settings, authorized_source_ids),
+                knowledge_base_select_query(authorized_source_ids),
                 params,
             )
             rows = result.mappings().all()
@@ -259,9 +256,7 @@ async def list_knowledge_bases(
     except SQLAlchemyError:
         return _database_error("FastAPI could not list knowledge bases.")
 
-    return KnowledgeBaseListResponse(
-        knowledgeBases=[_summary(dict(row)) for row in rows]
-    )
+    return KnowledgeBaseListResponse(knowledgeBases=[_summary(dict(row)) for row in rows])
 
 
 @router.post("", response_model=KnowledgeBaseSummary, status_code=status.HTTP_201_CREATED)
@@ -279,7 +274,7 @@ async def create_knowledge_base(
         async with get_db_connection() as connection:
             async with connection.begin():
                 await connection.execute(
-                    knowledge_base_insert_query(settings),
+                    knowledge_base_insert_query(),
                     {
                         "display_name": payload.display_name,
                         "knowledge_base_id": knowledge_base_id,
@@ -288,7 +283,7 @@ async def create_knowledge_base(
                     },
                 )
                 result = await connection.execute(
-                    knowledge_base_select_query(settings),
+                    knowledge_base_select_query(),
                     {"workspace_id": workspace_id},
                 )
                 row = next(
@@ -332,7 +327,7 @@ async def update_knowledge_base(
         async with get_db_connection() as connection:
             async with connection.begin():
                 result = await connection.execute(
-                    knowledge_base_update_query(settings),
+                    knowledge_base_update_query(),
                     {
                         "display_name": payload.display_name,
                         "knowledge_base_id": knowledge_base_id,
@@ -346,7 +341,7 @@ async def update_knowledge_base(
                         detail="Knowledge base not found in this workspace.",
                     )
                 result = await connection.execute(
-                    knowledge_base_select_query(settings),
+                    knowledge_base_select_query(),
                     {"workspace_id": workspace_id},
                 )
                 row = next(
@@ -407,7 +402,7 @@ async def delete_knowledge_base(
                     file_rows = [dict(row) for row in file_result.mappings().all()]
 
                 result = await connection.execute(
-                    knowledge_base_delete_query(settings),
+                    knowledge_base_delete_query(),
                     {
                         "knowledge_base_id": knowledge_base_id,
                         "workspace_id": workspace_id,

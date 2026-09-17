@@ -167,8 +167,8 @@ Web 的 JPEG/PNG `file` part 会被 FastAPI 转换为模型消息中的 OpenAI-c
 
 - Next.js BFF 保留原有 `/api/...` 路径，只负责 session 校验、签名 bridge 和响应转发。
 - FastAPI 的 `/api/v1` 是业务权限和数据访问的唯一新管道；旧 Next.js handler 暂时保留作回滚
-  和未切换开关时的兼容实现。
-- `KNOWLEDGE_BASE_ENTITY_ENABLED` 关闭时，FastAPI 使用 `KnowledgeSource`；开启前必须先应用
+  和逐步迁移期间的兼容实现。
+- FastAPI 固定使用 `KnowledgeBase` 作为知识库实体；部署前必须先应用
   `migrations/0004_knowledge_bases.sql`。
 - `KNOWLEDGE_GRANTS_ENABLED`、`KNOWLEDGE_INGESTION_ENABLED` 和
   `KNOWLEDGE_EMBEDDINGS_ENABLED` 都必须在对应数据库/provider 验证后再开启。

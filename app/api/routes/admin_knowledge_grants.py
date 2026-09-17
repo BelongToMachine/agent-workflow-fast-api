@@ -85,29 +85,27 @@ GRANT_KNOWLEDGE_BASE_QUERY_TEMPLATE = """
     """
 
 
-def grants_select_query(settings: Settings | None = None) -> object:
-    return text(render_knowledge_base_query(GRANTS_SELECT_TEMPLATE, settings))
+def grants_select_query() -> object:
+    return text(render_knowledge_base_query(GRANTS_SELECT_TEMPLATE))
 
 
-def grant_by_id_query(settings: Settings | None = None) -> object:
+def grant_by_id_query() -> object:
     return text(
         render_knowledge_base_query(
             GRANTS_SELECT_TEMPLATE
             + """
       AND grant_record."id" = :grant_id
     LIMIT 1
-    """,
-            settings,
+    """
         )
     )
 
 
-def grant_knowledge_base_query(settings: Settings | None = None) -> object:
-    return text(render_knowledge_base_query(GRANT_KNOWLEDGE_BASE_QUERY_TEMPLATE, settings))
+def grant_knowledge_base_query() -> object:
+    return text(render_knowledge_base_query(GRANT_KNOWLEDGE_BASE_QUERY_TEMPLATE))
 
 
-# Keep import-time constants for compatibility with existing unit tests and
-# callers that inspect the transitional SQL directly.
+# Keep import-time constants for compatibility with existing callers.
 GRANTS_SELECT = render_knowledge_base_query(GRANTS_SELECT_TEMPLATE)
 GRANT_BY_ID_QUERY = text(
     GRANTS_SELECT
@@ -205,10 +203,7 @@ def _grants_disabled() -> JSONResponse:
 
 
 def _require_non_anonymous_development_identity(current_user: AuthenticatedUser) -> None:
-    if (
-        current_user.is_development
-        and "permissions" not in current_user.claims
-    ):
+    if current_user.is_development and "permissions" not in current_user.claims:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer access token is required.",
@@ -228,10 +223,9 @@ async def _load_grant(
     connection: object,
     workspace_id: UUID,
     grant_id: UUID,
-    settings: Settings | None = None,
 ) -> KnowledgeBaseGrantView | None:
     result = await connection.execute(
-        grant_by_id_query(settings),
+        grant_by_id_query(),
         {"grant_id": grant_id, "workspace_id": workspace_id},
     )
     row = result.mappings().first()
@@ -284,7 +278,7 @@ async def list_knowledge_base_grants(
     if not settings.knowledge_grants_enabled:
         return _grants_disabled()
 
-    query = render_knowledge_base_query(GRANTS_SELECT_TEMPLATE, settings)
+    query = render_knowledge_base_query(GRANTS_SELECT_TEMPLATE)
     params: dict[str, object] = {"workspace_id": workspace_id}
     if knowledge_base_id is not None:
         query += '      AND grant_record."knowledgeBaseId" = :knowledge_base_id\n'
@@ -303,9 +297,7 @@ async def list_knowledge_base_grants(
     except SQLAlchemyError:
         return _database_error("FastAPI could not query knowledge base grants.")
 
-    return KnowledgeBaseGrantsResponse(
-        grants=[_build_grant_view(dict(row)) for row in rows]
-    )
+    return KnowledgeBaseGrantsResponse(grants=[_build_grant_view(dict(row)) for row in rows])
 
 
 @router.put("/knowledge-base-grants", response_model=None)
@@ -331,7 +323,7 @@ async def upsert_knowledge_base_grant(
         async with get_db_connection() as connection:
             async with connection.begin():
                 knowledge_base_result = await connection.execute(
-                    grant_knowledge_base_query(settings),
+                    grant_knowledge_base_query(),
                     {
                         "knowledge_base_id": body.knowledge_base_id,
                         "workspace_id": workspace_id,
@@ -354,7 +346,7 @@ async def upsert_knowledge_base_grant(
                     },
                 )
                 grant_id = result.scalar_one()
-                grant = await _load_grant(connection, workspace_id, grant_id, settings)
+                grant = await _load_grant(connection, workspace_id, grant_id)
                 await _write_audit_log(
                     connection,
                     action="workspace.knowledge_base_grant_updated",

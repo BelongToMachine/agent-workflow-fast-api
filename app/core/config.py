@@ -244,13 +244,6 @@ class Settings(BaseSettings):
             "ASIANODE_KNOWLEDGE_GRANTS_ENABLED",
         ),
     )
-    knowledge_base_entity_enabled: bool = Field(
-        default=True,
-        validation_alias=AliasChoices(
-            "KNOWLEDGE_BASE_ENTITY_ENABLED",
-            "ASIANODE_KNOWLEDGE_BASE_ENTITY_ENABLED",
-        ),
-    )
     knowledge_ingestion_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices(
