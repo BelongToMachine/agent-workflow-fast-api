@@ -32,7 +32,9 @@ import { useApplicationAuth } from "@/lib/auth/applicationAuth";
 import { useSession } from "@/lib/auth";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import mockBusinessTables from "@/data/businessTables.mock.json";
+import { requestBackend } from "@/lib/backend/request";
 import { queryMockRows } from "@/lib/businessTables/mockQuery.mjs";
+import { buildProductPriceRowsPath } from "@/lib/businessTables/productPriceApi.mjs";
 import "./businessDataTablesPage.css";
 
 type Locale = "zh" | "en";
@@ -63,6 +65,12 @@ type BusinessTable = {
   rows: BusinessRow[];
 };
 
+type BusinessTableRowsResponse = {
+  rows: BusinessRow[];
+  total: number;
+  hasMore: boolean;
+};
+
 type StoredColumnState = ColumnState[];
 type OrderedColumn = { field: BusinessField; state: ColumnState };
 
@@ -80,7 +88,9 @@ const labels = {
     title: "Business data tables",
     subtitle: "A focused view of product and content records across the workspace.",
     preview: "Mock data preview",
-    previewNote: "This page is using local mock JSON. No business API is connected yet.",
+    connected: "Database connected",
+    previewNote: "This table uses local mock JSON.",
+    apiNote: "ProductPrice is loaded from PostgreSQL. Other tables still use local mock JSON.",
     productGroup: "Product",
     contentGroup: "Content",
     search: "Search all fields",
@@ -95,6 +105,7 @@ const labels = {
     noRows: "No records match this search.",
     noRowsGrid: "No records to show",
     mockBadge: "MOCK JSON",
+    apiBadge: "POSTGRESQL API",
     resetColumns: "Reset columns",
     showColumn: "Show column",
     moveUp: "Move up",
@@ -110,6 +121,9 @@ const labels = {
     relation: "Product relation",
     openProduct: "Open product record",
     mockRecord: "Synthetic record",
+    databaseRecord: "Database record",
+    loadError: "Could not load ProductPrice rows. Check the backend connection and retry.",
+    retry: "Retry",
     sourceMetadata: "Columns are limited to documented relationship fields until the API supplies metadata.",
     all: "All",
     true: "Yes",
@@ -122,7 +136,9 @@ const labels = {
     title: "业务数据表",
     subtitle: "集中浏览工作区中的产品和内容业务记录。",
     preview: "Mock 数据预览",
-    previewNote: "当前页面使用本地 mock JSON，尚未连接业务数据 API。",
+    connected: "数据库已连接",
+    previewNote: "当前表使用本地 mock JSON。",
+    apiNote: "ProductPrice 已从 PostgreSQL 加载，其他表暂时仍使用本地 mock JSON。",
     productGroup: "产品",
     contentGroup: "内容",
     search: "检索全部字段",
@@ -137,6 +153,7 @@ const labels = {
     noRows: "没有符合条件的记录。",
     noRowsGrid: "没有可显示的记录",
     mockBadge: "模拟 JSON",
+    apiBadge: "POSTGRESQL API",
     resetColumns: "恢复默认列",
     showColumn: "显示列",
     moveUp: "上移",
@@ -152,6 +169,9 @@ const labels = {
     relation: "关联产品",
     openProduct: "查看产品主资料",
     mockRecord: "模拟记录",
+    databaseRecord: "数据库记录",
+    loadError: "ProductPrice 加载失败，请检查后端连接后重试。",
+    retry: "重试",
     sourceMetadata: "API 元数据补充前，仅展示已确认的产品关联字段。",
     all: "全部",
     true: "是",
@@ -199,6 +219,7 @@ function formatValue(value: unknown, field: BusinessField, locale: Locale, trunc
 }
 
 function rowKey(table: BusinessTable, row: BusinessRow) {
+  if (row.id !== null && row.id !== undefined) return String(row.id);
   if (table.key === "RealProductResearch") return String(row.id ?? "");
   if (table.key === "ProductPrice") {
     return `${row.researchId}:${row.sourceFileId}:${row.variant}`;
@@ -245,7 +266,8 @@ export function BusinessDataTablesPage() {
   const [activeTableKey, setActiveTableKey] = useState("RealProductResearch");
   const [searchValue, setSearchValue] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [matchCount, setMatchCount] = useState(tables[0].rows.length);
+  const [matchCount, setMatchCount] = useState<number | null>(tables[0].rows.length);
+  const [queryError, setQueryError] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<BusinessRow | null>(null);
   const [showJson, setShowJson] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -310,9 +332,63 @@ export function BusinessDataTablesPage() {
   const datasource = useMemo<IDatasource>(() => {
     let destroyed = false;
     const pendingTimers = new Set<number>();
+    const pendingRequests = new Set<AbortController>();
+    let previousCriteria = "";
+    let criteriaVersion = 0;
 
     return {
       getRows: (params: IGetRowsParams<BusinessRow>) => {
+        if (activeTable.key === "ProductPrice") {
+          const criteria = JSON.stringify({
+            search: debouncedSearch,
+            filterModel: params.filterModel,
+            sortModel: params.sortModel,
+          });
+          if (criteria !== previousCriteria) {
+            previousCriteria = criteria;
+            criteriaVersion += 1;
+            pendingRequests.forEach((request) => request.abort());
+            pendingRequests.clear();
+            setMatchCount(null);
+          }
+          const requestCriteriaVersion = criteriaVersion;
+          setQueryError(false);
+          const controller = new AbortController();
+          pendingRequests.add(controller);
+          const path = buildProductPriceRowsPath({
+            workspaceId: activeMembership?.workspaceId,
+            startRow: params.startRow,
+            endRow: params.endRow,
+            search: debouncedSearch,
+            filterModel: params.filterModel,
+            sortModel: params.sortModel,
+          });
+          void requestBackend<BusinessTableRowsResponse>(
+            path,
+            { signal: controller.signal },
+            { timeoutMs: 30_000 }
+          ).then((page) => {
+            pendingRequests.delete(controller);
+            if (
+              destroyed ||
+              controller.signal.aborted ||
+              requestCriteriaVersion !== criteriaVersion
+            ) return;
+            setMatchCount(page.total);
+            params.successCallback(page.rows, page.total);
+          }).catch(() => {
+            pendingRequests.delete(controller);
+            if (
+              destroyed ||
+              controller.signal.aborted ||
+              requestCriteriaVersion !== criteriaVersion
+            ) return;
+            setQueryError(true);
+            params.failCallback();
+          });
+          return;
+        }
+
         const timer = window.setTimeout(() => {
           pendingTimers.delete(timer);
           if (destroyed) return;
@@ -337,9 +413,11 @@ export function BusinessDataTablesPage() {
         destroyed = true;
         pendingTimers.forEach((timer) => window.clearTimeout(timer));
         pendingTimers.clear();
+        pendingRequests.forEach((controller) => controller.abort());
+        pendingRequests.clear();
       },
     };
-  }, [activeTable, debouncedSearch]);
+  }, [activeMembership?.workspaceId, activeTable, debouncedSearch]);
 
   const orderedColumnState = useMemo(() => {
     const state = gridRef.current?.api.getColumnState() ?? [];
@@ -392,7 +470,8 @@ export function BusinessDataTablesPage() {
     previousTableKey.current = activeTable.key;
     setSelectedRecord(null);
     setShowJson(false);
-    setMatchCount(activeTable.rows.length);
+    setMatchCount(activeTable.key === "ProductPrice" ? null : activeTable.rows.length);
+    setQueryError(false);
     setSearchValue("");
     setDebouncedSearch("");
 
@@ -437,7 +516,8 @@ export function BusinessDataTablesPage() {
     setDebouncedSearch("");
     setSelectedRecord(null);
     setColumnsOpen(false);
-    setMatchCount(table.rows.length);
+    setMatchCount(table.key === "ProductPrice" ? null : table.rows.length);
+    setQueryError(false);
   }, []);
 
   const onGridColumnStateChanged = useCallback(() => {
@@ -510,7 +590,7 @@ export function BusinessDataTablesPage() {
           </div>
           <span className="business-mock-badge">
             <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
-            {copy.preview}
+            {activeTable.key === "ProductPrice" ? copy.connected : copy.preview}
           </span>
         </header>
 
@@ -549,8 +629,10 @@ export function BusinessDataTablesPage() {
 
         <div className="flex items-start gap-2 rounded-lg border border-primary/10 bg-primary/[0.035] px-3 py-2.5 text-xs text-muted-foreground">
           <span aria-hidden="true" className="mt-1 size-1.5 shrink-0 rounded-full bg-primary/60" />
-          <span>{copy.previewNote}</span>
-          <span className="ml-auto shrink-0 font-mono text-[10px] tracking-wide text-muted-foreground/70">{copy.mockBadge}</span>
+          <span>{activeTable.key === "ProductPrice" ? copy.apiNote : copy.previewNote}</span>
+          <span className="ml-auto shrink-0 font-mono text-[10px] tracking-wide text-muted-foreground/70">
+            {activeTable.key === "ProductPrice" ? copy.apiBadge : copy.mockBadge}
+          </span>
         </div>
 
         <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
@@ -595,7 +677,8 @@ export function BusinessDataTablesPage() {
                 aria-label={copy.refresh}
                 className="business-toolbar-button business-icon-button"
                 onClick={() => {
-                  setMatchCount(activeTable.rows.length);
+                  setMatchCount(activeTable.key === "ProductPrice" ? null : activeTable.rows.length);
+                  setQueryError(false);
                   gridRef.current?.api.purgeInfiniteCache();
                 }}
                 title={copy.refresh}
@@ -681,6 +764,23 @@ export function BusinessDataTablesPage() {
             </div>
           ) : null}
 
+          {queryError ? (
+            <div className="flex items-center justify-between gap-3 border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-xs text-destructive" role="alert">
+              <span>{copy.loadError}</span>
+              <button
+                className="business-toolbar-button"
+                onClick={() => {
+                  setQueryError(false);
+                  gridRef.current?.api.purgeInfiniteCache();
+                }}
+                type="button"
+              >
+                <RefreshCwIcon aria-hidden="true" className="size-3.5" />
+                <span>{copy.retry}</span>
+              </button>
+            </div>
+          ) : null}
+
           <div className="business-data-grid h-[min(68vh,760px)] min-h-[420px] w-full">
             <AgGridProvider modules={modules}>
               <AgGridReact<BusinessRow>
@@ -691,7 +791,7 @@ export function BusinessDataTablesPage() {
                 datasource={datasource}
         defaultColDef={{ floatingFilter: true, resizable: true, sortable: true, suppressMovable: false }}
                 getRowId={({ data }) => `${activeTable.key}:${rowKey(activeTable, data)}`}
-                infiniteInitialRowCount={Math.min(activeTable.rows.length, 30)}
+                infiniteInitialRowCount={activeTable.key === "ProductPrice" ? 30 : Math.min(activeTable.rows.length, 30)}
                 maxBlocksInCache={8}
                 maxConcurrentDatasourceRequests={1}
                 onColumnMoved={onGridColumnStateChanged}
@@ -719,7 +819,7 @@ export function BusinessDataTablesPage() {
           <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5 text-[11px] text-muted-foreground">
             <span className="font-medium text-foreground">{locale === "zh" ? activeTable.labelZh : activeTable.labelEn} <span className="font-mono font-normal text-muted-foreground">· {activeTable.key}</span></span>
             <div className="flex items-center gap-3">
-              <span>{copy.loaded}: {matchCount} {copy.rows}</span>
+              <span>{copy.loaded}: {matchCount ?? "—"} {copy.rows}</span>
               <span aria-hidden="true" className="size-1 rounded-full bg-border" />
               <span>{copy.clickRow}</span>
             </div>
@@ -738,7 +838,10 @@ export function BusinessDataTablesPage() {
                   <span>{activeTable.key}</span>
                 </div>
                 <SheetTitle>{copy.detail}</SheetTitle>
-                <SheetDescription>{copy.mockRecord} · {rowKey(activeTable, selectedRecord)}</SheetDescription>
+                <SheetDescription>
+                  {activeTable.key === "ProductPrice" ? copy.databaseRecord : copy.mockRecord}
+                  {" · "}{rowKey(activeTable, selectedRecord)}
+                </SheetDescription>
                 <div className="mt-3 flex gap-1 rounded-lg bg-muted p-1">
                   <button className={`business-detail-tab ${!showJson ? "business-detail-tab-active" : ""}`} onClick={() => setShowJson(false)} type="button">{copy.fieldsView}</button>
                   <button className={`business-detail-tab ${showJson ? "business-detail-tab-active" : ""}`} onClick={() => setShowJson(true)} type="button">{copy.jsonView}</button>
@@ -769,7 +872,7 @@ export function BusinessDataTablesPage() {
                   </dl>
                 )}
 
-                {activeTable.key !== "RealProductResearch" && selectedRecord.researchId ? (
+                {activeTable.key !== "RealProductResearch" && activeTable.key !== "ProductPrice" && selectedRecord.researchId ? (
                   <div className="mt-6 rounded-lg border border-border bg-muted/35 p-3.5">
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{copy.relation}</div>
                     <div className="flex items-center justify-between gap-3">

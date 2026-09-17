@@ -1150,11 +1150,59 @@
       "descriptionEn": "Quotes, variants, and currency. Prices are treated as text.",
       "fields": [
         {
+          "field": "id",
+          "labelZh": "报价 ID",
+          "labelEn": "Price ID",
+          "type": "text",
+          "defaultVisible": false,
+          "sortable": true,
+          "filterable": true,
+          "searchable": true,
+          "width": 180,
+          "longText": false
+        },
+        {
           "field": "researchId",
           "labelZh": "产品 ID",
           "labelEn": "Product ID",
           "type": "text",
           "defaultVisible": true,
+          "sortable": true,
+          "filterable": true,
+          "searchable": true,
+          "width": 150,
+          "longText": false
+        },
+        {
+          "field": "productName",
+          "labelZh": "产品名称",
+          "labelEn": "Product name",
+          "type": "text",
+          "defaultVisible": true,
+          "sortable": true,
+          "filterable": true,
+          "searchable": true,
+          "width": 230,
+          "longText": false
+        },
+        {
+          "field": "category",
+          "labelZh": "分类",
+          "labelEn": "Category",
+          "type": "text",
+          "defaultVisible": false,
+          "sortable": true,
+          "filterable": true,
+          "searchable": true,
+          "width": 140,
+          "longText": false
+        },
+        {
+          "field": "brand",
+          "labelZh": "品牌",
+          "labelEn": "Brand",
+          "type": "text",
+          "defaultVisible": false,
           "sortable": true,
           "filterable": true,
           "searchable": true,
@@ -1170,31 +1218,31 @@
           "sortable": true,
           "filterable": true,
           "searchable": true,
-          "width": 190,
+          "width": 170,
           "longText": false
         },
         {
           "field": "priceMin",
           "labelZh": "最低报价",
           "labelEn": "Min price",
-          "type": "text",
+          "type": "number",
           "defaultVisible": true,
           "sortable": true,
           "filterable": true,
           "searchable": true,
-          "width": 140,
+          "width": 120,
           "longText": false
         },
         {
           "field": "priceMax",
           "labelZh": "最高报价",
           "labelEn": "Max price",
-          "type": "text",
+          "type": "number",
           "defaultVisible": true,
           "sortable": true,
           "filterable": true,
           "searchable": true,
-          "width": 140,
+          "width": 120,
           "longText": false
         },
         {
@@ -1206,7 +1254,31 @@
           "sortable": true,
           "filterable": true,
           "searchable": true,
-          "width": 110,
+          "width": 100,
+          "longText": false
+        },
+        {
+          "field": "priceType",
+          "labelZh": "报价类型",
+          "labelEn": "Price type",
+          "type": "text",
+          "defaultVisible": false,
+          "sortable": true,
+          "filterable": true,
+          "searchable": true,
+          "width": 150,
+          "longText": false
+        },
+        {
+          "field": "sourceFileName",
+          "labelZh": "来源文件",
+          "labelEn": "Source file",
+          "type": "text",
+          "defaultVisible": true,
+          "sortable": true,
+          "filterable": true,
+          "searchable": true,
+          "width": 220,
           "longText": false
         },
         {
@@ -1220,730 +1292,33 @@
           "searchable": true,
           "width": 180,
           "longText": false
+        },
+        {
+          "field": "sourceSheet",
+          "labelZh": "来源工作表",
+          "labelEn": "Source sheet",
+          "type": "text",
+          "defaultVisible": false,
+          "sortable": true,
+          "filterable": true,
+          "searchable": true,
+          "width": 150,
+          "longText": false
+        },
+        {
+          "field": "sourceRow",
+          "labelZh": "来源行号",
+          "labelEn": "Source row",
+          "type": "number",
+          "defaultVisible": false,
+          "sortable": true,
+          "filterable": true,
+          "searchable": true,
+          "width": 100,
+          "longText": false
         }
       ],
-      "rows": [
-        {
-          "researchId": "PRD-0001",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "15.00",
-          "priceMax": "21.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0002",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "22.00",
-          "priceMax": "28.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0003",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "29.00",
-          "priceMax": "35.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0004",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "36.00",
-          "priceMax": "42.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0005",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "43.00",
-          "priceMax": "49.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0006",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "50.00",
-          "priceMax": "56.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0007",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "57.00",
-          "priceMax": "63.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0008",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "64.00",
-          "priceMax": "70.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0009",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "71.00",
-          "priceMax": "77.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0010",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "78.00",
-          "priceMax": "84.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0011",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "85.00",
-          "priceMax": "91.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0012",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "92.00",
-          "priceMax": "98.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0013",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "14.00",
-          "priceMax": "20.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0014",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "21.00",
-          "priceMax": "27.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0015",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "28.00",
-          "priceMax": "34.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0016",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "35.00",
-          "priceMax": "41.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0017",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "42.00",
-          "priceMax": "48.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0018",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "49.00",
-          "priceMax": "55.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0019",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "56.00",
-          "priceMax": "62.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0020",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "63.00",
-          "priceMax": "69.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0021",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "70.00",
-          "priceMax": "76.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0022",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "77.00",
-          "priceMax": "83.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0023",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "84.00",
-          "priceMax": "90.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0024",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "91.00",
-          "priceMax": "97.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0025",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "13.00",
-          "priceMax": "19.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0026",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "20.00",
-          "priceMax": "26.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0027",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "27.00",
-          "priceMax": "33.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0028",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "34.00",
-          "priceMax": "40.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0029",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "41.00",
-          "priceMax": "47.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0030",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "48.00",
-          "priceMax": "54.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0031",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "55.00",
-          "priceMax": "61.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0032",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "62.00",
-          "priceMax": "68.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0033",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "69.00",
-          "priceMax": "75.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0034",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "76.00",
-          "priceMax": "82.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0035",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "83.00",
-          "priceMax": "89.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0036",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "90.00",
-          "priceMax": "96.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0037",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "12.00",
-          "priceMax": "18.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0038",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "19.00",
-          "priceMax": "25.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0039",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "26.00",
-          "priceMax": "32.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0040",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "33.00",
-          "priceMax": "39.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0041",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "40.00",
-          "priceMax": "46.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0042",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "47.00",
-          "priceMax": "53.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0043",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "54.00",
-          "priceMax": "60.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0044",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "61.00",
-          "priceMax": "67.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0045",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "68.00",
-          "priceMax": "74.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0046",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "75.00",
-          "priceMax": "81.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0047",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "82.00",
-          "priceMax": "88.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0048",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "89.00",
-          "priceMax": "95.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0049",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "11.00",
-          "priceMax": "17.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0050",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "18.00",
-          "priceMax": "24.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0051",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "25.00",
-          "priceMax": "31.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0052",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "32.00",
-          "priceMax": "38.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0053",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "39.00",
-          "priceMax": "45.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0054",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "46.00",
-          "priceMax": "52.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0055",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "53.00",
-          "priceMax": "59.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0056",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "60.00",
-          "priceMax": "66.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0057",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "67.00",
-          "priceMax": "73.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0058",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 1",
-          "priceMin": "74.00",
-          "priceMax": "80.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0059",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 1",
-          "priceMin": "81.00",
-          "priceMax": "87.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0060",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 1",
-          "priceMin": "88.00",
-          "priceMax": "94.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0001",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "12.00",
-          "priceMax": "18.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0002",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "19.00",
-          "priceMax": "25.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0003",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "26.00",
-          "priceMax": "32.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0004",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "33.00",
-          "priceMax": "39.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0005",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "40.00",
-          "priceMax": "46.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0006",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "47.00",
-          "priceMax": "53.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0007",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "54.00",
-          "priceMax": "60.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0008",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "61.00",
-          "priceMax": "67.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0009",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "68.00",
-          "priceMax": "74.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0010",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "75.00",
-          "priceMax": "81.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0011",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "82.00",
-          "priceMax": "88.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0012",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "89.00",
-          "priceMax": "95.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0013",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "11.00",
-          "priceMax": "17.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0014",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "18.00",
-          "priceMax": "24.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0015",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "25.00",
-          "priceMax": "31.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0016",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "32.00",
-          "priceMax": "38.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0017",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "39.00",
-          "priceMax": "45.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0018",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "46.00",
-          "priceMax": "52.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0019",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "53.00",
-          "priceMax": "59.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0020",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "60.00",
-          "priceMax": "66.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0021",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "67.00",
-          "priceMax": "73.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0022",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "74.00",
-          "priceMax": "80.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0023",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "81.00",
-          "priceMax": "87.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0024",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "88.00",
-          "priceMax": "94.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0025",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "10.00",
-          "priceMax": "16.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0026",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "17.00",
-          "priceMax": "23.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0027",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "24.00",
-          "priceMax": "30.50",
-          "currency": "USD"
-        },
-        {
-          "researchId": "PRD-0028",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Premium · option 2",
-          "priceMin": "31.00",
-          "priceMax": "37.50",
-          "currency": "CNY"
-        },
-        {
-          "researchId": "PRD-0029",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Retail pack · option 2",
-          "priceMin": "38.00",
-          "priceMax": "44.50",
-          "currency": "TRY"
-        },
-        {
-          "researchId": "PRD-0030",
-          "sourceFileId": "mock-file-pricing-2026-q3",
-          "variant": "Standard · option 2",
-          "priceMin": "45.00",
-          "priceMax": "51.50",
-          "currency": "USD"
-        }
-      ]
+      "rows": []
     },
     {
       "key": "ProductOperation",

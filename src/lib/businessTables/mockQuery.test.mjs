@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { queryMockRows } from "./mockQuery.mjs";
+import { buildProductPriceRowsPath } from "./productPriceApi.mjs";
 
 const rows = [
   { id: "p-01", productName: "Aurora Lamp", category: "Lighting", price: 24 },
@@ -63,7 +64,11 @@ test("mock registry contains the five requested tables with rows matching declar
   ]);
   for (const table of mockRegistry.tables) {
     const fields = new Set(table.fields.map((field) => field.field));
-    assert.ok(table.rows.length > 30, `${table.key} should contain enough rows to scroll`);
+    if (table.key === "ProductPrice") {
+      assert.equal(table.rows.length, 0, "ProductPrice rows come from the backend database");
+    } else {
+      assert.ok(table.rows.length > 30, `${table.key} should contain enough rows to scroll`);
+    }
     for (const row of table.rows) {
       assert.ok(Object.keys(row).every((key) => fields.has(key)), `${table.key} has an undeclared field`);
     }
@@ -75,4 +80,30 @@ test("ProductDocument only exposes its documented relationship fields", () => {
 
   assert.deepEqual(table.fields.map((field) => field.field), ["researchId", "sourceFileId"]);
   assert.equal(table.columnSource, "documented-fields-only");
+});
+
+test("ProductPrice infinite row requests encode workspace, search, filters, and stable sort parameters", () => {
+  const path = buildProductPriceRowsPath({
+    workspaceId: "workspace-1",
+    startRow: 30,
+    endRow: 60,
+    search: "charger",
+    filterModel: {
+      currency: { filterType: "text", type: "equals", filter: "USD" },
+    },
+    sortModel: [{ colId: "priceMin", sort: "desc" }],
+  });
+  const url = new URL(path, "http://localhost");
+
+  assert.equal(url.pathname, "/api/v1/admin/data-tables/ProductPrice/rows");
+  assert.equal(url.searchParams.get("workspace_id"), "workspace-1");
+  assert.equal(url.searchParams.get("offset"), "30");
+  assert.equal(url.searchParams.get("limit"), "30");
+  assert.equal(url.searchParams.get("q"), "charger");
+  assert.deepEqual(JSON.parse(url.searchParams.get("sort")), [
+    { field: "priceMin", direction: "desc" },
+  ]);
+  assert.deepEqual(JSON.parse(url.searchParams.get("filters")), {
+    currency: { filterType: "text", type: "equals", filter: "USD" },
+  });
 });
