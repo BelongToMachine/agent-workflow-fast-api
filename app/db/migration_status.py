@@ -307,6 +307,24 @@ MIGRATION_STATUS_QUERY = text(
               AND table_name = 'KnowledgeChunk'
               AND column_name = 'embedding'
         ) AS embedding_column,
+        EXISTS (
+            SELECT 1
+            FROM pg_attribute AS embedding_attribute
+            WHERE embedding_attribute.attrelid = to_regclass('public."KnowledgeChunk"')
+              AND embedding_attribute.attname = 'embedding'
+              AND NOT embedding_attribute.attisdropped
+              AND format_type(
+                  embedding_attribute.atttypid,
+                  embedding_attribute.atttypmod
+              ) = 'vector(1024)'
+        ) AS embedding_vector_1024,
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'KnowledgeChunk'
+              AND column_name = 'embeddingModel'
+        ) AS embedding_model_column,
         to_regclass('public."KnowledgeChunk_embedding_idx"') IS NOT NULL AS embedding_index,
         EXISTS (
             SELECT 1
@@ -568,6 +586,13 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "parsed_document_workspace_fk",
         )
     )
+    qwen_embeddings_applied = all(
+        flag(key)
+        for key in (
+            "embedding_vector_1024",
+            "embedding_model_column",
+        )
+    )
     embeddings_applied = all(
         flag(key)
         for key in (
@@ -603,7 +628,7 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
         MigrationStatus(
             "0003_knowledge_embeddings",
             embeddings_applied,
-            "pgvector extension, vector(1536) embedding column, and valid HNSW index",
+            "pgvector extension, embedding column, and valid HNSW index",
         ),
         MigrationStatus(
             "0004_knowledge_bases",
@@ -640,6 +665,11 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "0013_knowledge_parsed_documents",
             parsed_document_applied,
             "Persisted ParsedDocument artifacts and independent chunk-generation state",
+        ),
+        MigrationStatus(
+            "0014_knowledge_embedding_qwen",
+            qwen_embeddings_applied,
+            "Qwen embedding model marker and vector(1024) column",
         ),
     ]
 

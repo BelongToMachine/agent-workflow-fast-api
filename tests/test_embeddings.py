@@ -42,7 +42,7 @@ class FakeEmbeddingClient:
 
 
 def _embedding(value: float) -> list[float]:
-    return [value] * 1536
+    return [value] * 1024
 
 
 def test_embedding_provider_uses_configured_timeout_and_restores_response_order(
@@ -71,8 +71,9 @@ def test_embedding_provider_uses_configured_timeout_and_restores_response_order(
 
     assert client.timeout == 7.5
     assert client.requests[0]["json"] == {
+        "dimensions": 1024,
         "input": ["first", "second"],
-        "model": settings.embedding_model,
+        "model": "qwen3.7-text-embedding",
     }
     assert vectors[0][0] == 0.1
     assert vectors[1][0] == 0.2
@@ -84,7 +85,7 @@ def test_embedding_provider_rejects_invalid_vector_shape(monkeypatch) -> None:
     )
     monkeypatch.setattr("app.services.embeddings.httpx.AsyncClient", lambda **_kwargs: client)
 
-    with pytest.raises(EmbeddingProviderError, match="1536-dimensional"):
+    with pytest.raises(EmbeddingProviderError, match="1024-dimensional"):
         asyncio.run(
             embed_texts(
                 ["query"],
@@ -112,6 +113,12 @@ def test_embedding_provider_timeout_has_safe_bounds() -> None:
 
     with pytest.raises(ValidationError):
         Settings(EMBEDDING_PROVIDER_TIMEOUT_SECONDS=0.5)
+
+
+def test_dashscope_api_key_environment_name_is_accepted() -> None:
+    settings = Settings(DASHSCOPE_API_KEY="test-dashscope-key")
+
+    assert settings.embedding_api_key == "test-dashscope-key"
 
 
 @pytest.mark.parametrize("indexes", [[0, 0], [0, 2], [0, "1"], [False, 1], [None, 1]])
@@ -160,5 +167,7 @@ def test_embedding_requests_are_batched_with_one_client(monkeypatch) -> None:
     vectors = asyncio.run(embed_texts(texts, Settings(embedding_api_key="test-key")))
     assert [vector[0] for vector in vectors] == [float(i) for i in range(300)]
     assert len(requests) > 1
+    assert all(len(batch) <= 20 for batch in requests)
+    assert len(requests) == 15
     assert [text for batch in requests for text in batch] == texts
     assert len(created) == 1

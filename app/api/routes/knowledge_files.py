@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -16,13 +17,14 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.knowledge_access import require_knowledge_base_permission
+from app.db.errors import DatabaseServiceError
 from app.db.session import get_db_connection
 from app.services.document_parsing import (
     FILE_SIGNATURES,
@@ -32,7 +34,13 @@ from app.services.document_parsing import (
     parse_document,
     render_document_text,
 )
-from app.services.embeddings import embed_texts, vector_literal
+from app.services.embeddings import (
+    EMBEDDING_DIMENSIONS,
+    EmbeddingConfigurationError,
+    EmbeddingProviderError,
+    embed_texts,
+    vector_literal,
+)
 from app.services.storage import (
     LocalKnowledgeStorage,
     StorageConfigurationError,
@@ -46,6 +54,7 @@ router = APIRouter(prefix="/knowledge-bases", tags=["knowledge"])
 SAFE_FILENAME_PATTERN = re.compile(r"[^\w.-]+")
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 120
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeFileSummary(BaseModel):
@@ -115,6 +124,47 @@ class KnowledgeParsedDocumentListResponse(BaseModel):
     next_offset: int | None = Field(alias="nextOffset")
     offset: int
     total: int
+
+
+class KnowledgeChunkSummary(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    chunk_id: str = Field(alias="chunkId")
+    chunk_index: int = Field(alias="chunkIndex")
+    content: str
+    embedding_model: str | None = Field(alias="embeddingModel")
+    is_embedded: bool = Field(alias="isEmbedded")
+
+
+class KnowledgeChunkListResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    items: list[KnowledgeChunkSummary]
+    limit: int
+    next_offset: int | None = Field(alias="nextOffset")
+    offset: int
+    total: int
+
+
+class KnowledgeChunkEmbeddingRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    chunk_ids: list[UUID] = Field(alias="chunkIds", min_length=1, max_length=100)
+
+    @field_validator("chunk_ids")
+    @classmethod
+    def reject_duplicate_chunk_ids(cls, chunk_ids: list[UUID]) -> list[UUID]:
+        if len(set(chunk_ids)) != len(chunk_ids):
+            raise ValueError("chunkIds must not contain duplicate IDs.")
+        return chunk_ids
+
+
+class KnowledgeChunkEmbeddingResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    dimensions: int
+    embedded_count: int = Field(alias="embeddedCount")
+    embedding_model: str = Field(alias="embeddingModel")
 
 
 FILE_SELECT = text(
@@ -330,10 +380,11 @@ PARSED_DOCUMENT_CHUNK_CLAIM_QUERY = text(
 PARSED_DOCUMENT_CHUNK_STATUS_QUERY = text(
     """
     UPDATE "KnowledgeParsedDocument"
-    SET "chunkErrorMessage" = :chunk_error_message,
-        "chunkStatus" = :chunk_status,
+    SET "chunkErrorMessage" = CAST(:chunk_error_message AS text),
+        "chunkStatus" = CAST(:chunk_status AS varchar(16)),
         "chunkedAt" = CASE
-            WHEN :chunk_status = 'ready' THEN CURRENT_TIMESTAMP
+            WHEN CAST(:chunk_status AS varchar(16)) = CAST('ready' AS varchar(16))
+            THEN CURRENT_TIMESTAMP
             ELSE NULL
         END,
         "updatedAt" = CURRENT_TIMESTAMP
@@ -353,6 +404,48 @@ CHUNK_COUNT_BY_FILE_QUERY = text(
     """
 )
 
+CHUNK_LIST_BY_FILE_QUERY = text(
+    """
+    SELECT
+        "id" AS chunk_id,
+        "chunkIndex" AS chunk_index,
+        "content" AS content,
+        ("embedding" IS NOT NULL) AS is_embedded,
+        "embeddingModel" AS embedding_model
+    FROM "KnowledgeChunk"
+    WHERE "fileId" = :file_id
+      AND "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+    ORDER BY "chunkIndex" ASC, "id" ASC
+    LIMIT :limit OFFSET :offset
+    """
+)
+
+CHUNKS_SELECT_FOR_EMBEDDING_QUERY = text(
+    """
+    SELECT "id" AS chunk_id, "content" AS content
+    FROM "KnowledgeChunk"
+    WHERE "fileId" = :file_id
+      AND "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+      AND "id" = ANY(CAST(:chunk_ids AS uuid[]))
+    ORDER BY "chunkIndex" ASC, "id" ASC
+    """
+)
+
+CHUNK_EMBEDDING_UPDATE_QUERY = text(
+    """
+    UPDATE "KnowledgeChunk"
+    SET "embedding" = CAST(:embedding AS vector(1024)),
+        "embeddingModel" = :embedding_model
+    WHERE "id" = :chunk_id
+      AND "fileId" = :file_id
+      AND "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+    RETURNING "id"
+    """
+)
+
 CHUNKS_DELETE_QUERY = text('DELETE FROM "KnowledgeChunk" WHERE "fileId" = :file_id')
 CHUNKS_INSERT_QUERY = text(
     """
@@ -362,26 +455,6 @@ CHUNKS_INSERT_QUERY = text(
         (
             :chunk_index,
             :content,
-            :file_id,
-            :knowledge_base_id,
-            CAST(:metadata AS jsonb),
-            :workspace_id
-        )
-    """
-)
-
-CHUNKS_INSERT_WITH_EMBEDDING_QUERY = text(
-    """
-    INSERT INTO "KnowledgeChunk"
-        (
-            "chunkIndex", "content", "embedding", "fileId", "knowledgeBaseId",
-            "metadata", "workspaceId"
-        )
-    VALUES
-        (
-            :chunk_index,
-            :content,
-            CAST(:embedding AS vector),
             :file_id,
             :knowledge_base_id,
             CAST(:metadata AS jsonb),
@@ -572,6 +645,51 @@ def _chunk_text(content: str) -> list[str]:
     return chunks
 
 
+async def _mark_knowledge_chunks_failed(
+    *,
+    file_id: UUID,
+    workspace_id: UUID,
+    parsed_document_id: UUID,
+    error: Exception,
+) -> None:
+    retry_delay = 0.25
+    attempt = 0
+    while True:
+        try:
+            async with get_db_connection() as connection:
+                async with connection.begin():
+                    await connection.execute(
+                        PARSED_DOCUMENT_CHUNK_STATUS_QUERY,
+                        {
+                            "chunk_error_message": str(error)[:1000],
+                            "chunk_status": "failed",
+                            "file_id": file_id,
+                            "parsed_document_id": parsed_document_id,
+                            "workspace_id": workspace_id,
+                        },
+                    )
+            return
+        except DatabaseServiceError as status_error:
+            attempt += 1
+            if attempt == 1 or attempt % 5 == 0:
+                logger.warning(
+                    "database unavailable while marking knowledge chunks failed; retrying",
+                    extra={
+                        "database_error_type": type(status_error).__name__,
+                        "parsed_document_id": str(parsed_document_id),
+                        "retry_attempt": attempt,
+                    },
+                )
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 10)
+        except (RuntimeError, SQLAlchemyError):
+            logger.exception(
+                "could not persist failed knowledge chunk status",
+                extra={"parsed_document_id": str(parsed_document_id)},
+            )
+            return
+
+
 async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
     """Read one stored file and persist its ParsedDocument intermediate state."""
     settings = get_settings()
@@ -666,9 +784,12 @@ async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
             return
 
 
-async def materialize_knowledge_chunks(file_id: UUID, workspace_id: UUID) -> None:
+async def materialize_knowledge_chunks(
+    file_id: UUID,
+    workspace_id: UUID,
+    parsed_document_id: UUID,
+) -> None:
     """Turn a persisted ParsedDocument into searchable KnowledgeChunk rows."""
-    settings = get_settings()
     try:
         async with get_db_connection() as connection:
             file_result = await connection.execute(
@@ -676,13 +797,24 @@ async def materialize_knowledge_chunks(file_id: UUID, workspace_id: UUID) -> Non
                 {"file_id": file_id, "workspace_id": workspace_id},
             )
             file_row = file_result.mappings().first()
-    except (RuntimeError, SQLAlchemyError):
+    except (DatabaseServiceError, RuntimeError, SQLAlchemyError) as error:
+        await _mark_knowledge_chunks_failed(
+            error=error,
+            file_id=file_id,
+            parsed_document_id=parsed_document_id,
+            workspace_id=workspace_id,
+        )
         return
 
     if file_row is None:
+        await _mark_knowledge_chunks_failed(
+            error=ValueError("The source knowledge file is no longer available."),
+            file_id=file_id,
+            parsed_document_id=parsed_document_id,
+            workspace_id=workspace_id,
+        )
         return
 
-    parsed_document_id: UUID | None = None
     try:
         async with get_db_connection() as connection:
             parsed_result = await connection.execute(
@@ -695,6 +827,12 @@ async def materialize_knowledge_chunks(file_id: UUID, workspace_id: UUID) -> Non
             )
             parsed_row = parsed_result.mappings().first()
         if parsed_row is None:
+            await _mark_knowledge_chunks_failed(
+                error=ValueError("The parsed document is no longer available."),
+                file_id=file_id,
+                parsed_document_id=parsed_document_id,
+                workspace_id=workspace_id,
+            )
             return
 
         parsed_document_id = UUID(str(parsed_row["parsed_document_id"]))
@@ -705,26 +843,16 @@ async def materialize_knowledge_chunks(file_id: UUID, workspace_id: UUID) -> Non
         chunks = _chunk_text(extracted_text)
         if not chunks:
             raise ValueError("No extractable text was found in the parsed document.")
-        embeddings = (
-            await embed_texts(chunks, settings)
-            if settings.knowledge_embeddings_enabled
-            else None
-        )
 
         async with get_db_connection() as connection:
             async with connection.begin():
                 await connection.execute(CHUNKS_DELETE_QUERY, {"file_id": file_id})
                 await connection.execute(
-                    CHUNKS_INSERT_WITH_EMBEDDING_QUERY
-                    if embeddings is not None
-                    else CHUNKS_INSERT_QUERY,
+                    CHUNKS_INSERT_QUERY,
                     [
                         {
                             "chunk_index": index,
                             "content": chunk,
-                            "embedding": vector_literal(embeddings[index])
-                            if embeddings is not None
-                            else None,
                             "file_id": file_id,
                             "knowledge_base_id": file_row["knowledge_base_id"],
                             "metadata": json.dumps(
@@ -754,23 +882,12 @@ async def materialize_knowledge_chunks(file_id: UUID, workspace_id: UUID) -> Non
                     },
                 )
     except Exception as error:
-        if parsed_document_id is None:
-            return
-        try:
-            async with get_db_connection() as connection:
-                async with connection.begin():
-                    await connection.execute(
-                        PARSED_DOCUMENT_CHUNK_STATUS_QUERY,
-                        {
-                            "chunk_error_message": str(error)[:1000],
-                            "chunk_status": "failed",
-                            "file_id": file_id,
-                            "parsed_document_id": parsed_document_id,
-                            "workspace_id": workspace_id,
-                        },
-                    )
-        except (RuntimeError, SQLAlchemyError):
-            return
+        await _mark_knowledge_chunks_failed(
+            error=error,
+            file_id=file_id,
+            parsed_document_id=parsed_document_id,
+            workspace_id=workspace_id,
+        )
 
 
 @router.post(
@@ -989,6 +1106,173 @@ async def get_parsed_knowledge_document(
     return _parsed_document_response(response_row, chunk_count)
 
 
+@router.get(
+    "/{knowledge_base_id}/files/{file_id}/chunks",
+    response_model=KnowledgeChunkListResponse,
+)
+async def list_knowledge_file_chunks(
+    knowledge_base_id: UUID,
+    file_id: UUID,
+    workspace_id: UUID = Query(..., alias="workspace_id"),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> KnowledgeChunkListResponse | JSONResponse:
+    """List file-scoped chunks for review before selecting embedding inputs."""
+    await require_knowledge_base_permission(
+        current_user,
+        workspace_id,
+        knowledge_base_id,
+        "manage",
+    )
+    if not settings.knowledge_ingestion_enabled:
+        return _feature_disabled()
+
+    scope = {
+        "file_id": file_id,
+        "knowledge_base_id": knowledge_base_id,
+        "workspace_id": workspace_id,
+    }
+    try:
+        async with get_db_connection() as connection:
+            count_result = await connection.execute(CHUNK_COUNT_BY_FILE_QUERY, scope)
+            total = int(count_result.mappings().one()["chunk_count"])
+            result = await connection.execute(
+                CHUNK_LIST_BY_FILE_QUERY,
+                {**scope, "limit": limit, "offset": offset},
+            )
+            rows = result.mappings().all()
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except (KeyError, TypeError, ValueError, SQLAlchemyError):
+        return _database_error("FastAPI could not load knowledge file chunks.")
+
+    items = [
+        KnowledgeChunkSummary(
+            chunkId=str(row["chunk_id"]),
+            chunkIndex=int(row["chunk_index"]),
+            content=str(row["content"]),
+            embeddingModel=(
+                str(row["embedding_model"])
+                if row.get("embedding_model") is not None
+                else None
+            ),
+            isEmbedded=bool(row["is_embedded"]),
+        )
+        for row in rows
+    ]
+    next_offset = offset + limit if offset + limit < total else None
+    return KnowledgeChunkListResponse(
+        items=items,
+        limit=limit,
+        nextOffset=next_offset,
+        offset=offset,
+        total=total,
+    )
+
+
+@router.post(
+    "/{knowledge_base_id}/files/{file_id}/chunks/embeddings",
+    response_model=KnowledgeChunkEmbeddingResponse,
+)
+async def embed_knowledge_file_chunks(
+    knowledge_base_id: UUID,
+    file_id: UUID,
+    payload: KnowledgeChunkEmbeddingRequest,
+    workspace_id: UUID = Query(..., alias="workspace_id"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> KnowledgeChunkEmbeddingResponse | JSONResponse:
+    """Embed only explicitly selected chunks belonging to this source file."""
+    await require_knowledge_base_permission(
+        current_user,
+        workspace_id,
+        knowledge_base_id,
+        "manage",
+    )
+    if not settings.knowledge_ingestion_enabled:
+        return _feature_disabled()
+    if not settings.knowledge_embeddings_enabled:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "code": "knowledge_embeddings:disabled",
+                "message": "Knowledge embeddings are disabled until the provider is configured.",
+            },
+        )
+
+    try:
+        async with get_db_connection() as connection:
+            result = await connection.execute(
+                CHUNKS_SELECT_FOR_EMBEDDING_QUERY,
+                {
+                    "chunk_ids": payload.chunk_ids,
+                    "file_id": file_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            rows = result.mappings().all()
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except SQLAlchemyError:
+        return _database_error("FastAPI could not load the selected knowledge chunks.")
+
+    if len(rows) != len(payload.chunk_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more selected chunks were not found for this file.",
+        )
+
+    try:
+        vectors = await embed_texts([str(row["content"]) for row in rows], settings)
+    except EmbeddingConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except EmbeddingProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(error),
+        ) from error
+
+    try:
+        async with get_db_connection() as connection:
+            async with connection.begin():
+                for row, vector in zip(rows, vectors, strict=True):
+                    chunk_id = UUID(str(row["chunk_id"]))
+                    update_result = await connection.execute(
+                        CHUNK_EMBEDDING_UPDATE_QUERY,
+                        {
+                            "chunk_id": chunk_id,
+                            "embedding": vector_literal(vector),
+                            "embedding_model": settings.embedding_model,
+                            "file_id": file_id,
+                            "knowledge_base_id": knowledge_base_id,
+                            "workspace_id": workspace_id,
+                        },
+                    )
+                    if update_result.scalar_one_or_none() is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="A selected chunk changed before its embedding was saved.",
+                        )
+    except HTTPException:
+        raise
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except SQLAlchemyError:
+        return _database_error("FastAPI could not save the selected knowledge embeddings.")
+
+    return KnowledgeChunkEmbeddingResponse(
+        dimensions=EMBEDDING_DIMENSIONS,
+        embeddedCount=len(rows),
+        embeddingModel=settings.embedding_model,
+    )
+
+
 @router.post(
     "/{knowledge_base_id}/files/{file_id}/chunks",
     response_model=KnowledgeParsedDocumentResponse,
@@ -1065,7 +1349,12 @@ async def materialize_knowledge_file_chunks(
         return _database_error("FastAPI could not start knowledge chunk generation.")
 
     if claimed_id is not None:
-        background_tasks.add_task(materialize_knowledge_chunks, file_id, workspace_id)
+        background_tasks.add_task(
+            materialize_knowledge_chunks,
+            file_id,
+            workspace_id,
+            UUID(str(parsed_row["parsed_document_id"])),
+        )
         row = dict(parsed_row)
         row["chunk_status"] = "processing"
         row["chunk_error_message"] = None

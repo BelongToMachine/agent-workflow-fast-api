@@ -369,14 +369,18 @@ class Settings(BaseSettings):
     )
     embedding_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("EMBEDDING_API_KEY", "ASIANODE_EMBEDDING_API_KEY"),
+        validation_alias=AliasChoices(
+            "EMBEDDING_API_KEY",
+            "DASHSCOPE_API_KEY",
+            "ASIANODE_EMBEDDING_API_KEY",
+        ),
     )
     embedding_base_url: str = Field(
-        default="https://api.openai.com/v1",
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
         validation_alias=AliasChoices("EMBEDDING_BASE_URL", "ASIANODE_EMBEDDING_BASE_URL"),
     )
     embedding_model: str = Field(
-        default="text-embedding-3-small",
+        default="qwen3.7-text-embedding",
         validation_alias=AliasChoices("EMBEDDING_MODEL", "ASIANODE_EMBEDDING_MODEL"),
     )
     embedding_provider_timeout_seconds: float = Field(

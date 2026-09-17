@@ -4,8 +4,9 @@ import httpx
 
 from app.core.config import Settings, get_settings
 
-EMBEDDING_DIMENSIONS = 1536
-EMBEDDING_BATCH_SIZE = 128
+EMBEDDING_DIMENSIONS = 1024
+# Model Studio's synchronous text-embedding API accepts at most 20 input rows.
+EMBEDDING_BATCH_SIZE = 20
 
 
 class EmbeddingConfigurationError(Exception):
@@ -39,7 +40,11 @@ async def embed_texts(
                 response = await client.post(
                     f"{current_settings.embedding_base_url.rstrip('/')}/embeddings",
                     headers={"Authorization": f"Bearer {current_settings.embedding_api_key}"},
-                    json={"input": batch, "model": current_settings.embedding_model},
+                    json={
+                        "dimensions": EMBEDDING_DIMENSIONS,
+                        "input": batch,
+                        "model": current_settings.embedding_model,
+                    },
                 )
                 response.raise_for_status()
                 vectors.extend(_parse_vectors(response.json(), len(batch)))

@@ -6,8 +6,10 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.api.routes.knowledge_files import PARSED_DOCUMENT_CHUNK_STATUS_QUERY
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings
 from app.db.migration_status import MIGRATION_STATUS_QUERY, build_migration_statuses
@@ -130,6 +132,94 @@ def test_postgres_target_parser_matches_the_explicit_integration_url() -> None:
 
     assert target.database
     assert target.display_name
+
+
+async def _update_chunk_status_with_asyncpg(postgres_url: str) -> dict[str, object]:
+    engine = create_async_engine(
+        normalize_postgres_url(postgres_url),
+        connect_args={"statement_cache_size": 0},
+        pool_pre_ping=True,
+    )
+    parsed_document_id = uuid4()
+    file_id = uuid4()
+    workspace_id = uuid4()
+    try:
+        async with engine.connect() as connection:
+            async with connection.begin():
+                await connection.execute(
+                    text(
+                        '''
+                        CREATE TEMPORARY TABLE "KnowledgeParsedDocument" (
+                            "id" uuid PRIMARY KEY,
+                            "fileId" uuid NOT NULL,
+                            "workspaceId" uuid NOT NULL,
+                            "chunkStatus" varchar(16) NOT NULL,
+                            "chunkErrorMessage" text,
+                            "chunkedAt" timestamp,
+                            "updatedAt" timestamp NOT NULL
+                        ) ON COMMIT DROP
+                        '''
+                    )
+                )
+                await connection.execute(
+                    text(
+                        '''
+                        INSERT INTO "KnowledgeParsedDocument"
+                            ("id", "fileId", "workspaceId", "chunkStatus", "updatedAt")
+                        VALUES
+                            (
+                                :parsed_document_id,
+                                :file_id,
+                                :workspace_id,
+                                'processing',
+                                CURRENT_TIMESTAMP
+                            )
+                        '''
+                    ),
+                    {
+                        "file_id": file_id,
+                        "parsed_document_id": parsed_document_id,
+                        "workspace_id": workspace_id,
+                    },
+                )
+                await connection.execute(
+                    PARSED_DOCUMENT_CHUNK_STATUS_QUERY,
+                    {
+                        "chunk_error_message": None,
+                        "chunk_status": "ready",
+                        "file_id": file_id,
+                        "parsed_document_id": parsed_document_id,
+                        "workspace_id": workspace_id,
+                    },
+                )
+                result = await connection.execute(
+                    text(
+                        '''
+                        SELECT "chunkErrorMessage" AS chunk_error_message,
+                               "chunkStatus" AS chunk_status,
+                               ("chunkedAt" IS NOT NULL) AS is_chunked
+                        FROM "KnowledgeParsedDocument"
+                        WHERE "id" = :parsed_document_id
+                        '''
+                    ),
+                    {"parsed_document_id": parsed_document_id},
+                )
+                return dict(result.mappings().one())
+    finally:
+        await engine.dispose()
+
+
+def test_chunk_status_query_works_with_asyncpg_parameter_typing() -> None:
+    postgres_url = _configured_url("FASTAPI_TEST_POSTGRES_URL")
+    _assert_safe_target(postgres_url, "FASTAPI_TEST_POSTGRES_URL")
+
+    row = asyncio.run(_update_chunk_status_with_asyncpg(postgres_url))
+
+    assert row == {
+        "chunk_error_message": None,
+        "chunk_status": "ready",
+        "is_chunked": True,
+    }
 
 
 async def _s3_round_trip(

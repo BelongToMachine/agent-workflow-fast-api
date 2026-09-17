@@ -140,6 +140,7 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         True,
         True,
         True,
+        False,
     ]
     assert statuses[3].name == "0004_knowledge_bases"
 
@@ -174,6 +175,8 @@ def test_migration_status_query_covers_schema_capabilities() -> None:
     assert "files_required_columns" in sql
     assert "chunks_required_columns" in sql
     assert "embedding_index_valid" in sql
+    assert "embedding_vector_1024" in sql
+    assert "embedding_model_column" in sql
     assert "knowledge_base_required_columns" in sql
     assert "parsed_document_required_columns" in sql
     assert "conrelid = to_regclass" in sql
@@ -215,11 +218,19 @@ def test_knowledge_migration_runner_uses_dependency_order() -> None:
     assert all(path.is_file() for path in MIGRATION_PATHS)
 
 
-def test_file_provenance_migration_is_last_and_guarded() -> None:
-    assert MIGRATION_NAMES[-2] == "0012_knowledge_file_provenance"
-    sql = MIGRATION_PATHS[-2].read_text(encoding="utf-8")
+def test_file_provenance_migration_is_guarded() -> None:
+    assert MIGRATION_NAMES[-3] == "0012_knowledge_file_provenance"
+    sql = MIGRATION_PATHS[-3].read_text(encoding="utf-8")
     assert "legacy rows could not be matched" in sql
     assert 'ALTER COLUMN "sourceFileId" SET NOT NULL' in sql
+
+
+def test_qwen_embedding_migration_is_registered_and_resets_old_vectors() -> None:
+    assert MIGRATION_NAMES[-1] == "0014_knowledge_embedding_qwen"
+    sql = MIGRATION_PATHS[-1].read_text(encoding="utf-8")
+    assert '"embedding" = NULL' in sql
+    assert "vector(1024)" in sql
+    assert '"embeddingModel"' in sql
 
 
 def test_knowledge_migration_runner_only_selects_pending_migrations() -> None:

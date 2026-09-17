@@ -133,6 +133,7 @@ def test_knowledge_search_query_filters_workspace_and_knowledge_base() -> None:
 
     assert 'chunk."workspaceId" = :workspace_id' in sql
     assert 'chunk."knowledgeBaseId" = :knowledge_base_id' in sql
+    assert 'chunk."embeddingModel" = :embedding_model' in sql
     assert 'chunk."embedding" <=> CAST(:embedding AS vector)' in sql
 
 
@@ -165,7 +166,7 @@ def test_knowledge_search_route_keeps_workspace_and_base_scope(monkeypatch) -> N
         )
 
     async def fake_embed_texts(_texts, _settings):
-        return [[0.25] * 1536]
+        return [[0.25] * 1024]
 
     monkeypatch.setattr(
         "app.api.routes.knowledge_search.require_knowledge_base_permission",
@@ -180,6 +181,10 @@ def test_knowledge_search_route_keeps_workspace_and_base_scope(monkeypatch) -> N
         search_connection_context(connection),
     )
 
+    settings = Settings(
+        environment="development",
+        knowledge_embeddings_enabled=True,
+    )
     result = asyncio.run(
         search_knowledge_base(
             knowledge_base_id=KNOWLEDGE_BASE_A,
@@ -189,10 +194,7 @@ def test_knowledge_search_route_keeps_workspace_and_base_scope(monkeypatch) -> N
                 user_id="search-user",
                 is_development=True,
             ),
-            settings=Settings(
-                environment="development",
-                knowledge_embeddings_enabled=True,
-            ),
+            settings=settings,
         )
     )
 
@@ -209,6 +211,7 @@ def test_knowledge_search_route_keeps_workspace_and_base_scope(monkeypatch) -> N
     assert 'chunk."knowledgeBaseId" = :knowledge_base_id' in query
     assert params["workspace_id"] == WORKSPACE_A
     assert params["knowledge_base_id"] == KNOWLEDGE_BASE_A
+    assert params["embedding_model"] == settings.embedding_model
     assert params["limit"] == 3
 
 

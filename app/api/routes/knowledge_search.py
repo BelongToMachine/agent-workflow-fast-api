@@ -53,6 +53,7 @@ SEARCH_QUERY = text(
     WHERE chunk."workspaceId" = :workspace_id
       AND chunk."knowledgeBaseId" = :knowledge_base_id
       AND chunk."embedding" IS NOT NULL
+      AND chunk."embeddingModel" = :embedding_model
       AND file."status" = 'ready'
     ORDER BY chunk."embedding" <=> CAST(:embedding AS vector) ASC
     LIMIT :limit
@@ -109,6 +110,7 @@ async def search_knowledge_base(
                 SEARCH_QUERY,
                 {
                     "embedding": vector_literal(vectors[0]),
+                    "embedding_model": settings.embedding_model,
                     "knowledge_base_id": knowledge_base_id,
                     "limit": payload.limit,
                     "workspace_id": workspace_id,

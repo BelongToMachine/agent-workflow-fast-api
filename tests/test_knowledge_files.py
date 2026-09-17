@@ -20,6 +20,8 @@ from app.api.routes.knowledge_files import (
     FILE_INSERT_QUERY,
     FILE_LIST_QUERY,
     PARSED_DOCUMENT_BY_FILE_QUERY,
+    KnowledgeChunkEmbeddingRequest,
+    KnowledgeChunkListResponse,
     KnowledgeFileSummary,
     KnowledgeParsedDocumentListResponse,
     KnowledgeParsedDocumentResponse,
@@ -28,7 +30,9 @@ from app.api.routes.knowledge_files import (
     _extract_text,
     _safe_filename,
     _storage_path,
+    embed_knowledge_file_chunks,
     get_parsed_knowledge_document,
+    list_knowledge_file_chunks,
     list_parsed_knowledge_documents,
     materialize_knowledge_chunks,
     materialize_knowledge_file_chunks,
@@ -38,6 +42,7 @@ from app.api.routes.knowledge_files import (
 )
 from app.core.auth import AuthenticatedUser
 from app.core.config import MAX_KNOWLEDGE_FILE_BYTES, Settings, get_settings
+from app.db.errors import DatabaseUnavailableError
 from app.db.migrate_knowledge_ingestion import MIGRATION_PATH
 from app.main import app
 from app.services.document_parsing import parse_document
@@ -431,9 +436,16 @@ def test_materialize_knowledge_chunks_is_a_separate_explicit_step(
     asyncio.run(storage.put(storage_key, b"name,price\nchair,10"))
     settings = Settings(
         knowledge_ingestion_enabled=True,
-        knowledge_embeddings_enabled=False,
+        knowledge_embeddings_enabled=True,
         knowledge_storage_dir=str(tmp_path),
     )
+    embedding_calls: list[list[str]] = []
+
+    async def unexpected_embed(texts, _settings):
+        embedding_calls.append(texts)
+        return [[0.1] * 1024 for _ in texts]
+
+    monkeypatch.setattr("app.api.routes.knowledge_files.embed_texts", unexpected_embed)
     monkeypatch.setattr("app.api.routes.knowledge_files.get_settings", lambda: settings)
     monkeypatch.setattr(
         "app.api.routes.knowledge_files.get_knowledge_storage_for_provider",
@@ -444,15 +456,252 @@ def test_materialize_knowledge_chunks_is_a_separate_explicit_step(
         lambda: FakeConnectionContext(connection),
     )
 
-    asyncio.run(materialize_knowledge_chunks(file_id, workspace_id))
+    asyncio.run(
+        materialize_knowledge_chunks(file_id, workspace_id, parsed_document_id)
+    )
 
     assert [chunk["content"] for chunk in connection.inserted_chunks] == [
         "name\tprice\nchair\t10"
     ]
+    assert embedding_calls == []
+    assert "embedding" not in connection.inserted_chunks[0]
     metadata = json.loads(connection.inserted_chunks[0]["metadata"])
     assert metadata["fileHash"] == "hash-123"
     assert metadata["parsedDocumentId"] == str(parsed_document_id)
     assert connection.chunk_status_updates[-1]["chunk_status"] == "ready"
+
+
+def test_materialize_knowledge_chunks_marks_failed_after_database_connection_error(
+    monkeypatch,
+) -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000010")
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    parsed_document_id = UUID("00000000-0000-0000-0000-000000000011")
+    status_connection = FakeIngestionConnection({})
+
+    class UnavailableConnectionContext:
+        async def __aenter__(self):
+            raise DatabaseUnavailableError()
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+    connection_contexts = iter(
+        [
+            UnavailableConnectionContext(),
+            UnavailableConnectionContext(),
+            FakeConnectionContext(status_connection),
+        ]
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        lambda: next(connection_contexts),
+    )
+
+    asyncio.run(
+        materialize_knowledge_chunks(file_id, workspace_id, parsed_document_id)
+    )
+
+    assert status_connection.chunk_status_updates == [
+        {
+            "chunk_error_message": "The database is temporarily unavailable.",
+            "chunk_status": "failed",
+            "file_id": file_id,
+            "parsed_document_id": parsed_document_id,
+            "workspace_id": workspace_id,
+        }
+    ]
+
+
+def test_knowledge_file_chunk_list_is_scoped_and_reports_embedding_state(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    file_id = UUID("00000000-0000-0000-0000-000000000003")
+    chunk_id = UUID("00000000-0000-0000-0000-000000000004")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class ChunkListConnection:
+        async def execute(self, query, params):
+            sql = str(query)
+            calls.append((sql, params))
+            if "COUNT(*)" in sql:
+                return FakeUploadResult(row={"chunk_count": 1})
+            return FakeUploadResult(
+                rows=[
+                    {
+                        "chunk_id": chunk_id,
+                        "chunk_index": 0,
+                        "content": "chair costs ten",
+                        "is_embedded": False,
+                        "embedding_model": None,
+                    }
+                ]
+            )
+
+    permission: list[object] = []
+
+    async def fake_require_permission(*args):
+        permission.extend(args[1:])
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(ChunkListConnection()),
+    )
+
+    result = asyncio.run(
+        list_knowledge_file_chunks(
+            knowledge_base_id=knowledge_base_id,
+            file_id=file_id,
+            workspace_id=workspace_id,
+            offset=0,
+            limit=20,
+            current_user=AuthenticatedUser(user_id="chunk-reader"),
+            settings=Settings(knowledge_ingestion_enabled=True),
+        )
+    )
+
+    assert isinstance(result, KnowledgeChunkListResponse)
+    assert result.total == 1
+    assert result.items[0].chunk_id == str(chunk_id)
+    assert result.items[0].is_embedded is False
+    assert permission == [workspace_id, knowledge_base_id, "manage"]
+    assert all(params["file_id"] == file_id for _sql, params in calls)
+    assert all(params["knowledge_base_id"] == knowledge_base_id for _sql, params in calls)
+    assert all(params["workspace_id"] == workspace_id for _sql, params in calls)
+
+
+def test_embedding_route_only_embeds_selected_chunks_for_the_requested_file(
+    monkeypatch,
+) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    file_id = UUID("00000000-0000-0000-0000-000000000003")
+    chunk_ids = [
+        UUID("00000000-0000-0000-0000-000000000004"),
+        UUID("00000000-0000-0000-0000-000000000005"),
+    ]
+    update_params: list[dict[str, object]] = []
+    selected_ids: list[UUID] = []
+
+    class ChunkEmbeddingConnection:
+        async def execute(self, query, params):
+            sql = str(query)
+            if sql.lstrip().startswith("SELECT"):
+                selected_ids.extend(params["chunk_ids"])
+                return FakeUploadResult(
+                    rows=[
+                        {"chunk_id": chunk_ids[0], "content": "chair costs ten"},
+                        {"chunk_id": chunk_ids[1], "content": "table costs twenty"},
+                    ]
+                )
+            update_params.append(params)
+            return FakeUploadResult(scalar_value=params["chunk_id"])
+
+        def begin(self):
+            return FakeTransaction()
+
+    async def fake_embed_texts(texts, _settings):
+        assert texts == ["chair costs ten", "table costs twenty"]
+        return [[0.25] * 1024, [0.5] * 1024]
+
+    permission: list[object] = []
+
+    async def fake_require_permission(*args):
+        permission.extend(args[1:])
+
+    monkeypatch.setattr("app.api.routes.knowledge_files.embed_texts", fake_embed_texts)
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(ChunkEmbeddingConnection()),
+    )
+
+    result = asyncio.run(
+        embed_knowledge_file_chunks(
+            knowledge_base_id=knowledge_base_id,
+            file_id=file_id,
+            payload=KnowledgeChunkEmbeddingRequest(chunkIds=chunk_ids),
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(user_id="chunk-manager"),
+            settings=Settings(
+                knowledge_ingestion_enabled=True,
+                knowledge_embeddings_enabled=True,
+                embedding_model="qwen3.7-text-embedding",
+                embedding_api_key="test-key",
+            ),
+        )
+    )
+
+    assert result.embedded_count == 2
+    assert result.embedding_model == "qwen3.7-text-embedding"
+    assert result.dimensions == 1024
+    assert selected_ids == chunk_ids
+    assert permission == [workspace_id, knowledge_base_id, "manage"]
+    assert [params["chunk_id"] for params in update_params] == chunk_ids
+    assert all(params["file_id"] == file_id for params in update_params)
+    assert all(params["embedding_model"] == "qwen3.7-text-embedding" for params in update_params)
+
+
+def test_embedding_route_rejects_selected_chunks_outside_the_file_without_provider_call(
+    monkeypatch,
+) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    file_id = UUID("00000000-0000-0000-0000-000000000003")
+    requested_ids = [
+        UUID("00000000-0000-0000-0000-000000000004"),
+        UUID("00000000-0000-0000-0000-000000000005"),
+    ]
+    provider_calls: list[list[str]] = []
+
+    class ScopedChunkConnection:
+        async def execute(self, _query, _params):
+            return FakeUploadResult(
+                rows=[{"chunk_id": requested_ids[0], "content": "in-scope chunk"}]
+            )
+
+    async def fake_embed_texts(texts, _settings):
+        provider_calls.append(texts)
+        return [[0.1] * 1024 for _ in texts]
+
+    async def fake_require_permission(*_args):
+        return None
+
+    monkeypatch.setattr("app.api.routes.knowledge_files.embed_texts", fake_embed_texts)
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(ScopedChunkConnection()),
+    )
+
+    with pytest.raises(Exception) as error:
+        asyncio.run(
+            embed_knowledge_file_chunks(
+                knowledge_base_id=knowledge_base_id,
+                file_id=file_id,
+                payload=KnowledgeChunkEmbeddingRequest(chunkIds=requested_ids),
+                workspace_id=workspace_id,
+                current_user=AuthenticatedUser(user_id="chunk-manager"),
+                settings=Settings(
+                    knowledge_ingestion_enabled=True,
+                    knowledge_embeddings_enabled=True,
+                    embedding_api_key="test-key",
+                ),
+            )
+        )
+
+    assert getattr(error.value, "status_code", None) == 404
+    assert provider_calls == []
 
 
 def test_ingestion_migration_is_idempotent_and_contains_chunk_table() -> None:
@@ -700,7 +949,9 @@ def test_parsed_document_is_readable_and_chunking_is_a_separate_manual_action(
     )
     assert isinstance(chunk_result, KnowledgeParsedDocumentResponse)
     assert chunk_result.chunk_status == "processing"
-    assert background_tasks.tasks == [(materialize_knowledge_chunks, (file_id, workspace_id))]
+    assert background_tasks.tasks == [
+        (materialize_knowledge_chunks, (file_id, workspace_id, parsed_document_id))
+    ]
 
 
 def test_knowledge_base_parsed_document_list_returns_all_parsed_files(

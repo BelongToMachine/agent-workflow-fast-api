@@ -22,6 +22,7 @@ MIGRATION_NAMES = (
     "0009_knowledge_source_relationships_required",
     "0012_knowledge_file_provenance",
     "0013_knowledge_parsed_documents",
+    "0014_knowledge_embedding_qwen",
 )
 MIGRATION_PATHS = tuple(
     Path(__file__).resolve().parents[2] / "migrations" / f"{name}.sql"
