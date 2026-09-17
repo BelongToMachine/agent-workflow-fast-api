@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InlineLoadingState } from "@/components/ui/loadingState";
 import { BackendRequestError, requestBackend } from "@/lib/backend/request";
+import { getKnowledgeChunkActionLabelKey } from "@/lib/knowledgeChunkAction";
 import { cn } from "@/lib/utils";
 
 type KnowledgeFile = {
@@ -100,6 +101,28 @@ type ParsedDocumentTaskResponse = {
   updatedAt: string;
 };
 
+type KnowledgeChunk = {
+  chunkId: string;
+  chunkIndex: number;
+  content: string;
+  embeddingModel: string | null;
+  isEmbedded: boolean;
+};
+
+type KnowledgeChunkPage = {
+  items: KnowledgeChunk[];
+  limit: number;
+  nextOffset: number | null;
+  offset: number;
+  total: number;
+};
+
+type KnowledgeChunkEmbeddingResponse = {
+  dimensions: number;
+  embeddedCount: number;
+  embeddingModel: string;
+};
+
 type Props = {
   disabled?: boolean;
   knowledgeBaseId: string;
@@ -108,6 +131,7 @@ type Props = {
 
 const PARSED_DOCUMENT_PAGE_SIZE = 20;
 const PARSED_BLOCK_PAGE_SIZE = 30;
+const KNOWLEDGE_CHUNK_PAGE_SIZE = 20;
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) {
@@ -170,10 +194,9 @@ export function KnowledgeFileLibrary({
   const [isParsing, setIsParsing] = useState(false);
   const [isGeneratingChunks, setIsGeneratingChunks] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isParsedDocumentsOpen, setIsParsedDocumentsOpen] = useState(false);
   const [parsedDocuments, setParsedDocuments] =
     useState<ParsedDocumentListResponse | null>(null);
-  const [isLoadingParsedDocuments, setIsLoadingParsedDocuments] = useState(false);
+  const [isLoadingParsedDocuments, setIsLoadingParsedDocuments] = useState(true);
   const [parsedDocumentsError, setParsedDocumentsError] = useState<string | null>(
     null
   );
@@ -244,16 +267,10 @@ export function KnowledgeFileLibrary({
   }, [loadFiles, refreshKey]);
 
   useEffect(() => {
-    if (!knowledgeBaseId) {
-      setIsParsedDocumentsOpen(false);
-      setParsedDocuments(null);
-      setParsedDocumentsError(null);
-      return;
-    }
-    setIsParsedDocumentsOpen(false);
     setParsedDocuments(null);
     setParsedDocumentsError(null);
-  }, [knowledgeBaseId]);
+    void loadParsedDocuments(0);
+  }, [loadParsedDocuments]);
 
   useEffect(() => {
     const availableIds = new Set(files.map(({ fileId }) => fileId));
@@ -271,25 +288,20 @@ export function KnowledgeFileLibrary({
     }
     const intervalId = window.setInterval(() => {
       void loadFiles();
-      if (isParsedDocumentsOpen) {
-        void loadParsedDocuments(parsedDocuments?.offset ?? 0);
-      }
+      void loadParsedDocuments(parsedDocuments?.offset ?? 0);
     }, 1500);
     return () => window.clearInterval(intervalId);
-  }, [files, isParsedDocumentsOpen, loadFiles, loadParsedDocuments, parsedDocuments?.offset]);
+  }, [files, loadFiles, loadParsedDocuments, parsedDocuments?.offset]);
 
   useEffect(() => {
-    if (
-      !isParsedDocumentsOpen ||
-      !parsedDocuments?.items.some(({ chunkStatus }) => isProcessing(chunkStatus))
-    ) {
+    if (!parsedDocuments?.items.some(({ chunkStatus }) => isProcessing(chunkStatus))) {
       return;
     }
     const intervalId = window.setInterval(() => {
       void loadParsedDocuments(parsedDocuments.offset);
     }, 1500);
     return () => window.clearInterval(intervalId);
-  }, [isParsedDocumentsOpen, loadParsedDocuments, parsedDocuments]);
+  }, [loadParsedDocuments, parsedDocuments]);
 
   const selectableFiles = useMemo(
     () => files.filter(({ status }) => !isProcessing(status)),
@@ -360,9 +372,7 @@ export function KnowledgeFileLibrary({
     setSelectedFileIds(new Set());
     setIsParsing(false);
     await loadFiles();
-    if (isParsedDocumentsOpen) {
-      await loadParsedDocuments(parsedDocuments?.offset ?? 0);
-    }
+    await loadParsedDocuments(parsedDocuments?.offset ?? 0);
     if (failedCount === 0) {
       toast.success(
         t("settings.parseKnowledgeFilesStarted", { count: startedCount })
@@ -376,7 +386,6 @@ export function KnowledgeFileLibrary({
     }
   }, [
     disabled,
-    isParsedDocumentsOpen,
     isParsing,
     knowledgeBaseId,
     loadFiles,
@@ -417,9 +426,7 @@ export function KnowledgeFileLibrary({
       setSelectedFileIds(new Set());
       setIsGeneratingChunks(false);
       await loadFiles();
-      if (isParsedDocumentsOpen) {
-        await loadParsedDocuments(parsedDocuments?.offset ?? 0);
-      }
+      await loadParsedDocuments(parsedDocuments?.offset ?? 0);
       if (failedCount === 0) {
         toast.success(
           t("settings.generateKnowledgeChunksStarted", { count: startedCount })
@@ -435,7 +442,6 @@ export function KnowledgeFileLibrary({
     [
       disabled,
       isGeneratingChunks,
-      isParsedDocumentsOpen,
       knowledgeBaseId,
       loadFiles,
       loadParsedDocuments,
@@ -449,7 +455,7 @@ export function KnowledgeFileLibrary({
 
   return (
     <div className="space-y-6">
-    <section className="rounded-2xl border border-border/70 bg-card/50 shadow-[var(--shadow-card)]">
+      <section className="rounded-2xl border border-border/70 bg-card/50 shadow-[var(--shadow-card)]">
       <div className="flex flex-col gap-4 border-b border-border/70 p-5 md:flex-row md:items-start md:justify-between md:p-7">
         <div className="flex items-start gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -483,22 +489,6 @@ export function KnowledgeFileLibrary({
             aria-label={t("settings.refreshKnowledgeFiles")}
           >
             <RefreshCwIcon className={cn(isLoading && "animate-spin")} />
-          </Button>
-          <Button
-            disabled={isParsing || isGeneratingChunks}
-            onClick={() => {
-              setIsParsedDocumentsOpen((current) => !current);
-              if (!isParsedDocumentsOpen) {
-                void loadParsedDocuments(0);
-              }
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <DatabaseIcon />
-            {isParsedDocumentsOpen
-              ? t("settings.hideParsedDocuments")
-              : t("settings.viewParsedDocuments")}
           </Button>
         </div>
       </div>
@@ -605,13 +595,14 @@ export function KnowledgeFileLibrary({
         )}
 
       </div>
-    </section>
-    {isParsedDocumentsOpen ? (
+      </section>
       <ParsedDocumentLibrary
         data={parsedDocuments}
+        disabled={disabled}
         error={parsedDocumentsError}
         i18nLanguage={i18n.language}
         isLoading={isLoadingParsedDocuments}
+        knowledgeBaseId={knowledgeBaseId}
         onGenerateChunks={(fileId) =>
           void generateChunksForFiles([fileId])
         }
@@ -630,7 +621,6 @@ export function KnowledgeFileLibrary({
         t={t}
         isGeneratingChunks={isGeneratingChunks}
       />
-    ) : null}
     </div>
   );
 }
@@ -705,20 +695,24 @@ function StoredFileRow({
 
 function ParsedDocumentLibrary({
   data,
+  disabled,
   error,
   i18nLanguage,
   isLoading,
   isGeneratingChunks,
+  knowledgeBaseId,
   onGenerateChunks,
   onNext,
   onPrevious,
   t,
 }: {
   data: ParsedDocumentListResponse | null;
+  disabled: boolean;
   error: string | null;
   i18nLanguage: string;
   isLoading: boolean;
   isGeneratingChunks: boolean;
+  knowledgeBaseId: string;
   onGenerateChunks: (fileId: string) => void;
   onNext: () => void;
   onPrevious: () => void;
@@ -770,9 +764,11 @@ function ParsedDocumentLibrary({
           <div className="space-y-4 p-5">
             {data.items.map((item) => (
               <ParsedDocumentCard
+                disabled={disabled}
                 i18nLanguage={i18nLanguage}
                 isGeneratingChunks={isGeneratingChunks}
                 item={item}
+                knowledgeBaseId={knowledgeBaseId}
                 key={item.parsedDocumentId}
                 onGenerateChunks={onGenerateChunks}
                 t={t}
@@ -815,15 +811,19 @@ function ParsedDocumentLibrary({
 }
 
 function ParsedDocumentCard({
+  disabled,
   i18nLanguage,
   isGeneratingChunks,
   item,
+  knowledgeBaseId,
   onGenerateChunks,
   t,
 }: {
+  disabled: boolean;
   i18nLanguage: string;
   isGeneratingChunks: boolean;
   item: ParsedDocumentListItem;
+  knowledgeBaseId: string;
   onGenerateChunks: (fileId: string) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
@@ -910,6 +910,16 @@ function ParsedDocumentCard({
             </div>
           ) : null}
 
+          <div className="px-4 pt-4">
+            <KnowledgeChunkSelector
+              chunkCount={item.chunkCount}
+              disabled={disabled}
+              fileId={item.fileId}
+              knowledgeBaseId={knowledgeBaseId}
+              t={t}
+            />
+          </div>
+
           <div className="space-y-3 p-4">
             {document.blocks.length === 0 ? (
               <p className="rounded-xl border border-dashed border-border/80 px-4 py-8 text-center text-muted-foreground text-sm">
@@ -970,10 +980,268 @@ function ParsedDocumentCard({
           ) : (
             <Layers3Icon />
           )}
-          {t("settings.generateKnowledgeChunks")}
+          {t(getKnowledgeChunkActionLabelKey(item.chunkStatus))}
         </Button>
       </div>
     </article>
+  );
+}
+
+function KnowledgeChunkSelector({
+  chunkCount,
+  disabled,
+  fileId,
+  knowledgeBaseId,
+  t,
+}: {
+  chunkCount: number;
+  disabled: boolean;
+  fileId: string;
+  knowledgeBaseId: string;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const [offset, setOffset] = useState(0);
+  const [reloadIndex, setReloadIndex] = useState(0);
+  const [chunkPage, setChunkPage] = useState<KnowledgeChunkPage | null>(null);
+  const [selectedChunkIds, setSelectedChunkIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [isLoading, setIsLoading] = useState(chunkCount > 0);
+  const [isEmbedding, setIsEmbedding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadChunkPage = useCallback(async (pageOffset: number) => {
+    setIsLoading(true);
+    setError(null);
+    setChunkPage(null);
+    try {
+      const page = await requestBackend<KnowledgeChunkPage>(
+        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/files/${encodeURIComponent(fileId)}/chunks?offset=${pageOffset}&limit=${KNOWLEDGE_CHUNK_PAGE_SIZE}`
+      );
+      setChunkPage(page);
+      setSelectedChunkIds(new Set());
+    } catch (loadError) {
+      setChunkPage(null);
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : t("settings.unableToLoadKnowledgeChunks")
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fileId, knowledgeBaseId, t]);
+
+  useEffect(() => {
+    if (chunkCount > 0) {
+      void loadChunkPage(offset);
+    } else {
+      setChunkPage(null);
+      setSelectedChunkIds(new Set());
+    }
+  }, [chunkCount, loadChunkPage, offset, reloadIndex]);
+
+  const pageChunkIds = chunkPage?.items.map((chunk) => chunk.chunkId) ?? [];
+  const allPageChunksSelected =
+    pageChunkIds.length > 0 &&
+    pageChunkIds.every((chunkId) => selectedChunkIds.has(chunkId));
+
+  const togglePageSelection = () => {
+    setSelectedChunkIds(
+      allPageChunksSelected ? new Set() : new Set(pageChunkIds)
+    );
+  };
+
+  const toggleChunkSelection = (chunkId: string) => {
+    setSelectedChunkIds((current) => {
+      const next = new Set(current);
+      if (next.has(chunkId)) {
+        next.delete(chunkId);
+      } else {
+        next.add(chunkId);
+      }
+      return next;
+    });
+  };
+
+  const embedSelectedChunks = async () => {
+    const chunkIds = [...selectedChunkIds];
+    if (chunkIds.length === 0 || isEmbedding) {
+      return;
+    }
+
+    setIsEmbedding(true);
+    setError(null);
+    try {
+      const result = await requestBackend<KnowledgeChunkEmbeddingResponse>(
+        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/files/${encodeURIComponent(fileId)}/chunks/embeddings`,
+        {
+          body: JSON.stringify({ chunkIds }),
+          method: "POST",
+        }
+      );
+      toast.success(
+        t("settings.knowledgeChunksEmbedded", {
+          count: result.embeddedCount,
+          dimensions: result.dimensions,
+          model: result.embeddingModel,
+        })
+      );
+      setSelectedChunkIds(new Set());
+      setReloadIndex((current) => current + 1);
+    } catch (embedError) {
+      const message =
+        embedError instanceof Error
+          ? embedError.message
+          : t("settings.knowledgeChunksEmbeddingFailed");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsEmbedding(false);
+    }
+  };
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-border/70 bg-card/40">
+      <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h5 className="font-medium text-sm">
+            {t("settings.chunkSelectionHeading")}
+          </h5>
+          <p className="mt-1 text-muted-foreground text-xs">
+            {t("settings.chunkSelectionDescription")}
+          </p>
+        </div>
+        {chunkPage && chunkPage.items.length > 0 ? (
+          <Button
+            disabled={disabled || isEmbedding}
+            onClick={togglePageSelection}
+            size="sm"
+            variant="ghost"
+          >
+            {t(
+              allPageChunksSelected
+                ? "settings.clearChunkSelection"
+                : "settings.selectChunkPage"
+            )}
+          </Button>
+        ) : null}
+      </div>
+
+      {error ? (
+        <div className="border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm" role="alert">
+          {error}
+        </div>
+      ) : isLoading && !chunkPage ? (
+        <div className="px-4 py-6">
+          <InlineLoadingState message={t("settings.loadingKnowledgeChunks")} />
+        </div>
+      ) : chunkCount === 0 ? (
+        <p className="px-4 py-5 text-muted-foreground text-sm">
+          {t("settings.noKnowledgeChunks")}
+        </p>
+      ) : chunkPage && chunkPage.items.length > 0 ? (
+        <>
+          <div className="divide-y divide-border/60">
+            {chunkPage.items.map((chunk) => (
+              <label
+                className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
+                key={chunk.chunkId}
+              >
+                <input
+                  aria-label={t("settings.selectKnowledgeChunk", {
+                    index: chunk.chunkIndex + 1,
+                  })}
+                  checked={selectedChunkIds.has(chunk.chunkId)}
+                  className="mt-1 size-4 shrink-0 accent-primary"
+                  disabled={disabled || isEmbedding}
+                  onChange={() => toggleChunkSelection(chunk.chunkId)}
+                  type="checkbox"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">
+                      {t("settings.knowledgeChunkNumber", {
+                        index: chunk.chunkIndex + 1,
+                      })}
+                    </Badge>
+                    <Badge variant={chunk.isEmbedded ? "default" : "outline"}>
+                      {chunk.isEmbedded
+                        ? t("settings.chunkEmbedded", {
+                            model: chunk.embeddingModel ?? "",
+                          })
+                        : t("settings.chunkNotEmbedded")}
+                    </Badge>
+                  </span>
+                  <span className="mt-2 block max-h-28 overflow-auto whitespace-pre-wrap text-sm leading-6">
+                    {chunk.content}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-3 border-t border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-muted-foreground text-xs">
+              {t("settings.knowledgeChunksPage", {
+                from: chunkPage.offset + 1,
+                to: Math.min(chunkPage.offset + chunkPage.items.length, chunkPage.total),
+                total: chunkPage.total,
+              })}
+            </span>
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <Button
+                disabled={offset === 0 || isLoading || isEmbedding}
+                onClick={() => setOffset(Math.max(0, offset - KNOWLEDGE_CHUNK_PAGE_SIZE))}
+                size="sm"
+                variant="outline"
+              >
+                <ChevronLeftIcon />
+                {t("settings.previousKnowledgeChunks")}
+              </Button>
+              <Button
+                disabled={chunkPage.nextOffset === null || isLoading || isEmbedding}
+                onClick={() => {
+                  if (chunkPage.nextOffset !== null) {
+                    setOffset(chunkPage.nextOffset);
+                  }
+                }}
+                size="sm"
+                variant="outline"
+              >
+                {t("settings.nextKnowledgeChunks")}
+                <ChevronRightIcon />
+              </Button>
+              <Button
+                disabled={disabled || isEmbedding || selectedChunkIds.size === 0}
+                onClick={() => void embedSelectedChunks()}
+                size="sm"
+              >
+                {isEmbedding ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : (
+                  <ScanTextIcon />
+                )}
+                {t(
+                  isEmbedding
+                    ? "settings.embeddingSelectedChunks"
+                    : "settings.embedSelectedChunks",
+                  { count: selectedChunkIds.size }
+                )}
+              </Button>
+            </div>
+          </div>
+        </>
+      ) : !isLoading ? (
+        <p className="px-4 py-5 text-muted-foreground text-sm">
+          {t("settings.noKnowledgeChunks")}
+        </p>
+      ) : (
+        <div className="px-4 py-6">
+          <InlineLoadingState message={t("settings.loadingKnowledgeChunks")} />
+        </div>
+      )}
+    </section>
   );
 }
 
