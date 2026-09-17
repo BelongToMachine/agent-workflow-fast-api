@@ -10,7 +10,11 @@ from app.db.migration_status import (
     MigrationStatus,
     build_migration_statuses,
 )
-from app.db.migration_utils import get_migration_target, migration_apply_error
+from app.db.migration_utils import (
+    get_migration_target,
+    migration_apply_error,
+    split_sql_statements,
+)
 
 
 def test_local_migration_target_is_allowed() -> None:
@@ -141,6 +145,7 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         True,
         True,
         False,
+        False,
     ]
     assert statuses[3].name == "0004_knowledge_bases"
 
@@ -179,6 +184,7 @@ def test_migration_status_query_covers_schema_capabilities() -> None:
     assert "embedding_model_column" in sql
     assert "knowledge_base_required_columns" in sql
     assert "parsed_document_required_columns" in sql
+    assert "knowledge_source_retired" in sql
     assert "conrelid = to_regclass" in sql
 
 
@@ -188,7 +194,60 @@ def test_knowledge_integrity_query_checks_cross_scope_relationships() -> None:
     assert 'grant_record."workspaceId" <> knowledge_base."workspaceId"' in sql
     assert 'knowledge_file."workspaceId" <> knowledge_base."workspaceId"' in sql
     assert 'chunk."knowledgeBaseId" <> knowledge_file."knowledgeBaseId"' in sql
-    assert 'source."workspaceId"' in sql
+    assert 'source."workspaceId"' not in sql
+
+
+def test_retired_knowledge_source_keeps_historical_migrations_applied() -> None:
+    row = {
+        "knowledge_source_retired": True,
+        "content_source_file_idx": True,
+        "research_source_file_idx": True,
+        "document_source_file_idx": True,
+        "operation_source_file_idx": True,
+        "price_source_file_idx": True,
+        "content_source_file_non_null": True,
+        "research_source_file_non_null": True,
+        "document_source_file_non_null": True,
+        "operation_source_file_non_null": True,
+        "price_source_file_non_null": True,
+        "content_source_file_fk": True,
+        "research_source_file_fk": True,
+        "document_source_file_fk": True,
+        "operation_source_file_fk": True,
+        "price_source_file_fk": True,
+    }
+
+    statuses = {status.name: status for status in build_migration_statuses(row)}
+
+    for name in (
+        "0006_knowledge_source_provenance",
+        "0007_knowledge_source_relationships",
+        "0008_knowledge_source_import_key",
+        "0009_knowledge_source_relationships_required",
+        "0015_knowledge_source_retirement",
+    ):
+        assert statuses[name].applied is True
+
+
+def test_retirement_stays_pending_without_canonical_file_relationships() -> None:
+    statuses = {
+        status.name: status
+        for status in build_migration_statuses({"knowledge_source_retired": True})
+    }
+
+    assert statuses["0015_knowledge_source_retirement"].applied is False
+
+
+def test_knowledge_source_retirement_migration_is_registered_and_guarded() -> None:
+    assert MIGRATION_NAMES[-1] == "0015_knowledge_source_retirement"
+    sql = MIGRATION_PATHS[-1].read_text(encoding="utf-8")
+    statements = split_sql_statements(sql)
+
+    assert "sourceFileId" in sql
+    assert "KnowledgeFile" in sql
+    assert "unexpected foreign key" in sql
+    assert 'DROP TABLE "KnowledgeSource"' in sql
+    assert sum("DO $$" in statement for statement in statements) == 2
 
 
 def test_knowledge_integrity_checks_pass_for_zero_violations() -> None:
@@ -219,15 +278,15 @@ def test_knowledge_migration_runner_uses_dependency_order() -> None:
 
 
 def test_file_provenance_migration_is_guarded() -> None:
-    assert MIGRATION_NAMES[-3] == "0012_knowledge_file_provenance"
-    sql = MIGRATION_PATHS[-3].read_text(encoding="utf-8")
+    assert MIGRATION_NAMES[-4] == "0012_knowledge_file_provenance"
+    sql = MIGRATION_PATHS[-4].read_text(encoding="utf-8")
     assert "legacy rows could not be matched" in sql
     assert 'ALTER COLUMN "sourceFileId" SET NOT NULL' in sql
 
 
 def test_qwen_embedding_migration_is_registered_and_resets_old_vectors() -> None:
-    assert MIGRATION_NAMES[-1] == "0014_knowledge_embedding_qwen"
-    sql = MIGRATION_PATHS[-1].read_text(encoding="utf-8")
+    assert MIGRATION_NAMES[-2] == "0014_knowledge_embedding_qwen"
+    sql = MIGRATION_PATHS[-2].read_text(encoding="utf-8")
     assert '"embedding" = NULL' in sql
     assert "vector(1024)" in sql
     assert '"embeddingModel"' in sql

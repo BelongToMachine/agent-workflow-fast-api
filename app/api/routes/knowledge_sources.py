@@ -36,7 +36,7 @@ class KnowledgeSourceListResponse(BaseModel):
 
     sources: list[KnowledgeSourceSummary]
     source: str = "enterprise"
-    source_table: str = Field(default="KnowledgeSource", alias="sourceTable")
+    source_table: str = Field(default="KnowledgeFile", alias="sourceTable")
 
 
 KNOWLEDGE_SOURCES_SELECT_TEMPLATE = """

@@ -70,13 +70,6 @@ KNOWLEDGE_INTEGRITY_QUERY = text(
         ) AS chunk_file_scope_mismatches,
         (
             SELECT COUNT(*)
-            FROM "KnowledgeBase" AS knowledge_base
-            INNER JOIN "KnowledgeSource" AS source
-                ON source."id" = knowledge_base."id"
-            WHERE knowledge_base."workspaceId" <> source."workspaceId"
-        ) AS backfilled_workspace_mismatches,
-        (
-            SELECT COUNT(*)
             FROM "KnowledgeParsedDocument" AS parsed_document
             LEFT JOIN "KnowledgeFile" AS knowledge_file
                 ON knowledge_file."id" = parsed_document."fileId"
@@ -161,11 +154,6 @@ def build_integrity_checks(row: Mapping[str, object]) -> list[IntegrityCheck]:
             "chunk_file_scope_mismatches",
             _violation_count(row, "chunk_file_scope_mismatches"),
             "chunk workspace and knowledgeBaseId values match its file",
-        ),
-        IntegrityCheck(
-            "backfilled_workspace_mismatches",
-            _violation_count(row, "backfilled_workspace_mismatches"),
-            "backfilled KnowledgeBase rows preserve the source workspace",
         ),
         IntegrityCheck(
             "parsed_documents_without_file",

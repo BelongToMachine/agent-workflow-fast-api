@@ -460,7 +460,17 @@ MIGRATION_STATUS_QUERY = text(
             WHERE conrelid = to_regclass('public."ProductPrice"')
               AND conname = 'ProductPrice_source_file_fk'
               AND confrelid = to_regclass('public."KnowledgeFile"')
-        ) AS price_source_file_fk
+        ) AS price_source_file_fk,
+        to_regclass('public."KnowledgeSource"') IS NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name IN (
+                      'ContentRecord', 'RealProductResearch', 'ProductDocument'
+                  )
+                  AND column_name = 'sourceId'
+            ) AS knowledge_source_retired
     """
 )
 
@@ -476,7 +486,8 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
     def flag(name: str) -> bool:
         return bool(row.get(name, False))
 
-    source_applied = all(
+    knowledge_source_retired = flag("knowledge_source_retired")
+    source_applied = knowledge_source_retired or all(
         flag(key)
         for key in (
             "source_table",
@@ -485,7 +496,7 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "source_workspace_fk",
         )
     )
-    legacy_source_relationships_applied = all(
+    legacy_source_relationships_applied = knowledge_source_retired or all(
         flag(key)
         for key in (
             "content_table",
@@ -525,8 +536,10 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
         legacy_source_relationships_applied
         or canonical_source_relationships_applied
     )
-    source_import_key_applied = flag("source_import_key_idx")
-    legacy_source_relationships_required = all(
+    source_import_key_applied = knowledge_source_retired or flag(
+        "source_import_key_idx"
+    )
+    legacy_source_relationships_required = knowledge_source_retired or all(
         flag(key)
         for key in (
             "content_source_non_null",
@@ -545,7 +558,8 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
         )
     )
     source_relationships_required = (
-        legacy_source_relationships_required
+        knowledge_source_retired
+        or legacy_source_relationships_required
         or canonical_source_relationships_required
     )
     grants_applied = all(
@@ -670,6 +684,13 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "0014_knowledge_embedding_qwen",
             qwen_embeddings_applied,
             "Qwen embedding model marker and vector(1024) column",
+        ),
+        MigrationStatus(
+            "0015_knowledge_source_retirement",
+            knowledge_source_retired
+            and canonical_source_relationships_applied
+            and canonical_source_relationships_required,
+            "KnowledgeSource retired after canonical KnowledgeFile provenance is ready",
         ),
     ]
 
