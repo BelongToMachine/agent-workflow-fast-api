@@ -1,6 +1,7 @@
 import type { InferSelectModel } from "drizzle-orm";
 import {
   boolean,
+  bigint,
   foreignKey,
   index,
   integer,
@@ -216,16 +217,15 @@ export const stream = pgTable(
 
 export type Stream = InferSelectModel<typeof stream>;
 
-export const knowledgeSource = pgTable(
-  "KnowledgeSource",
+export const knowledgeBase = pgTable(
+  "KnowledgeBase",
   {
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     displayName: text("displayName").notNull(),
-    fileHash: text("fileHash"),
+    fileHash: varchar("fileHash", { length: 64 }),
     id: uuid("id").primaryKey().notNull().defaultRandom(),
-    sourceType: varchar("sourceType", { length: 32 }).notNull(),
-    status: varchar("status", { length: 16 }).notNull().default("pending"),
-    storageKey: text("storageKey"),
+    sourceType: varchar("sourceType", { length: 32 }).notNull().default("manual"),
+    status: varchar("status", { length: 16 }).notNull().default("ready"),
     storageProvider: varchar("storageProvider", { length: 16 }),
     updatedAt: timestamp("updatedAt").notNull().defaultNow(),
     version: integer("version").notNull().default(1),
@@ -234,11 +234,59 @@ export const knowledgeSource = pgTable(
       .references(() => workspace.id),
   },
   (table) => ({
-    fileHashIdx: index("KnowledgeSource_fileHash_idx").on(table.fileHash),
+    workspaceStatusIdx: index("KnowledgeBase_workspace_status_idx").on(
+      table.workspaceId,
+      table.status
+    ),
+    workspaceNameIdx: index("KnowledgeBase_workspace_name_idx").on(
+      table.workspaceId,
+      table.displayName
+    ),
   })
 );
 
-export type KnowledgeSource = InferSelectModel<typeof knowledgeSource>;
+export type KnowledgeBase = InferSelectModel<typeof knowledgeBase>;
+
+export const knowledgeFile = pgTable(
+  "KnowledgeFile",
+  {
+    byteSize: bigint("byteSize", { mode: "number" }).notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    errorMessage: text("errorMessage"),
+    fileHash: varchar("fileHash", { length: 64 }).notNull(),
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    knowledgeBaseId: uuid("knowledgeBaseId")
+      .notNull()
+      .references(() => knowledgeBase.id, { onDelete: "cascade" }),
+    mimeType: varchar("mimeType", { length: 128 }).notNull(),
+    originalName: text("originalName").notNull(),
+    status: varchar("status", { length: 16 }).notNull().default("pending"),
+    storageKey: text("storageKey").notNull(),
+    storageProvider: varchar("storageProvider", { length: 16 })
+      .notNull()
+      .default("local"),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+    uploadedBy: uuid("uploadedBy")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    workspaceId: uuid("workspaceId")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+  },
+  (table) => ({
+    uniqueHash: uniqueIndex("KnowledgeFile_unique_hash").on(
+      table.knowledgeBaseId,
+      table.fileHash
+    ),
+    workspaceIdx: index("KnowledgeFile_workspace_idx").on(
+      table.workspaceId,
+      table.knowledgeBaseId,
+      table.status
+    ),
+  })
+);
+
+export type KnowledgeFile = InferSelectModel<typeof knowledgeFile>;
 
 export const realProductResearch = pgTable(
   "RealProductResearch",
@@ -267,19 +315,21 @@ export const realProductResearch = pgTable(
     sellingPrice: text("sellingPrice"),
     shippingTime: text("shippingTime"),
     singleProductCost: text("singleProductCost"),
-    sourceId: uuid("sourceId")
+    sourceFileId: uuid("sourceFileId")
       .notNull()
-      .references(() => knowledgeSource.id),
+      .references(() => knowledgeFile.id, { onDelete: "cascade" }),
     sourceRow: integer("sourceRow").notNull(),
     sourceSheet: varchar("sourceSheet", { length: 64 }).notNull(),
     supplierContact: text("supplierContact"),
     targetSalesChannels: text("targetSalesChannels"),
   },
   (table) => ({
-    sourceIdIdx: index("RealProductResearch_sourceId_idx").on(table.sourceId),
+    sourceFileIdIdx: index("RealProductResearch_sourceFileId_idx").on(
+      table.sourceFileId
+    ),
     sourceRowUnique: uniqueIndex(
-      "RealProductResearch_sourceId_sourceSheet_sourceRow_idx"
-    ).on(table.sourceId, table.sourceSheet, table.sourceRow),
+      "RealProductResearch_sourceFileId_sourceSheet_sourceRow_idx"
+    ).on(table.sourceFileId, table.sourceSheet, table.sourceRow),
   })
 );
 
@@ -302,6 +352,9 @@ export const productOperation = pgTable(
     researchId: uuid("researchId")
       .notNull()
       .references(() => realProductResearch.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("sourceFileId")
+      .notNull()
+      .references(() => knowledgeFile.id, { onDelete: "cascade" }),
     sourceRow: integer("sourceRow").notNull(),
     sourceSheet: varchar("sourceSheet", { length: 64 }).notNull(),
     targetChannels: text("targetChannels"),
@@ -310,6 +363,9 @@ export const productOperation = pgTable(
   (table) => ({
     researchUnique: uniqueIndex("ProductOperation_researchId_idx").on(
       table.researchId
+    ),
+    sourceFileIdIdx: index("ProductOperation_sourceFileId_idx").on(
+      table.sourceFileId
     ),
   })
 );
@@ -328,6 +384,9 @@ export const productPrice = pgTable(
     researchId: uuid("researchId")
       .notNull()
       .references(() => realProductResearch.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("sourceFileId")
+      .notNull()
+      .references(() => knowledgeFile.id, { onDelete: "cascade" }),
     sourceRow: integer("sourceRow").notNull(),
     sourceSheet: varchar("sourceSheet", { length: 64 }).notNull(),
     variant: text("variant").notNull(),
@@ -339,6 +398,9 @@ export const productPrice = pgTable(
       table.priceMin,
       table.currency,
       table.priceType
+    ),
+    sourceFileIdIdx: index("ProductPrice_sourceFileId_idx").on(
+      table.sourceFileId
     ),
   })
 );
@@ -357,9 +419,9 @@ export const productDocument = pgTable(
     researchId: uuid("researchId")
       .notNull()
       .references(() => realProductResearch.id, { onDelete: "cascade" }),
-    sourceId: uuid("sourceId")
+    sourceFileId: uuid("sourceFileId")
       .notNull()
-      .references(() => knowledgeSource.id),
+      .references(() => knowledgeFile.id, { onDelete: "cascade" }),
     sourceRow: integer("sourceRow").notNull(),
     sourceSheet: varchar("sourceSheet", { length: 64 }).notNull(),
   },
@@ -369,7 +431,9 @@ export const productDocument = pgTable(
       table.documentType,
       table.fileReference
     ),
-    sourceIdIdx: index("ProductDocument_sourceId_idx").on(table.sourceId),
+    sourceFileIdIdx: index("ProductDocument_sourceFileId_idx").on(
+      table.sourceFileId
+    ),
   })
 );
 
@@ -402,9 +466,9 @@ export const contentRecord = pgTable(
     searchText: text("searchText").notNull(),
     shootConfirmed: text("shootConfirmed"),
     shootingScene: text("shootingScene"),
-    sourceId: uuid("sourceId")
+    sourceFileId: uuid("sourceFileId")
       .notNull()
-      .references(() => knowledgeSource.id),
+      .references(() => knowledgeFile.id, { onDelete: "cascade" }),
     sourceRow: integer("sourceRow").notNull(),
     sourceSheet: varchar("sourceSheet", { length: 64 }).notNull(),
     submitter: text("submitter"),
@@ -415,10 +479,12 @@ export const contentRecord = pgTable(
     videoType: text("videoType"),
   },
   (table) => ({
-    sourceIdIdx: index("ContentRecord_sourceId_idx").on(table.sourceId),
+    sourceFileIdIdx: index("ContentRecord_sourceFileId_idx").on(
+      table.sourceFileId
+    ),
     sourceRowUnique: uniqueIndex(
-      "ContentRecord_sourceId_sourceSheet_sourceRow_idx"
-    ).on(table.sourceId, table.sourceSheet, table.sourceRow),
+      "ContentRecord_sourceFileId_sourceSheet_sourceRow_idx"
+    ).on(table.sourceFileId, table.sourceSheet, table.sourceRow),
   })
 );
 

@@ -6,7 +6,7 @@ import postgres from "postgres";
 import { logError, logEvent } from "@/lib/ai/logger";
 import type { SourceCitation } from "@/lib/knowledgeCitation";
 import { isMockDatabase } from "../constants";
-import { contentRecord, knowledgeSource } from "./schema";
+import { contentRecord, knowledgeFile } from "./schema";
 
 const db = isMockDatabase
   ? (undefined as never)
@@ -95,21 +95,21 @@ export async function searchContent(
   }
 
   const sourceFileNames = normalizedSourceFileNames(input.sourceFileNames);
-  let sourceIds: string[] | undefined;
+  let sourceFileIds: string[] | undefined;
   let missingSourceFileNames: string[] = [];
 
   if (sourceFileNames.length > 0) {
     const sourceRows = await db
       .select({
-        displayName: knowledgeSource.displayName,
-        id: knowledgeSource.id,
+        displayName: knowledgeFile.originalName,
+        id: knowledgeFile.id,
       })
-      .from(knowledgeSource)
+      .from(knowledgeFile)
       .where(
         and(
-          eq(knowledgeSource.status, "ready"),
-          eq(knowledgeSource.workspaceId, input.workspaceId),
-          inArray(knowledgeSource.displayName, sourceFileNames)
+          eq(knowledgeFile.status, "ready"),
+          eq(knowledgeFile.workspaceId, input.workspaceId),
+          inArray(knowledgeFile.originalName, sourceFileNames)
         )
       );
     const foundSourceNames = new Set(
@@ -118,11 +118,12 @@ export async function searchContent(
     missingSourceFileNames = sourceFileNames.filter(
       (fileName) => !foundSourceNames.has(fileName)
     );
-    sourceIds = sourceRows.map(({ id }) => id);
+    const matchedFileIds = sourceRows.map(({ id }) => id);
+    sourceFileIds = matchedFileIds;
 
-    if (sourceIds.length === 0) {
+    if (matchedFileIds.length === 0) {
       return {
-        message: `No knowledge source matched: ${sourceFileNames.join(", ")}`,
+        message: `No knowledge file matched: ${sourceFileNames.join(", ")}`,
         records: [],
         source: "enterprise",
         sourceTable: "ContentRecord",
@@ -132,8 +133,8 @@ export async function searchContent(
 
   const search = input.query?.trim();
   const conditions = [
-    eq(knowledgeSource.workspaceId, input.workspaceId),
-    sourceIds ? inArray(contentRecord.sourceId, sourceIds) : undefined,
+    eq(knowledgeFile.workspaceId, input.workspaceId),
+    sourceFileIds ? inArray(contentRecord.sourceFileId, sourceFileIds) : undefined,
     input.account
       ? or(
           ilike(contentRecord.accountName, textPattern(input.account)),
@@ -193,8 +194,8 @@ export async function searchContent(
       searchText: contentRecord.searchText,
       shootConfirmed: contentRecord.shootConfirmed,
       shootingScene: contentRecord.shootingScene,
-      sourceFileName: knowledgeSource.displayName,
-      sourceId: contentRecord.sourceId,
+      sourceFileName: knowledgeFile.originalName,
+      sourceId: contentRecord.sourceFileId,
       sourceRow: contentRecord.sourceRow,
       sourceSheet: contentRecord.sourceSheet,
       submitter: contentRecord.submitter,
@@ -205,7 +206,7 @@ export async function searchContent(
       videoType: contentRecord.videoType,
     })
     .from(contentRecord)
-    .leftJoin(knowledgeSource, eq(contentRecord.sourceId, knowledgeSource.id))
+    .leftJoin(knowledgeFile, eq(contentRecord.sourceFileId, knowledgeFile.id))
     .where(and(...conditions))
     .orderBy(asc(contentRecord.plannedAt), asc(contentRecord.sourceRow))
     .limit(resultLimit(input.limit))

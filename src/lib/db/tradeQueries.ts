@@ -7,7 +7,7 @@ import { logError, logEvent } from "@/lib/ai/logger";
 import type { SourceCitation } from "@/lib/knowledgeCitation";
 import { isMockDatabase } from "../constants";
 import {
-  knowledgeSource,
+  knowledgeFile,
   productDocument,
   productOperation,
   productPrice,
@@ -128,21 +128,21 @@ async function searchEnterpriseProducts(
   }
 
   const sourceFileNames = normalizedSourceFileNames(input.sourceFileNames);
-  let sourceIds: string[] | undefined;
+  let sourceFileIds: string[] | undefined;
   let missingSourceFileNames: string[] = [];
 
   if (sourceFileNames.length > 0) {
     const sourceRows = await db
       .select({
-        displayName: knowledgeSource.displayName,
-        id: knowledgeSource.id,
+        displayName: knowledgeFile.originalName,
+        id: knowledgeFile.id,
       })
-      .from(knowledgeSource)
+      .from(knowledgeFile)
       .where(
         and(
-          eq(knowledgeSource.status, "ready"),
-          eq(knowledgeSource.workspaceId, input.workspaceId),
-          inArray(knowledgeSource.displayName, sourceFileNames)
+          eq(knowledgeFile.status, "ready"),
+          eq(knowledgeFile.workspaceId, input.workspaceId),
+          inArray(knowledgeFile.originalName, sourceFileNames)
         )
       );
     const foundSourceNames = new Set(
@@ -151,11 +151,12 @@ async function searchEnterpriseProducts(
     missingSourceFileNames = sourceFileNames.filter(
       (fileName) => !foundSourceNames.has(fileName)
     );
-    sourceIds = sourceRows.map(({ id }) => id);
+    const matchedFileIds = sourceRows.map(({ id }) => id);
+    sourceFileIds = matchedFileIds;
 
-    if (sourceIds.length === 0) {
+    if (matchedFileIds.length === 0) {
       return {
-        message: `No knowledge source matched: ${sourceFileNames.join(", ")}`,
+        message: `No knowledge file matched: ${sourceFileNames.join(", ")}`,
         products: [],
         source: "enterprise",
         sourceTable: "RealProductResearch + operations",
@@ -175,8 +176,10 @@ async function searchEnterpriseProducts(
 
   const search = input.query?.trim();
   const conditions = [
-    eq(knowledgeSource.workspaceId, input.workspaceId),
-    sourceIds ? inArray(realProductResearch.sourceId, sourceIds) : undefined,
+    eq(knowledgeFile.workspaceId, input.workspaceId),
+    sourceFileIds
+      ? inArray(realProductResearch.sourceFileId, sourceFileIds)
+      : undefined,
     input.category
       ? ilike(realProductResearch.category, textPattern(input.category))
       : undefined,
@@ -230,12 +233,12 @@ async function searchEnterpriseProducts(
         productIntro: realProductResearch.productIntro,
         productName: realProductResearch.productName,
         shippingTime: realProductResearch.shippingTime,
-        sourceId: realProductResearch.sourceId,
+        sourceId: realProductResearch.sourceFileId,
         sourceRow: realProductResearch.sourceRow,
         sourceSheet: realProductResearch.sourceSheet,
         supplierContact: realProductResearch.supplierContact,
       },
-      sourceFileName: knowledgeSource.displayName,
+      sourceFileName: knowledgeFile.originalName,
     })
     .from(realProductResearch)
     .leftJoin(
@@ -243,8 +246,8 @@ async function searchEnterpriseProducts(
       eq(productOperation.researchId, realProductResearch.id)
     )
     .leftJoin(
-      knowledgeSource,
-      eq(realProductResearch.sourceId, knowledgeSource.id)
+      knowledgeFile,
+      eq(realProductResearch.sourceFileId, knowledgeFile.id)
     )
     .where(and(...conditions))
     .orderBy(asc(realProductResearch.productName));
