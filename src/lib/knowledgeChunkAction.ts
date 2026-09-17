@@ -9,3 +9,11 @@ export function getKnowledgeChunkActionLabelKey(
     ? "settings.regenerateKnowledgeChunks"
     : "settings.generateKnowledgeChunks";
 }
+
+export function getKnowledgeChunkSelectorKey(
+  chunkStatus: string,
+  chunkCount: number,
+  updatedAt: string
+): string {
+  return JSON.stringify([chunkStatus, chunkCount, updatedAt]);
+}

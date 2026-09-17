@@ -21,7 +21,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InlineLoadingState } from "@/components/ui/loadingState";
 import { BackendRequestError, requestBackend } from "@/lib/backend/request";
-import { getKnowledgeChunkActionLabelKey } from "@/lib/knowledgeChunkAction";
+import {
+  getKnowledgeChunkActionLabelKey,
+  getKnowledgeChunkSelectorKey,
+} from "@/lib/knowledgeChunkAction";
 import { cn } from "@/lib/utils";
 
 type KnowledgeFile = {
@@ -913,9 +916,15 @@ function ParsedDocumentCard({
           <div className="px-4 pt-4">
             <KnowledgeChunkSelector
               chunkCount={item.chunkCount}
+              chunkStatus={item.chunkStatus}
               disabled={disabled}
               fileId={item.fileId}
               knowledgeBaseId={knowledgeBaseId}
+              key={getKnowledgeChunkSelectorKey(
+                item.chunkStatus,
+                item.chunkCount,
+                item.updatedAt
+              )}
               t={t}
             />
           </div>
@@ -989,12 +998,14 @@ function ParsedDocumentCard({
 
 function KnowledgeChunkSelector({
   chunkCount,
+  chunkStatus,
   disabled,
   fileId,
   knowledgeBaseId,
   t,
 }: {
   chunkCount: number;
+  chunkStatus: string;
   disabled: boolean;
   fileId: string;
   knowledgeBaseId: string;
@@ -1006,7 +1017,9 @@ function KnowledgeChunkSelector({
   const [selectedChunkIds, setSelectedChunkIds] = useState<Set<string>>(
     () => new Set()
   );
-  const [isLoading, setIsLoading] = useState(chunkCount > 0);
+  const [isLoading, setIsLoading] = useState(
+    chunkCount > 0 || chunkStatus === "processing"
+  );
   const [isEmbedding, setIsEmbedding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1033,13 +1046,20 @@ function KnowledgeChunkSelector({
   }, [fileId, knowledgeBaseId, t]);
 
   useEffect(() => {
-    if (chunkCount > 0) {
+    if (chunkStatus === "processing") {
+      setIsLoading(true);
+      setError(null);
+      setChunkPage(null);
+      setSelectedChunkIds(new Set());
+    } else if (chunkCount > 0) {
       void loadChunkPage(offset);
     } else {
+      setIsLoading(false);
+      setError(null);
       setChunkPage(null);
       setSelectedChunkIds(new Set());
     }
-  }, [chunkCount, loadChunkPage, offset, reloadIndex]);
+  }, [chunkCount, chunkStatus, loadChunkPage, offset, reloadIndex]);
 
   const pageChunkIds = chunkPage?.items.map((chunk) => chunk.chunkId) ?? [];
   const allPageChunksSelected =
