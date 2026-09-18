@@ -10,6 +10,7 @@ from app.api.routes.admin_members import (
     UpdateMemberRequest,
     UpdateMemberStatusRequest,
     _build_member_views,
+    _permission_overrides,
     _require_non_anonymous_development_identity,
 )
 from app.core.auth import AuthenticatedUser
@@ -64,8 +65,42 @@ def test_member_views_include_role_defaults_and_overrides() -> None:
         "chat.read",
         "document.read",
         "audit.read",
+        "agent.tool.products.search",
+        "agent.tool.content.search",
+        "agent.tool.knowledge_bases.list",
+        "agent.tool.knowledge_files.list",
+        "agent.tool.knowledge_base.read",
+        "agent.tool.knowledge_file.read",
+        "agent.tool.knowledge_base.search",
     ]
     assert views[0].user_id == "00000000-0000-0000-0000-000000000011"
+
+
+def test_member_views_apply_agent_tool_permission_denials() -> None:
+    member_id = UUID("00000000-0000-0000-0000-000000000010")
+    views = _build_member_views(
+        [
+            {
+                "id": member_id,
+                "role": "employee",
+                "status": "active",
+                "user_id": UUID("00000000-0000-0000-0000-000000000011"),
+                "workspace_id": UUID("00000000-0000-0000-0000-000000000012"),
+                "email": "employee@example.com",
+                "name": "Employee",
+                "workspace_name": "Asianode",
+            }
+        ],
+        [
+            {
+                "member_id": member_id,
+                "effect": "deny",
+                "permission": "agent.tool.knowledge.search",
+            }
+        ],
+    )
+
+    assert "agent.tool.knowledge.search" not in views[0].effective_permissions
 
 
 def test_update_request_rejects_unknown_or_duplicate_permissions() -> None:
@@ -104,6 +139,33 @@ def test_update_request_accepts_employee_role() -> None:
     )
 
     assert request.role == "employee"
+
+
+def test_update_request_accepts_agent_tool_permissions() -> None:
+    request = UpdateMemberRequest.model_validate(
+        {
+            "memberId": "00000000-0000-0000-0000-000000000010",
+            "permissions": ["agent.tool.knowledge_base.search"],
+            "role": "employee",
+        }
+    )
+
+    assert request.permissions == ["agent.tool.knowledge_base.search"]
+
+
+def test_member_permission_overrides_can_grant_file_extraction_only_to_one_member() -> None:
+    overrides = _permission_overrides(
+        "employee",
+        ["knowledge.read", "agent.tool.knowledge_file.extract"],
+    )
+
+    assert {
+        (item["effect"], item["permission"])
+        for item in overrides
+    } >= {
+        ("grant", "agent.tool.knowledge_file.extract"),
+        ("deny", "agent.tool.knowledge_base.search"),
+    }
 
 
 def test_create_request_defaults_permissions_to_role_baseline() -> None:

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import Collection
 from typing import Any, Literal
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from app.api.routes.products import search_products
 from app.core.auth import AuthenticatedUser
 from app.core.config import get_settings
 from app.core.knowledge_access import require_knowledge_base_permission
+from app.core.permissions import AGENT_TOOL_PERMISSION_CODES
 from app.db.session import get_db_connection
 from app.services.document_parsing import paginate_parsed_document, parse_document
 from app.services.storage import (
@@ -162,6 +164,7 @@ def agent_tool_definitions(
     *,
     include_knowledge_base: bool = True,
     include_knowledge_base_search: bool | None = None,
+    allowed_tool_permissions: Collection[str] | None = None,
 ) -> list[dict[str, Any]]:
     definitions = [
         {
@@ -273,13 +276,28 @@ def agent_tool_definitions(
                     "name": "searchKnowledgeBaseTool",
                     "description": (
                         "Search one authorized knowledge base using semantic search. "
-                        "Only use a knowledgeBaseId that the current user is allowed to read."
+                        "Rewrite the latest request and relevant conversation context "
+                        "into a concise standalone natural-language query in the user's "
+                        "language. Preserve names, numbers, dates, and constraints; do "
+                        "not invent missing facts. Only use a knowledgeBaseId that the "
+                        "current user is allowed to read."
                     ),
                     "parameters": KnowledgeBaseToolInput.model_json_schema(),
                 },
             },
         )
-    return definitions
+    if allowed_tool_permissions is None:
+        return definitions
+
+    allowed_permissions = set(allowed_tool_permissions)
+    return [
+        definition
+        for definition in definitions
+        if AGENT_TOOL_PERMISSION_CODES.get(
+            str(definition.get("function", {}).get("name"))
+        )
+        in allowed_permissions
+    ]
 
 
 def _response_payload(response: object) -> dict[str, Any]:
@@ -320,9 +338,19 @@ async def execute_agent_tool(
     current_user: AuthenticatedUser,
     workspace_id: UUID,
     can_query_knowledge: bool,
+    allowed_tool_permissions: Collection[str],
 ) -> dict[str, Any]:
     if not can_query_knowledge:
         raise AgentToolError("The current user is not allowed to query enterprise knowledge.")
+
+    required_permission = AGENT_TOOL_PERMISSION_CODES.get(name)
+    if required_permission is None:
+        raise AgentToolError(f"Unknown agent tool: {name}")
+    if required_permission not in allowed_tool_permissions:
+        raise AgentToolError(
+            f"The current user is not allowed to use the {name} agent tool.",
+            status_code=403,
+        )
 
     try:
         if name == "searchProductsTool":

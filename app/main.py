@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,16 +13,23 @@ from app.core.rate_limit import RateLimitMiddleware
 from app.core.request_context import REQUEST_ID_HEADER, RequestContextMiddleware
 from app.db.errors import DatabaseServiceError
 from app.db.session import get_engine
+from app.services.agent_trace import configure_agent_trace_file_logging
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     validate_runtime_settings(settings)
 
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        configure_agent_trace_file_logging(settings)
+        yield
+
     application = FastAPI(
         title=settings.app_name,
         version="0.1.0",
         description="Backend service for the Asianode Agent platform.",
+        lifespan=lifespan,
     )
     application.add_middleware(
         CORSMiddleware,

@@ -1,7 +1,8 @@
 import json
 import logging
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection
+from time import monotonic
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -21,6 +22,7 @@ from app.core.dev_identity import (
     ensure_development_identity,
     get_persistence_user_id,
 )
+from app.core.knowledge_access import require_knowledge_base_permission
 from app.core.workspace_access import require_workspace_permission
 from app.db.session import get_db_connection
 from app.services.agent_tools import (
@@ -28,12 +30,26 @@ from app.services.agent_tools import (
     agent_tool_definitions,
     execute_agent_tool,
 )
+from app.services.agent_trace import (
+    agent_tool_trace_context,
+    summarize_tool_output,
+    trace_event,
+)
 from app.services.resumable_streams import get_resumable_stream_store
 
 router = APIRouter(tags=["chat"])
 logger = logging.getLogger(__name__)
 
 MAX_CHAT_TOOL_STEPS = 10
+KNOWLEDGE_BASE_SCOPED_TOOLS = frozenset(
+    {
+        "searchKnowledgeBaseTool",
+        "listKnowledgeFilesTool",
+        "getKnowledgeBaseTool",
+        "getKnowledgeFileTool",
+        "extractKnowledgeFileTool",
+    }
+)
 FINAL_SUMMARY_SYSTEM_PROMPT = (
     "Tool execution is complete. Provide the final answer to the user now. "
     "Synthesize the available tool results, state important limitations, and give "
@@ -44,6 +60,27 @@ FINAL_SUMMARY_SYSTEM_PROMPT = (
     "When the user named source files, use only results returned for those files. "
     "Do not call tools, emit DSML/XML/tool syntax, describe internal reasoning, "
     "or say that you are about to search."
+)
+RESPONSE_LANGUAGE_SYSTEM_PROMPT = (
+    "Response language policy: If the user has explicitly requested a response "
+    "language at any point in the active conversation, follow that language until "
+    "the user changes it. Otherwise, answer in the language of the latest user "
+    "message. If that message uses multiple languages without specifying a "
+    "response language, use its dominant language. Apply this policy to every "
+    "user-facing answer, including answers synthesized after tool calls. Keep "
+    "proper names, technical terms, code, and direct quotations in their original "
+    "form when appropriate, but use the requested or inferred language for "
+    "explanations. Do not switch response language because retrieved documents "
+    "or tool results use another language."
+)
+KNOWLEDGE_SEARCH_SYSTEM_PROMPT = (
+    "When the user asks a question that depends on uploaded knowledge files, use "
+    "searchKnowledgeBaseTool before answering. Rewrite the user's request as a "
+    "standalone natural-language search query using relevant conversation context. "
+    "Preserve the user's language, names, numbers, dates, and constraints; do not "
+    "invent missing facts. Use existing structured business search tools for "
+    "supplier, product, price, and content-operation records. Treat retrieved "
+    "passages as evidence and cite their source file and location in the final answer."
 )
 
 
@@ -61,10 +98,16 @@ class UIMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     message: UIMessage | None = None
     messages: list[UIMessage] | None = None
     selectedChatModel: str | None = None
+    selected_knowledge_base_id: UUID | None = Field(
+        default=None,
+        alias="selectedKnowledgeBaseId",
+    )
     selectedVisibilityType: Literal["public", "private"] | None = None
 
 
@@ -369,12 +412,70 @@ async def stream_chat(
     include_knowledge_base_tool: bool,
     provider_timeout_seconds: float = 60.0,
     on_complete: Callable[[str, str], Awaitable[None]] | None = None,
+    selected_knowledge_base_id: UUID | None = None,
+    trace_settings: Settings | None = None,
+    allowed_tool_permissions: Collection[str] = (),
 ) -> AsyncIterator[str]:
+    trace_settings = trace_settings or get_settings()
     assistant_message_id = str(uuid4())
     assistant_text: list[str] = []
     conversation = to_openai_messages(payload)
+    available_tool_definitions = (
+        agent_tool_definitions(
+            include_knowledge_base=True,
+            include_knowledge_base_search=include_knowledge_base_tool,
+            allowed_tool_permissions=allowed_tool_permissions,
+        )
+        if can_query_knowledge
+        else []
+    )
+    available_tool_names = {
+        str(definition["function"]["name"])
+        for definition in available_tool_definitions
+    }
+    system_messages: list[dict[str, str]] = [
+        {"role": "system", "content": RESPONSE_LANGUAGE_SYSTEM_PROMPT}
+    ]
+    if (
+        can_query_knowledge
+        and include_knowledge_base_tool
+        and "searchKnowledgeBaseTool" in available_tool_names
+    ):
+        knowledge_prompt = KNOWLEDGE_SEARCH_SYSTEM_PROMPT
+        if selected_knowledge_base_id is not None:
+            knowledge_prompt += (
+                " The user selected knowledge base "
+                f"{selected_knowledge_base_id}; search only that knowledge base."
+            )
+        else:
+            if "listKnowledgeBasesTool" in available_tool_names:
+                knowledge_prompt += (
+                    " No knowledge base was selected. For a knowledge-file question, "
+                    "use listKnowledgeBasesTool to choose an authorized relevant base "
+                    "before semantic search."
+                )
+            else:
+                knowledge_prompt += (
+                    " No knowledge base was selected and the current user cannot list "
+                    "available bases. Do not attempt semantic search; ask the user to "
+                    "select an authorized knowledge base."
+                )
+        system_messages.append({"role": "system", "content": knowledge_prompt})
     tool_step_count = 0
     summary_retry_count = 0
+
+    trace_event(
+        trace_settings,
+        "agent_stream_started",
+        request_id=request_id,
+        chat_id=payload.id,
+        model=resolve_chat_model(payload.selectedChatModel, model),
+        message_count=len(conversation),
+        available_tools=sorted(available_tool_names),
+        knowledge_base_id=(
+            str(selected_knowledge_base_id) if selected_knowledge_base_id else None
+        ),
+    )
 
     yield sse_chunk({"type": "start", "messageId": assistant_message_id})
     yield sse_chunk({"type": "text-start", "id": assistant_message_id})
@@ -391,10 +492,11 @@ async def stream_chat(
                     or step == MAX_CHAT_TOOL_STEPS
                 )
                 remaining_tool_steps = MAX_CHAT_TOOL_STEPS - tool_step_count
-                request_messages = conversation
+                request_messages = [*system_messages, *conversation]
                 if is_final_summary_step:
                     request_messages = [
                         {"role": "system", "content": FINAL_SUMMARY_SYSTEM_PROMPT},
+                        *system_messages,
                         *conversation,
                     ]
                 request_body: dict[str, Any] = {
@@ -404,10 +506,7 @@ async def stream_chat(
                 }
                 allowed_tool_names: set[str] = set()
                 if can_query_knowledge and not is_final_summary_step:
-                    tool_definitions = agent_tool_definitions(
-                        include_knowledge_base=True,
-                        include_knowledge_base_search=include_knowledge_base_tool,
-                    )
+                    tool_definitions = available_tool_definitions
                     request_body["tools"] = tool_definitions
                     request_body["tool_choice"] = "auto"
                     allowed_tool_names = {
@@ -427,8 +526,22 @@ async def stream_chat(
                                 "any tool call markup."
                             ),
                         },
+                        *system_messages,
                         *conversation,
                     ]
+
+                trace_event(
+                    trace_settings,
+                    "model_request_started",
+                    request_id=request_id,
+                    chat_id=payload.id,
+                    step=step + 1,
+                    model=request_body["model"],
+                    message_count=len(request_body["messages"]),
+                    tools_enabled=bool(request_body.get("tools")),
+                    tool_names=sorted(allowed_tool_names),
+                    final_summary=is_final_summary_step,
+                )
 
                 tool_calls: dict[int, dict[str, str]] = {}
                 allowed_tool_call_indexes: set[int] = set()
@@ -443,6 +556,14 @@ async def stream_chat(
                 ) as response:
                     if response.status_code >= 400:
                         detail = (await response.aread()).decode("utf-8", errors="replace")
+                        trace_event(
+                            trace_settings,
+                            "model_provider_request_failed",
+                            request_id=request_id,
+                            chat_id=payload.id,
+                            step=step + 1,
+                            status_code=response.status_code,
+                        )
                         yield sse_chunk(
                             {
                                 "type": "error",
@@ -560,6 +681,19 @@ async def stream_chat(
                         "content_has_dsml": has_dsml_control_text,
                     },
                 )
+                trace_event(
+                    trace_settings,
+                    "model_response_step_completed",
+                    request_id=request_id,
+                    chat_id=payload.id,
+                    step=step + 1,
+                    finish_reason=provider_finish_reason,
+                    content_characters=len(step_content),
+                    returned_tool_names=[
+                        call["name"] for call in tool_calls.values() if call["name"]
+                    ],
+                    content_had_tool_markup=has_dsml_control_text,
+                )
                 if not tool_calls and has_dsml_control_text:
                     dsml_tool_calls = _parse_dsml_tool_calls(
                         step_content,
@@ -599,6 +733,13 @@ async def stream_chat(
                             summary_retry_count += 1
                             tool_step_count = MAX_CHAT_TOOL_STEPS
                             continue
+                        trace_event(
+                            trace_settings,
+                            "agent_stream_failed",
+                            request_id=request_id,
+                            chat_id=payload.id,
+                            failure_kind="invalid_model_tool_markup",
+                        )
                         yield sse_chunk(
                             {
                                 "type": "error",
@@ -628,6 +769,13 @@ async def stream_chat(
                     if summary_retry_count < 1:
                         summary_retry_count += 1
                         continue
+                    trace_event(
+                        trace_settings,
+                        "agent_stream_failed",
+                        request_id=request_id,
+                        chat_id=payload.id,
+                        failure_kind="tool_call_during_final_summary",
+                    )
                     yield sse_chunk(
                         {
                             "type": "error",
@@ -643,6 +791,22 @@ async def stream_chat(
                 ordered_tool_calls = ordered_tool_calls[:remaining_tool_steps]
                 if not ordered_tool_calls:
                     break
+                if selected_knowledge_base_id is not None:
+                    for tool_call in ordered_tool_calls:
+                        if tool_call["name"] not in KNOWLEDGE_BASE_SCOPED_TOOLS:
+                            continue
+                        try:
+                            arguments = json.loads(tool_call["arguments"] or "{}")
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(arguments, dict):
+                            arguments["knowledgeBaseId"] = str(
+                                selected_knowledge_base_id
+                            )
+                            tool_call["arguments"] = json.dumps(
+                                arguments,
+                                ensure_ascii=False,
+                            )
                 tool_step_count += len(ordered_tool_calls)
                 conversation.append(
                     {
@@ -666,30 +830,67 @@ async def stream_chat(
                 )
                 for tool_call in ordered_tool_calls:
                     parsed_arguments: dict[str, Any]
-                    try:
-                        raw_arguments = json.loads(tool_call["arguments"] or "{}")
-                        if not isinstance(raw_arguments, dict):
-                            raise AgentToolError("Tool arguments must be a JSON object.")
-                        parsed_arguments = raw_arguments
-                        output = await execute_agent_tool(
-                            tool_call["name"],
-                            parsed_arguments,
-                            can_query_knowledge=can_query_knowledge,
-                            current_user=current_user,
-                            workspace_id=workspace_id,
+                    tool_started_at = monotonic()
+                    output: dict[str, Any]
+                    with agent_tool_trace_context(
+                        trace_settings,
+                        request_id=request_id,
+                        chat_id=payload.id,
+                        tool_name=tool_call["name"],
+                    ):
+                        try:
+                            raw_arguments = json.loads(tool_call["arguments"] or "{}")
+                            if not isinstance(raw_arguments, dict):
+                                raise AgentToolError(
+                                    "Tool arguments must be a JSON object."
+                                )
+                            parsed_arguments = raw_arguments
+                            trace_event(
+                                trace_settings,
+                                "agent_tool_call_started",
+                                tool_call_id=tool_call["id"],
+                                tool_arguments=parsed_arguments,
+                            )
+                            output = await execute_agent_tool(
+                                tool_call["name"],
+                                parsed_arguments,
+                                can_query_knowledge=can_query_knowledge,
+                                allowed_tool_permissions=allowed_tool_permissions,
+                                current_user=current_user,
+                                workspace_id=workspace_id,
+                            )
+                        except (AgentToolError, json.JSONDecodeError) as error:
+                            parsed_arguments = {}
+                            output = {"error": str(error)}
+                            trace_event(
+                                trace_settings,
+                                "agent_tool_call_failed",
+                                tool_call_id=tool_call["id"],
+                                error_type=type(error).__name__,
+                                error=str(error),
+                            )
+                        except Exception as error:
+                            logger.exception(
+                                "Agent tool execution failed",
+                                extra={
+                                    "tool_name": tool_call["name"],
+                                    "tool_call_id": tool_call["id"],
+                                },
+                            )
+                            output = {"error": "The agent tool could not be completed."}
+                            trace_event(
+                                trace_settings,
+                                "agent_tool_call_failed",
+                                tool_call_id=tool_call["id"],
+                                error_type=type(error).__name__,
+                            )
+                        trace_event(
+                            trace_settings,
+                            "agent_tool_call_completed",
+                            tool_call_id=tool_call["id"],
+                            elapsed_ms=round((monotonic() - tool_started_at) * 1000),
+                            result=summarize_tool_output(tool_call["name"], output),
                         )
-                    except (AgentToolError, json.JSONDecodeError) as error:
-                        parsed_arguments = {}
-                        output = {"error": str(error)}
-                    except Exception:
-                        logger.exception(
-                            "Agent tool execution failed",
-                            extra={
-                                "tool_name": tool_call["name"],
-                                "tool_call_id": tool_call["id"],
-                            },
-                        )
-                        output = {"error": "The agent tool could not be completed."}
                     yield sse_chunk(
                         {
                             "type": "tool-input-available",
@@ -715,12 +916,29 @@ async def stream_chat(
                         }
                     )
 
+        trace_event(
+            trace_settings,
+            "agent_stream_completed",
+            request_id=request_id,
+            chat_id=payload.id,
+            tool_call_count=tool_step_count,
+            final_answer_characters=sum(len(part) for part in assistant_text),
+            completion_status="completed",
+        )
         yield sse_chunk({"type": "text-end", "id": assistant_message_id})
         yield sse_chunk({"type": "finish", "finishReason": "stop"})
         if on_complete and assistant_text:
             await on_complete(assistant_message_id, "".join(assistant_text))
     except httpx.HTTPError as error:
         provider_error = _provider_error_message(error)
+        trace_event(
+            trace_settings,
+            "agent_stream_failed",
+            request_id=request_id,
+            chat_id=payload.id,
+            failure_kind="model_provider_connection_error",
+            error_type=type(error).__name__,
+        )
         logger.warning(
             "Model provider request failed",
             extra={"error_type": type(error).__name__, "provider_error": provider_error},
@@ -744,6 +962,27 @@ async def chat(
     settings = get_settings()
     messages = to_openai_messages(payload)
 
+    user_messages = payload.messages or ([payload.message] if payload.message else [])
+    latest_user_message = next(
+        (message for message in reversed(user_messages) if message.role == "user"),
+        None,
+    )
+    latest_user_question = get_text(latest_user_message) if latest_user_message else ""
+    trace_event(
+        settings,
+        "chat_request_received",
+        request_id=request_id,
+        chat_id=payload.id,
+        user_question_preview=latest_user_question,
+        user_question_characters=len(latest_user_question),
+        message_count=len(messages),
+        selected_knowledge_base_id=(
+            str(payload.selected_knowledge_base_id)
+            if payload.selected_knowledge_base_id
+            else None
+        ),
+    )
+
     if not messages:
         return error_response("A text message is required.", request_id, 400)
 
@@ -756,6 +995,14 @@ async def chat(
         effective_workspace_id,
         "chat.write",
     )
+    selected_knowledge_base_id = payload.selected_knowledge_base_id
+    if selected_knowledge_base_id is not None:
+        await require_knowledge_base_permission(
+            current_user,
+            effective_workspace_id,
+            selected_knowledge_base_id,
+            "read",
+        )
     selected_model = resolve_chat_model(payload.selectedChatModel, settings.chat_model)
     persistence = await _prepare_chat_persistence(
         payload,
@@ -782,6 +1029,9 @@ async def chat(
                 settings.knowledge_embeddings_enabled,
                 settings.chat_provider_timeout_seconds,
                 on_complete=persistence,
+                selected_knowledge_base_id=selected_knowledge_base_id,
+                trace_settings=settings,
+                allowed_tool_permissions=workspace_access.permissions,
             ),
         ),
         media_type="text/event-stream",

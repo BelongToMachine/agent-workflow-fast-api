@@ -303,6 +303,7 @@ def test_agent_provider_completes_a_bounded_direct_workflow() -> None:
             ),
             workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
             can_query_knowledge=False,
+            allowed_tool_permissions=(),
             include_knowledge_base_search=False,
             max_steps=1,
             timeout_seconds=float(

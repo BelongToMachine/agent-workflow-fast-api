@@ -78,13 +78,18 @@ async def query_agent(
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> AgentQueryResponse | JSONResponse:
-    await require_workspace_permission(current_user, workspace_id, "knowledge.read")
+    workspace_access = await require_workspace_permission(
+        current_user,
+        workspace_id,
+        "knowledge.read",
+    )
 
     try:
         result = await execute_agent_tool(
             payload.tool,
             payload.arguments,
             can_query_knowledge=True,
+            allowed_tool_permissions=workspace_access.permissions,
             current_user=current_user,
             workspace_id=workspace_id,
         )
@@ -131,6 +136,7 @@ async def run_agent(
             current_user=current_user,
             workspace_id=workspace_id,
             can_query_knowledge="knowledge.read" in workspace_access.permissions,
+            allowed_tool_permissions=workspace_access.permissions,
             include_knowledge_base_search=settings.knowledge_embeddings_enabled,
             max_steps=payload.max_steps,
             timeout_seconds=settings.chat_provider_timeout_seconds,

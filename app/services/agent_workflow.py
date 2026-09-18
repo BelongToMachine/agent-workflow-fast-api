@@ -1,4 +1,5 @@
 import json
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -95,6 +96,7 @@ async def _run_with_client(
     current_user: AuthenticatedUser,
     workspace_id: UUID,
     can_query_knowledge: bool,
+    allowed_tool_permissions: Collection[str],
     include_knowledge_base_search: bool,
     max_steps: int,
     timeout_seconds: float,
@@ -104,6 +106,7 @@ async def _run_with_client(
     tools = agent_tool_definitions(
         include_knowledge_base=can_query_knowledge,
         include_knowledge_base_search=include_knowledge_base_search,
+        allowed_tool_permissions=allowed_tool_permissions,
     )
     force_final_summary = False
 
@@ -203,6 +206,7 @@ async def _run_with_client(
                     tool_name,
                     arguments,
                     can_query_knowledge=can_query_knowledge,
+                    allowed_tool_permissions=allowed_tool_permissions,
                     current_user=current_user,
                     workspace_id=workspace_id,
                 )
@@ -247,6 +251,7 @@ async def run_agent_workflow(
     current_user: AuthenticatedUser,
     workspace_id: UUID,
     can_query_knowledge: bool,
+    allowed_tool_permissions: Collection[str],
     include_knowledge_base_search: bool,
     max_steps: int = MAX_AGENT_TOOL_STEPS,
     timeout_seconds: float = 60.0,
@@ -262,6 +267,7 @@ async def run_agent_workflow(
             current_user=current_user,
             workspace_id=workspace_id,
             can_query_knowledge=can_query_knowledge,
+            allowed_tool_permissions=allowed_tool_permissions,
             include_knowledge_base_search=include_knowledge_base_search,
             max_steps=max_steps,
             timeout_seconds=timeout_seconds,
@@ -277,6 +283,7 @@ async def run_agent_workflow(
             current_user=current_user,
             workspace_id=workspace_id,
             can_query_knowledge=can_query_knowledge,
+            allowed_tool_permissions=allowed_tool_permissions,
             include_knowledge_base_search=include_knowledge_base_search,
             max_steps=max_steps,
             timeout_seconds=timeout_seconds,

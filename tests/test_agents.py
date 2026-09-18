@@ -16,6 +16,7 @@ from app.api.routes.agents import (
 )
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
+from app.core.permissions import AGENT_TOOL_PERMISSION_CATALOG
 from app.main import app
 from app.services.agent_tools import AgentToolError
 from app.services.agent_workflow import (
@@ -172,6 +173,7 @@ def test_independent_agent_workflow_executes_authorized_tools_then_answers(monke
             ),
             workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
             can_query_knowledge=True,
+            allowed_tool_permissions=("agent.tool.knowledge_bases.list",),
             include_knowledge_base_search=False,
             client=provider,
         )
@@ -181,6 +183,11 @@ def test_independent_agent_workflow_executes_authorized_tools_then_answers(monke
     assert result.steps == 3
     assert result.tool_calls[0].tool == "listKnowledgeBasesTool"
     assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
+    assert captured["allowed_tool_permissions"] == ("agent.tool.knowledge_bases.list",)
+    assert [
+        definition["function"]["name"]
+        for definition in provider.requests[0]["json"]["tools"]
+    ] == ["listKnowledgeBasesTool"]
     assert provider.requests[0]["json"]["tools"]
     assert provider.requests[1]["json"]["messages"][-2:] == [
         {
@@ -259,6 +266,7 @@ def test_independent_agent_workflow_finalizes_after_the_configured_tool_limit(mo
             ),
             workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
             can_query_knowledge=True,
+            allowed_tool_permissions=AGENT_TOOL_PERMISSION_CATALOG,
             include_knowledge_base_search=False,
             max_steps=1,
             client=provider,
@@ -275,7 +283,9 @@ def test_agent_run_route_keeps_workspace_and_permission_context(monkeypatch) -> 
     captured: dict[str, object] = {}
 
     async def fake_require_workspace_permission(*args, **kwargs):
-        return SimpleNamespace(permissions=["knowledge.read"])
+        return SimpleNamespace(
+            permissions=["knowledge.read", "agent.tool.knowledge_bases.list"]
+        )
 
     async def fake_run_agent_workflow(**kwargs):
         captured.update(kwargs)
@@ -318,6 +328,10 @@ def test_agent_run_route_keeps_workspace_and_permission_context(monkeypatch) -> 
     )
     assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
     assert captured["can_query_knowledge"] is True
+    assert captured["allowed_tool_permissions"] == [
+        "knowledge.read",
+        "agent.tool.knowledge_bases.list",
+    ]
 
 
 def test_agent_query_requires_authenticated_identity() -> None:
@@ -337,7 +351,9 @@ def test_agent_query_requires_authenticated_identity() -> None:
 
 def test_agent_query_maps_tool_errors_without_exposing_identity_controls(monkeypatch) -> None:
     async def fake_require_workspace_permission(*args, **kwargs):
-        return SimpleNamespace(permissions=["knowledge.read"])
+        return SimpleNamespace(
+            permissions=["knowledge.read", "agent.tool.knowledge_base.search"]
+        )
 
     captured: dict[str, object] = {}
 
@@ -374,4 +390,8 @@ def test_agent_query_maps_tool_errors_without_exposing_identity_controls(monkeyp
         b'knowledge base.","tool":"searchKnowledgeBaseTool"}'
     )
     assert captured["can_query_knowledge"] is True
+    assert captured["allowed_tool_permissions"] == [
+        "knowledge.read",
+        "agent.tool.knowledge_base.search",
+    ]
     assert captured["current_user"].user_id == "00000000-0000-0000-0000-000000000010"

@@ -33,6 +33,20 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("DEBUG", "ASIANODE_DEBUG"),
     )
+    agent_trace_logging_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "AGENT_TRACE_LOGGING_ENABLED",
+            "ASIANODE_AGENT_TRACE_LOGGING_ENABLED",
+        ),
+    )
+    agent_trace_log_file: str = Field(
+        default="storage/logs/agent-trace.log",
+        validation_alias=AliasChoices(
+            "AGENT_TRACE_LOG_FILE",
+            "ASIANODE_AGENT_TRACE_LOG_FILE",
+        ),
+    )
     deepseek_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("DEEPSEEK_API_KEY", "ASIANODE_DEEPSEEK_API_KEY"),
@@ -44,6 +58,27 @@ class Settings(BaseSettings):
     chat_model: str = Field(
         default="deepseek-chat",
         validation_alias=AliasChoices("CHAT_MODEL", "ASIANODE_CHAT_MODEL"),
+    )
+    business_import_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "BUSINESS_IMPORT_API_KEY",
+            "ASIANODE_BUSINESS_IMPORT_API_KEY",
+        ),
+    )
+    business_import_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "BUSINESS_IMPORT_BASE_URL",
+            "ASIANODE_BUSINESS_IMPORT_BASE_URL",
+        ),
+    )
+    business_import_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "BUSINESS_IMPORT_MODEL",
+            "ASIANODE_BUSINESS_IMPORT_MODEL",
+        ),
     )
     chat_provider_timeout_seconds: float = Field(
         default=60.0,
@@ -435,6 +470,14 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    def resolved_business_import_provider(self) -> tuple[str | None, str, str]:
+        """Prefer a dedicated import model while retaining current chat defaults."""
+        return (
+            self.business_import_api_key or self.deepseek_api_key,
+            self.business_import_base_url or self.deepseek_base_url,
+            self.business_import_model or self.chat_model,
+        )
 
 
 @lru_cache

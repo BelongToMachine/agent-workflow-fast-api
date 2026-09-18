@@ -245,6 +245,13 @@ def test_development_token_endpoint_supports_employee_role_with_knowledge_read_a
         "chat.delete",
         "document.read",
         "document.write",
+        "agent.tool.products.search",
+        "agent.tool.content.search",
+        "agent.tool.knowledge_bases.list",
+        "agent.tool.knowledge_files.list",
+        "agent.tool.knowledge_base.read",
+        "agent.tool.knowledge_file.read",
+        "agent.tool.knowledge_base.search",
     ]
 
 

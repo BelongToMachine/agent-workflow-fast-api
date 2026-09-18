@@ -59,6 +59,13 @@ def test_effective_permissions_apply_role_defaults_and_overrides() -> None:
         "chat.read",
         "document.read",
         "audit.read",
+        "agent.tool.products.search",
+        "agent.tool.content.search",
+        "agent.tool.knowledge_bases.list",
+        "agent.tool.knowledge_files.list",
+        "agent.tool.knowledge_base.read",
+        "agent.tool.knowledge_file.read",
+        "agent.tool.knowledge_base.search",
     ]
     assert memberships[0].overrides[0].permission == "audit.read"
 
@@ -99,4 +106,11 @@ def test_employee_role_can_read_knowledge_but_not_manage_it() -> None:
         "chat.delete",
         "document.read",
         "document.write",
+        "agent.tool.products.search",
+        "agent.tool.content.search",
+        "agent.tool.knowledge_bases.list",
+        "agent.tool.knowledge_files.list",
+        "agent.tool.knowledge_base.read",
+        "agent.tool.knowledge_file.read",
+        "agent.tool.knowledge_base.search",
     ]

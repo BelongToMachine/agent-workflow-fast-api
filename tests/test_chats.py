@@ -34,6 +34,7 @@ from app.api.routes.chats import (
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
 from app.core.dev_identity import DEV_USER_ID
+from app.core.permissions import AGENT_TOOL_PERMISSION_CATALOG
 from app.main import app
 
 client = TestClient(app)
@@ -375,6 +376,7 @@ def test_chat_request_keeps_tool_parts_for_model_and_persistence() -> None:
                 "role": "user",
             },
             "selectedChatModel": "deepseek-chat",
+            "selectedKnowledgeBaseId": "00000000-0000-0000-0000-000000000002",
             "selectedVisibilityType": "private",
         }
     )
@@ -390,6 +392,9 @@ def test_chat_request_keeps_tool_parts_for_model_and_persistence() -> None:
             "url": "https://example.com/brief.png",
         }
     ]
+    assert str(payload.selected_knowledge_base_id) == (
+        "00000000-0000-0000-0000-000000000002"
+    )
 
 
 def test_chat_converts_supported_image_parts_to_openai_multimodal_content() -> None:
@@ -787,6 +792,110 @@ def test_chat_route_falls_back_when_client_submits_an_unlisted_model(monkeypatch
     assert captured["model"] == "deepseek-chat"
 
 
+def test_chat_route_authorizes_selected_knowledge_base_before_streaming(
+    monkeypatch,
+    caplog,
+) -> None:
+    captured: dict[str, object] = {}
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+
+    async def fake_require_workspace_permission(*_args, **_kwargs):
+        return SimpleNamespace(permissions=["chat.write", "knowledge.read"])
+
+    async def fake_require_knowledge_base_permission(
+        current_user,
+        workspace_id,
+        selected_id,
+        permission,
+    ):
+        captured["permission_check"] = (
+            current_user.user_id,
+            workspace_id,
+            selected_id,
+            permission,
+        )
+
+    async def fake_prepare_chat_persistence(*_args, **_kwargs):
+        return None
+
+    def fake_stream_chat(*args, **kwargs):
+        captured["selected_knowledge_base_id"] = kwargs.get(
+            "selected_knowledge_base_id"
+        )
+
+        async def source():
+            yield "data: done\n\n"
+
+        return source()
+
+    class FakeStreamStore:
+        def capture(self, _chat_id, source):
+            return source
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_settings",
+        lambda: Settings(
+            environment="development",
+            agent_trace_logging_enabled=True,
+            deepseek_api_key="test-key",
+            chat_model="deepseek-chat",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.require_workspace_permission",
+        fake_require_workspace_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.require_knowledge_base_permission",
+        fake_require_knowledge_base_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat._prepare_chat_persistence",
+        fake_prepare_chat_persistence,
+    )
+    monkeypatch.setattr("app.api.routes.chat.stream_chat", fake_stream_chat)
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_resumable_stream_store",
+        lambda *_args: FakeStreamStore(),
+    )
+
+    with caplog.at_level("INFO", logger="app.agent_trace"):
+        response = asyncio.run(
+            chat(
+                ChatRequest(
+                    id="00000000-0000-0000-0000-000000000010",
+                    message={
+                        "parts": [
+                            {
+                                "text": "Search the handbook; api_key=secret-test",
+                                "type": "text",
+                            }
+                        ],
+                        "role": "user",
+                    },
+                    selectedKnowledgeBaseId=str(knowledge_base_id),
+                ),
+                request=Request({"type": "http", "headers": []}),
+                workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+                current_user=AuthenticatedUser(
+                    user_id="development-user", is_development=True
+                ),
+            )
+        )
+
+    assert response.status_code == 200
+    assert captured["permission_check"] == (
+        "development-user",
+        UUID("00000000-0000-0000-0000-000000000001"),
+        knowledge_base_id,
+        "read",
+    )
+    assert captured["selected_knowledge_base_id"] == knowledge_base_id
+    assert '"event":"chat_request_received"' in caplog.text
+    assert "Search the handbook" in caplog.text
+    assert "secret-test" not in caplog.text
+
+
 class FakeSseResponse:
     status_code = 200
 
@@ -873,6 +982,17 @@ def test_stream_chat_forwards_provider_text_deltas_incrementally(monkeypatch) ->
         ]
 
     chunks = asyncio.run(collect())
+    system_prompts = [
+        message["content"]
+        for message in provider.requests[0]["json"]["messages"]
+        if message["role"] == "system"
+    ]
+    response_language_prompt = " ".join(system_prompts).lower()
+
+    assert "explicitly requested a response language" in response_language_prompt
+    assert "latest user message" in response_language_prompt
+    assert "tool results" in response_language_prompt
+
     text_deltas = [
         json.loads(chunk.removeprefix("data: "))["delta"]
         for chunk in chunks
@@ -884,7 +1004,222 @@ def test_stream_chat_forwards_provider_text_deltas_incrementally(monkeypatch) ->
     assert completed["text"] == "First second."
 
 
-def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(monkeypatch) -> None:
+def test_stream_chat_adds_trusted_knowledge_scope_and_query_rewrite_policy(
+    monkeypatch,
+) -> None:
+    provider = FakeStreamingClient(
+        [
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps({"choices": [{"delta": {"content": "Answer."}}]}),
+                    "data: [DONE]",
+                ]
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.httpx.AsyncClient",
+        lambda **_kwargs: provider,
+    )
+    selected_id = UUID("00000000-0000-0000-0000-000000000002")
+    payload = ChatRequest(
+        id="00000000-0000-0000-0000-000000000010",
+        message={"parts": [{"text": "What's our return policy?", "type": "text"}], "role": "user"},
+    )
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in stream_chat(
+                payload,
+                "request-knowledge-scope",
+                "test-key",
+                "https://provider.example/v1",
+                "deepseek-chat",
+                AuthenticatedUser(user_id="development-user", is_development=True),
+                UUID("00000000-0000-0000-0000-000000000001"),
+                True,
+                True,
+                allowed_tool_permissions=("agent.tool.knowledge_base.search",),
+                selected_knowledge_base_id=selected_id,
+            )
+        ]
+
+    asyncio.run(collect())
+
+    messages = provider.requests[0]["json"]["messages"]
+    assert [
+        tool["function"]["name"] for tool in provider.requests[0]["json"]["tools"]
+    ] == ["searchKnowledgeBaseTool"]
+    system_prompts = [
+        message["content"] for message in messages if message["role"] == "system"
+    ]
+    prompt = " ".join(system_prompts)
+    assert str(selected_id) in prompt
+    assert "standalone" in prompt.lower()
+    assert "preserve" in prompt.lower()
+
+
+def test_stream_chat_does_not_instruct_unavailable_knowledge_base_listing(
+    monkeypatch,
+) -> None:
+    provider = FakeStreamingClient(
+        [
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps({"choices": [{"delta": {"content": "Answer."}}]}),
+                    "data: [DONE]",
+                ]
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.httpx.AsyncClient",
+        lambda **_kwargs: provider,
+    )
+    payload = ChatRequest(
+        id="00000000-0000-0000-0000-000000000010",
+        message={"parts": [{"text": "Search the knowledge base", "type": "text"}], "role": "user"},
+    )
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in stream_chat(
+                payload,
+                "request-restricted-knowledge-tools",
+                "test-key",
+                "https://provider.example/v1",
+                "deepseek-chat",
+                AuthenticatedUser(user_id="development-user", is_development=True),
+                UUID("00000000-0000-0000-0000-000000000001"),
+                True,
+                True,
+                allowed_tool_permissions=("agent.tool.knowledge_base.search",),
+            )
+        ]
+
+    asyncio.run(collect())
+
+    prompt = " ".join(
+        message["content"]
+        for message in provider.requests[0]["json"]["messages"]
+        if message["role"] == "system"
+    )
+    tool_names = [
+        tool["function"]["name"] for tool in provider.requests[0]["json"]["tools"]
+    ]
+    assert "cannot list available bases" in prompt
+    assert tool_names == ["searchKnowledgeBaseTool"]
+
+
+def test_stream_chat_enforces_selected_knowledge_base_for_search_tool(monkeypatch) -> None:
+    provider = FakeStreamingClient(
+        [
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "tool_calls": [
+                                            {
+                                                "index": 0,
+                                                "id": "search-call",
+                                                "function": {
+                                                    "name": "searchKnowledgeBaseTool",
+                                                    "arguments": (
+                                                        '{"knowledgeBaseId":"'
+                                                        '00000000-0000-0000-0000-'
+                                                        '000000000099","query":"policy"}'
+                                                    ),
+                                                },
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ),
+                    "data: [DONE]",
+                ]
+            ),
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps({"choices": [{"delta": {"content": "Found it."}}]}),
+                    "data: [DONE]",
+                ]
+            ),
+            FakeSseResponse(
+                [
+                    "data: "
+                    + json.dumps({"choices": [{"delta": {"content": "Final answer."}}]}),
+                    "data: [DONE]",
+                ]
+            ),
+        ]
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent_tool(_name, arguments, **_kwargs):
+        captured.update(arguments)
+        return {"results": []}
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.httpx.AsyncClient",
+        lambda **_kwargs: provider,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.execute_agent_tool",
+        fake_execute_agent_tool,
+    )
+    selected_id = UUID("00000000-0000-0000-0000-000000000002")
+    payload = ChatRequest(
+        id="00000000-0000-0000-0000-000000000010",
+        message={"parts": [{"text": "Search our return policy", "type": "text"}], "role": "user"},
+    )
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in stream_chat(
+                payload,
+                "request-enforce-knowledge-scope",
+                "test-key",
+                "https://provider.example/v1",
+                "deepseek-chat",
+                AuthenticatedUser(user_id="development-user", is_development=True),
+                UUID("00000000-0000-0000-0000-000000000001"),
+                True,
+                True,
+                allowed_tool_permissions=AGENT_TOOL_PERMISSION_CATALOG,
+                selected_knowledge_base_id=selected_id,
+            )
+        ]
+
+    asyncio.run(collect())
+
+    assert captured["knowledgeBaseId"] == str(selected_id)
+    assert captured["query"] == "policy"
+    provider_tool_call = next(
+        message
+        for message in provider.requests[1]["json"]["messages"]
+        if message.get("tool_calls")
+    )["tool_calls"][0]
+    assert json.loads(provider_tool_call["function"]["arguments"])[
+        "knowledgeBaseId"
+    ] == str(selected_id)
+
+
+def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(
+    monkeypatch,
+    caplog,
+) -> None:
     provider = FakeStreamingClient(
         [
             FakeSseResponse(
@@ -992,10 +1327,16 @@ def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(mo
                 True,
                 False,
                 7.5,
+                allowed_tool_permissions=AGENT_TOOL_PERMISSION_CATALOG,
+                trace_settings=Settings(
+                    environment="development",
+                    agent_trace_logging_enabled=True,
+                ),
             )
         ]
 
-    chunks = asyncio.run(collect())
+    with caplog.at_level("INFO", logger="app.agent_trace"):
+        chunks = asyncio.run(collect())
 
     assert provider.timeout == 7.5
     assert captured["name"] == "listKnowledgeBasesTool"
@@ -1005,6 +1346,10 @@ def test_stream_chat_emits_sse_tool_events_and_continues_with_provider_answer(mo
     assert any('"type": "finish"' in chunk for chunk in chunks)
     assert provider.requests[0]["json"]["model"] == "deepseek-chat"
     assert provider.requests[1]["json"]["messages"][-1]["role"] == "tool"
+    assert '"event":"model_request_started"' in caplog.text
+    assert '"event":"agent_tool_call_started"' in caplog.text
+    assert '"event":"agent_tool_call_completed"' in caplog.text
+    assert '"result_count":0' in caplog.text
 
 
 def test_parse_dsml_tool_calls_accepts_provider_compatibility_format() -> None:
@@ -1136,6 +1481,7 @@ def test_stream_chat_parses_dsml_without_leaking_control_text(monkeypatch) -> No
                 UUID("00000000-0000-0000-0000-000000000001"),
                 True,
                 False,
+                allowed_tool_permissions=AGENT_TOOL_PERMISSION_CATALOG,
             )
         ]
 

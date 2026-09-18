@@ -1,5 +1,18 @@
 from collections.abc import Iterable
 
+AGENT_TOOL_PERMISSION_CODES = {
+    "searchProductsTool": "agent.tool.products.search",
+    "searchContentTool": "agent.tool.content.search",
+    "listKnowledgeBasesTool": "agent.tool.knowledge_bases.list",
+    "listKnowledgeFilesTool": "agent.tool.knowledge_files.list",
+    "getKnowledgeBaseTool": "agent.tool.knowledge_base.read",
+    "getKnowledgeFileTool": "agent.tool.knowledge_file.read",
+    "extractKnowledgeFileTool": "agent.tool.knowledge_file.extract",
+    "searchKnowledgeBaseTool": "agent.tool.knowledge_base.search",
+}
+
+AGENT_TOOL_PERMISSION_CATALOG = tuple(AGENT_TOOL_PERMISSION_CODES.values())
+
 PERMISSION_CATALOG = (
     "members.read",
     "members.manage",
@@ -11,6 +24,13 @@ PERMISSION_CATALOG = (
     "document.read",
     "document.write",
     "audit.read",
+    *AGENT_TOOL_PERMISSION_CATALOG,
+)
+
+_STANDARD_AGENT_TOOL_PERMISSIONS = tuple(
+    permission
+    for permission in AGENT_TOOL_PERMISSION_CATALOG
+    if permission != "agent.tool.knowledge_file.extract"
 )
 
 DEFAULT_PERMISSIONS_BY_ROLE = {
@@ -24,6 +44,7 @@ DEFAULT_PERMISSIONS_BY_ROLE = {
         "chat.delete",
         "document.read",
         "document.write",
+        *AGENT_TOOL_PERMISSION_CATALOG,
     ),
     "employee": (
         "knowledge.read",
@@ -32,12 +53,14 @@ DEFAULT_PERMISSIONS_BY_ROLE = {
         "chat.delete",
         "document.read",
         "document.write",
+        *_STANDARD_AGENT_TOOL_PERMISSIONS,
     ),
     "viewer": (
         "knowledge.read",
         "chat.read",
         "chat.write",
         "document.read",
+        *_STANDARD_AGENT_TOOL_PERMISSIONS,
     ),
 }
 

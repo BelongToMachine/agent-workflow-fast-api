@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from app.core.config import get_settings
 from app.core.request_context import get_request_context
 from app.db.errors import DatabaseServiceError, DatabaseTimeoutError, DatabaseUnavailableError
+from app.services.agent_trace import install_agent_database_trace
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def get_engine() -> AsyncEngine:
     if not postgres_url:
         raise DatabaseUnavailableError()
 
-    return create_async_engine(
+    engine = create_async_engine(
         normalize_postgres_url(postgres_url),
         connect_args={
             "command_timeout": settings.postgres_command_timeout_seconds,
@@ -48,6 +49,8 @@ def get_engine() -> AsyncEngine:
         pool_pre_ping=True,
         pool_timeout=settings.postgres_pool_timeout_seconds,
     )
+    install_agent_database_trace(engine, settings)
+    return engine
 
 
 @asynccontextmanager
