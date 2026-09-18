@@ -8,6 +8,7 @@ import {
   BrainIcon,
   EyeIcon,
   LockIcon,
+  LoaderCircleIcon,
   WrenchIcon,
 } from "lucide-react";
 import { useRouter } from "@/lib/router";
@@ -37,6 +38,7 @@ import {
   ModelSelectorName,
   ModelSelectorTrigger,
 } from "@/components/ai-elements/modelSelector";
+import { ComposerKnowledgeBaseSelector } from "@/components/chat/composerKnowledgeBaseSelector";
 import {
   type ChatModel,
   chatModels,
@@ -49,6 +51,8 @@ import {
   useBackendQuery,
 } from "@/lib/backend/reactQuery";
 import { requestBackend } from "@/lib/backend/request";
+import { isChatGenerationActive } from "@/lib/chatToolchain.mjs";
+import { resolveInitialKnowledgeBaseSelection } from "@/lib/knowledgeSearchScope.mjs";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn, getNewChatPath } from "@/lib/utils";
 import {
@@ -59,7 +63,7 @@ import {
 } from "../ai-elements/promptInput";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import { BotIcon, StopIcon } from "./icons";
+import { BotIcon } from "./icons";
 import { PreviewAttachment } from "./previewAttachment";
 import {
   type SlashCommand,
@@ -73,6 +77,17 @@ type ModelsResponse = Record<string, ModelCapabilities> & {
   capabilities?: Record<string, ModelCapabilities>;
   models?: ChatModel[];
 };
+
+type KnowledgeBase = {
+  displayName: string;
+  knowledgeBaseId: string;
+};
+
+type KnowledgeBaseListResponse = {
+  knowledgeBases: KnowledgeBase[];
+};
+
+const EMPTY_KNOWLEDGE_BASES: KnowledgeBase[] = [];
 
 function setCookie(name: string, value: string) {
   const maxAge = 60 * 60 * 24 * 365;
@@ -89,6 +104,8 @@ function isDesktopPointerDevice() {
 
 function PureMultimodalInput({
   chatId,
+  selectedKnowledgeBaseId,
+  onKnowledgeBaseChange,
   input,
   setInput,
   status,
@@ -107,6 +124,8 @@ function PureMultimodalInput({
   isLoading,
 }: {
   chatId: string;
+  selectedKnowledgeBaseId: string;
+  onKnowledgeBaseChange: (id: string) => void;
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
   status: UseChatHelpers<ChatMessage>["status"];
@@ -126,11 +145,45 @@ function PureMultimodalInput({
   onCancelEdit?: () => void;
   isLoading?: boolean;
 }) {
+  const isGenerating = isChatGenerationActive(status);
   const router = useRouter();
   const { setTheme, resolvedTheme } = useTheme();
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
+  const identity = useBackendIdentity();
+  const { data: knowledgeBaseData, isLoading: knowledgeBasesLoading } =
+    useBackendQuery<KnowledgeBaseListResponse>({
+      path: "/api/knowledge-bases",
+      queryKey: backendQueryKeys.knowledgeBases(identity),
+    });
+  const knowledgeBases =
+    knowledgeBaseData?.knowledgeBases ?? EMPTY_KNOWLEDGE_BASES;
+  const knowledgeBasesLoaded = !knowledgeBasesLoading;
+  const initializedScopeChatId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (
+      !knowledgeBasesLoaded ||
+      initializedScopeChatId.current === chatId
+    ) {
+      return;
+    }
+    initializedScopeChatId.current = chatId;
+    const initialSelection = resolveInitialKnowledgeBaseSelection(
+      knowledgeBases,
+      selectedKnowledgeBaseId
+    );
+    if (initialSelection !== selectedKnowledgeBaseId) {
+      onKnowledgeBaseChange(initialSelection);
+    }
+  }, [
+    chatId,
+    knowledgeBases,
+    knowledgeBasesLoaded,
+    onKnowledgeBaseChange,
+    selectedKnowledgeBaseId,
+  ]);
   const hasAutoFocused = useRef(false);
   useEffect(() => {
     // Do not auto-focus on touch devices: mobile browsers open the keyboard
@@ -563,31 +616,48 @@ function PureMultimodalInput({
           />
           <div className="flex shrink-0 items-center gap-2 px-3">
             <PromptInputTools className="ml-auto">
-              {/* Temporarily disabled until attachment selection is supported. */}
+              {knowledgeBases.length > 0 && (
+                <ComposerKnowledgeBaseSelector
+                  automaticLabel={t("chat.autoKnowledgeBase")}
+                  availableLabel={t("chat.available")}
+                  emptyMessage={t("chat.noKnowledgeBaseMatches")}
+                  knowledgeBases={knowledgeBases}
+                  label={t("chat.knowledgeBaseScope")}
+                  onChange={onKnowledgeBaseChange}
+                  searchPlaceholder={t("chat.searchKnowledgeBase")}
+                  selectedKnowledgeBaseId={selectedKnowledgeBaseId}
+                />
+              )}
               <ModelSelectorCompact
                 onModelChange={onModelChange}
                 selectedModelId={selectedModelId}
               />
             </PromptInputTools>
 
-            {status === "submitted" ? (
-              <StopButton setMessages={setMessages} stop={stop} />
-            ) : (
-              <PromptInputSubmit
-                className={cn(
-                  "size-11 rounded-2xl transition-all duration-200 md:size-7 md:rounded-xl",
-                  input.trim()
+            <PromptInputSubmit
+              aria-busy={isGenerating}
+              className={cn(
+                "size-11 rounded-2xl transition-all duration-200 md:size-7 md:rounded-xl",
+                isGenerating
+                  ? "bg-[var(--message-accent-background)] text-[var(--message-accent-foreground)] hover:opacity-85 active:scale-95"
+                  : input.trim()
                     ? "bg-[var(--message-accent-background)] text-[var(--message-accent-foreground)] hover:opacity-85 active:scale-95"
                     : "bg-muted text-muted-foreground/25 cursor-not-allowed"
-                )}
-                data-testid="send-button"
-                disabled={!input.trim() || uploadQueue.length > 0}
-                status={status}
-                variant="secondary"
-              >
+              )}
+              data-testid="send-button"
+              disabled={
+                !isGenerating && (!input.trim() || uploadQueue.length > 0)
+              }
+              onStop={stop}
+              status={status}
+              variant="secondary"
+            >
+              {isGenerating ? (
+                <LoaderCircleIcon className="size-4 animate-spin" />
+              ) : (
                 <ArrowUpIcon className="size-4" />
-              </PromptInputSubmit>
-            )}
+              )}
+            </PromptInputSubmit>
           </div>
         </div>
       </PromptInput>
@@ -598,6 +668,13 @@ function PureMultimodalInput({
 export const MultimodalInput = memo(
   PureMultimodalInput,
   (prevProps, nextProps) => {
+    if (
+      prevProps.chatId !== nextProps.chatId ||
+      prevProps.selectedKnowledgeBaseId !== nextProps.selectedKnowledgeBaseId ||
+      prevProps.onKnowledgeBaseChange !== nextProps.onKnowledgeBaseChange
+    ) {
+      return false;
+    }
     if (prevProps.input !== nextProps.input) {
       return false;
     }
@@ -780,18 +857,23 @@ function PureModelSelectorCompact({
     activeModels[0];
   return (
     <ModelSelector onOpenChange={setOpen} open={open}>
-      <ModelSelectorTrigger asChild>
-        <Button
-          aria-label={t("chat.selectModel")}
-          className="h-7 max-w-[200px] justify-between gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground active:translate-y-0"
-          data-testid="model-selector"
-          title={t("chat.selectModel")}
-          variant="ghost"
-        >
-          <BotIcon />
-          <ModelSelectorName>{t("chat.model")}</ModelSelectorName>
-        </Button>
-      </ModelSelectorTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ModelSelectorTrigger asChild>
+            <Button
+              aria-label={t("chat.selectModel")}
+              className="size-11 shrink-0 rounded-lg p-0 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground active:translate-y-0 md:size-8"
+              data-testid="model-selector"
+              variant="ghost"
+            >
+              <BotIcon />
+            </Button>
+          </ModelSelectorTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={8}>
+          {t("chat.model")}
+        </TooltipContent>
+      </Tooltip>
       <ModelSelectorContent
         commandDefaultValue={selectedModel.id}
         onOpenAutoFocus={(event) => {
@@ -889,32 +971,3 @@ function PureModelSelectorCompact({
 }
 
 const ModelSelectorCompact = memo(PureModelSelectorCompact);
-
-function PureStopButton({
-  stop,
-  setMessages,
-}: {
-  stop: () => void;
-  setMessages: UseChatHelpers<ChatMessage>["setMessages"];
-}) {
-  const handleClick = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      stop();
-      setMessages((messages) => messages);
-    },
-    [setMessages, stop]
-  );
-
-  return (
-    <Button
-      className="h-7 w-7 rounded-xl bg-foreground p-1 text-background transition-all duration-200 hover:opacity-85 active:scale-95 disabled:bg-muted disabled:text-muted-foreground/25 disabled:cursor-not-allowed"
-      data-testid="stop-button"
-      onClick={handleClick}
-    >
-      <StopIcon size={14} />
-    </Button>
-  );
-}
-
-const StopButton = memo(PureStopButton);

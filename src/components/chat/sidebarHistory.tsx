@@ -283,7 +283,7 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
         <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
           {t("sidebar.history")}
         </SidebarGroupLabel>
-        <SidebarGroupContent>
+        <SidebarGroupContent className="max-h-[35dvh] overflow-y-auto overscroll-contain no-scrollbar md:max-h-none md:overflow-visible">
           <SidebarMenu>
             <div className="flex flex-col gap-4">
               {groupedChats.today.length > 0 && (

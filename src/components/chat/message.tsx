@@ -2,7 +2,10 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { useTranslation } from "react-i18next";
 import type { SourceCitation } from "@/lib/knowledgeCitation";
+import { getAgentToolTitleKey } from "@/lib/chatToolchain.mjs";
+import { getKnowledgeSearchTitleKey } from "@/lib/knowledgeSearchStatus.mjs";
 import type { ChatMessage } from "@/lib/types";
+import { Spinner } from "@/components/ui/spinner";
 import { cn, hasToolControlSyntax, sanitizeText } from "@/lib/utils";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import { Shimmer } from "../ai-elements/shimmer";
@@ -24,7 +27,11 @@ function WaitingText() {
   const waitingText = waitingStatus?.message ?? t("chat.waiting");
 
   return (
-    <div className="flex min-h-[calc(13px*1.65)] min-w-0 items-center text-[13px] leading-[1.65]">
+    <div className="flex min-h-[calc(13px*1.65)] min-w-0 items-center gap-2 text-[13px] leading-[1.65]">
+      <Spinner
+        aria-hidden="true"
+        className="size-3.5 shrink-0 text-[var(--message-accent-background)]"
+      />
       <Shimmer
         as="span"
         className="font-medium whitespace-normal break-words"
@@ -145,15 +152,6 @@ const PurePreviewMessage = ({
     { isStreaming: false, rendered: false, text: "" }
   ) ?? { isStreaming: false, rendered: false, text: "" };
 
-  const dynamicToolLastCallIds = new Map<string, string>();
-  message.parts?.forEach((part) => {
-    if (part.type !== "dynamic-tool") {
-      return;
-    }
-
-    dynamicToolLastCallIds.set(part.toolName, part.toolCallId);
-  });
-
   const displayParts = [
     ...(message.parts?.filter((part) => part.type === "dynamic-tool") ?? []),
     ...(message.parts?.filter((part) => part.type !== "dynamic-tool") ?? []),
@@ -209,10 +207,6 @@ const PurePreviewMessage = ({
     }
 
     if (type === "dynamic-tool" && part.toolName === "searchProductsTool") {
-      if (dynamicToolLastCallIds.get(part.toolName) !== part.toolCallId) {
-        return null;
-      }
-
       const { toolCallId, state } = part;
       const output =
         state === "output-available" &&
@@ -343,10 +337,6 @@ const PurePreviewMessage = ({
     }
 
     if (type === "dynamic-tool" && part.toolName === "searchContentTool") {
-      if (dynamicToolLastCallIds.get(part.toolName) !== part.toolCallId) {
-        return null;
-      }
-
       const { toolCallId, state } = part;
       const output =
         state === "output-available" &&
@@ -449,6 +439,197 @@ const PurePreviewMessage = ({
               </div>
             )}
             {state === "output-error" && (
+              <ToolOutput errorText={part.errorText} output={undefined} />
+            )}
+          </ToolContent>
+        </Tool>
+      );
+    }
+
+    if (type === "dynamic-tool" && part.toolName === "searchKnowledgeBaseTool") {
+      const { toolCallId, state } = part;
+      const output =
+        state === "output-available" &&
+        part.output &&
+        typeof part.output === "object"
+          ? (part.output as {
+              error?: string;
+              message?: string;
+              results?: Array<{
+                chunkId: string;
+                chunkIndex: number;
+                content: string;
+                fileId: string;
+                fileName: string;
+                locator?: Record<string, string | number> | null;
+                sourceLocators?: Array<Record<string, string | number>>;
+                score: number;
+              }>;
+            })
+          : null;
+
+      return (
+        <Tool
+          className="w-[min(100%,650px)]"
+          defaultOpen={false}
+          key={toolCallId}
+        >
+          <ToolHeader
+            state={state}
+            title={t(getKnowledgeSearchTitleKey(state))}
+            toolName="searchKnowledgeBaseTool"
+            type="dynamic-tool"
+          />
+          <ToolContent>
+            {state === "input-available" && <ToolInput input={part.input} />}
+            {state === "output-available" && output && (
+              <div className="space-y-3">
+                <div className="text-muted-foreground text-xs">
+                  {t("chat.knowledgeResultsFound", {
+                    count: output.results?.length ?? 0,
+                  })}
+                </div>
+                {output.error || output.message ? (
+                  <div className="text-destructive text-xs">
+                    {output.message ?? output.error}
+                  </div>
+                ) : null}
+                <div className="grid gap-2">
+                  {output.results?.map((result) => {
+                    const locator = result.locator ?? {};
+                    const sourceLocators = result.sourceLocators?.length
+                      ? result.sourceLocators
+                      : [locator];
+                    const rows = Array.from(
+                      new Set(
+                        sourceLocators.flatMap((sourceLocator) =>
+                          typeof sourceLocator.row === "number"
+                            ? [sourceLocator.row]
+                            : []
+                        )
+                      )
+                    ).sort((left, right) => left - right);
+                    const isConsecutiveRows = rows.every(
+                      (value, index) =>
+                        index === 0 || value === rows[index - 1] + 1
+                    );
+                    const row = rows.length === 1 ? rows[0] : null;
+                    const page =
+                      typeof locator.page === "number" ? locator.page : null;
+                    const sheet =
+                      typeof locator.sheet === "string"
+                        ? locator.sheet
+                        : null;
+                    const section = [
+                      rows.length > 1 && isConsecutiveRows
+                        ? t("chat.rows", {
+                            start: rows[0],
+                            end: rows.at(-1),
+                          })
+                        : rows.length > 1
+                          ? t("chat.rowsList", { values: rows.join(", ") })
+                          : null,
+                      typeof locator.slide === "number"
+                        ? t("chat.slide", { value: locator.slide })
+                        : null,
+                      typeof locator.shape === "number"
+                        ? t("chat.shape", { value: locator.shape })
+                        : null,
+                      typeof locator.lineStart === "number"
+                        ? t("chat.lines", {
+                            start: locator.lineStart,
+                            end:
+                              typeof locator.lineEnd === "number"
+                                ? locator.lineEnd
+                                : locator.lineStart,
+                          })
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+
+                    return (
+                      <div
+                        className="rounded-md border bg-muted/30 p-3 text-sm"
+                        key={result.chunkId}
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-3 text-muted-foreground text-xs">
+                          <span className="truncate font-medium text-foreground">
+                            {result.fileName}
+                          </span>
+                          <span className="shrink-0">
+                            {t("chat.knowledgeChunk", {
+                              value: result.chunkIndex + 1,
+                            })}
+                          </span>
+                        </div>
+                        <div className="whitespace-pre-wrap break-words text-xs leading-relaxed">
+                          {result.content}
+                        </div>
+                        <SourceCitationLine
+                          citation={{
+                            fileName: result.fileName,
+                            page,
+                            row,
+                            section: section || null,
+                            sheet,
+                            sourceId: result.fileId,
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {state === "output-error" && (
+              <ToolOutput errorText={part.errorText} output={undefined} />
+            )}
+          </ToolContent>
+        </Tool>
+      );
+    }
+
+    if (type === "dynamic-tool") {
+      const outputError =
+        part.state === "output-error"
+          ? part.errorText
+          : part.output &&
+              typeof part.output === "object" &&
+              "error" in part.output
+            ? String((part.output as { error: unknown }).error)
+            : undefined;
+
+      return (
+        <Tool
+          className="w-[min(100%,650px)]"
+          data-testid="agent-tool-call"
+          data-tool-name={part.toolName}
+          defaultOpen={false}
+          key={part.toolCallId}
+        >
+          <ToolHeader
+            state={part.state}
+            title={t(getAgentToolTitleKey(part.toolName, part.state))}
+            toolName={part.toolName}
+            type="dynamic-tool"
+          />
+          <ToolContent>
+            {part.input !== undefined && part.state !== "input-streaming" && (
+              <ToolInput input={part.input} />
+            )}
+            {part.state === "output-available" && (
+              <div
+                className={
+                  outputError
+                    ? "text-destructive text-xs"
+                    : "text-muted-foreground text-xs"
+                }
+              >
+                {outputError ?? t("chat.agentToolCompleted")}
+              </div>
+            )}
+            {part.state === "output-error" && (
               <ToolOutput errorText={part.errorText} output={undefined} />
             )}
           </ToolContent>

@@ -9,6 +9,7 @@ type Dispatch,
 type ReactNode,
 type SetStateAction,
 useContext,
+useCallback,
 useEffect,
 useMemo,
 useRef,
@@ -37,6 +38,8 @@ const chatApi = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat`;
 
 type ActiveChatContextValue = {
 chatId: string;
+selectedKnowledgeBaseId: string;
+setSelectedKnowledgeBaseId: (id: string) => void;
 messages: ChatMessage[];
 setMessages: UseChatHelpers<ChatMessage>["setMessages"];
 sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
@@ -69,6 +72,17 @@ const match = pathname.match(/\/chat\/([^/]+)/);
 return match ? match[1] : null;
 }
 
+function readKnowledgeBaseSelection(chatId: string): string {
+if (typeof window === "undefined") {
+  return "";
+}
+try {
+  return window.localStorage.getItem(`chat-knowledge-base:v1:${chatId}`) ?? "";
+} catch {
+  return "";
+}
+}
+
 export function ActiveChatProvider({ children }: { children: ReactNode }) {
 const pathname = usePathname();
 const locationSearch = useLocationSearch();
@@ -93,6 +107,37 @@ if (isNewChat) {
 }
 
 const chatId = chatIdFromUrl ?? newChatIdRef.current;
+const [knowledgeBaseSelection, setKnowledgeBaseSelection] = useState(() => ({
+chatId,
+id: readKnowledgeBaseSelection(chatId),
+}));
+const selectedKnowledgeBaseId =
+knowledgeBaseSelection.chatId === chatId
+  ? knowledgeBaseSelection.id
+  : readKnowledgeBaseSelection(chatId);
+const selectedKnowledgeBaseIdRef = useRef({
+chatId,
+id: selectedKnowledgeBaseId,
+});
+if (selectedKnowledgeBaseIdRef.current.chatId !== chatId) {
+selectedKnowledgeBaseIdRef.current = { chatId, id: selectedKnowledgeBaseId };
+}
+const updateSelectedKnowledgeBaseId = useCallback(
+(id: string) => {
+  selectedKnowledgeBaseIdRef.current = { chatId, id };
+  setKnowledgeBaseSelection({ chatId, id });
+  try {
+    if (id) {
+      window.localStorage.setItem(`chat-knowledge-base:v1:${chatId}`, id);
+    } else {
+      window.localStorage.removeItem(`chat-knowledge-base:v1:${chatId}`);
+    }
+  } catch {
+    // The active chat can still use its in-memory selection when storage is unavailable.
+  }
+},
+[chatId]
+);
 const locallyCreatedChatIdsRef = useRef(new Set<string>());
 useEffect(() => {
 if (isNewChat) {
@@ -238,6 +283,7 @@ transport: new DefaultChatTransport({
             ? { messages: request.messages }
             : { message: lastMessage }),
         selectedChatModel: currentModelIdRef.current,
+        selectedKnowledgeBaseId: selectedKnowledgeBaseIdRef.current.id || null,
         selectedVisibilityType: visibility,
         ...request.body,
       },
@@ -321,6 +367,8 @@ const value = useMemo<ActiveChatContextValue>(
 () => ({
   addToolApprovalResponse,
   chatId,
+  selectedKnowledgeBaseId,
+  setSelectedKnowledgeBaseId: updateSelectedKnowledgeBaseId,
   currentModelId,
   input,
   isLoading: !isNewChat && isLoading,
@@ -339,6 +387,8 @@ const value = useMemo<ActiveChatContextValue>(
 }),
 [
   chatId,
+  selectedKnowledgeBaseId,
+  updateSelectedKnowledgeBaseId,
   messages,
   setMessages,
   sendMessage,

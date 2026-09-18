@@ -9,6 +9,8 @@
     "build": "vite build",
     "lint": "oxlint",
     "test:business-tables": "node --test src/lib/businessTables/mockQuery.test.mjs",
+    "test:chat-toolchain": "node --test src/lib/chatToolchain.test.mjs",
+    "test:knowledge-search-scope": "node --test src/lib/knowledgeSearchScope.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

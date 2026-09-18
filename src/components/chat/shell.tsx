@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alertDialog";
 import { useActiveChat } from "@/hooks/useActiveChat";
+import { LoadingState } from "@/components/ui/loadingState";
 import {
   initialArtifactData,
   useArtifact,
@@ -31,6 +32,8 @@ export function ChatShell() {
   const { t } = useTranslation();
   const {
     chatId,
+    selectedKnowledgeBaseId,
+    setSelectedKnowledgeBaseId,
     messages,
     setMessages,
     sendMessage,
@@ -111,6 +114,15 @@ export function ChatShell() {
     window.location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/`;
   }, []);
 
+  if (isLoading) {
+    return (
+      <>
+        <LoadingState message={t("common.loading")} />
+        <DataStreamHandler />
+      </>
+    );
+  }
+
   return (
     <>
       <div className="flex h-dvh min-h-0 w-full flex-row overflow-hidden">
@@ -146,6 +158,8 @@ export function ChatShell() {
                 <MultimodalInput
                   attachments={attachments}
                   chatId={chatId}
+                  selectedKnowledgeBaseId={selectedKnowledgeBaseId}
+                  onKnowledgeBaseChange={setSelectedKnowledgeBaseId}
                   editingMessage={editingMessage}
                   input={input}
                   isLoading={isLoading}
