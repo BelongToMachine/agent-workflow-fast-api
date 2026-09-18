@@ -146,6 +146,7 @@ def test_migration_status_requires_all_entity_dependencies() -> None:
         True,
         False,
         False,
+        False,
     ]
     assert statuses[3].name == "0004_knowledge_bases"
 
@@ -185,7 +186,21 @@ def test_migration_status_query_covers_schema_capabilities() -> None:
     assert "knowledge_base_required_columns" in sql
     assert "parsed_document_required_columns" in sql
     assert "knowledge_source_retired" in sql
+    assert "import_job_table" in sql
+    assert "import_proposal_table" in sql
+    assert "imported_fact_table" in sql
     assert "conrelid = to_regclass" in sql
+
+
+def test_business_import_status_requires_proposal_error_message_column() -> None:
+    sql = str(MIGRATION_STATUS_QUERY)
+    proposal_columns_check = sql.split("AS import_proposal_required_columns", 1)[0].rsplit(
+        "to_regclass('public.\"ImportProposal\"')",
+        1,
+    )[-1]
+
+    assert "COUNT(*) = 17" in proposal_columns_check
+    assert "'errorMessage'" in proposal_columns_check
 
 
 def test_knowledge_integrity_query_checks_cross_scope_relationships() -> None:
@@ -239,8 +254,8 @@ def test_retirement_stays_pending_without_canonical_file_relationships() -> None
 
 
 def test_knowledge_source_retirement_migration_is_registered_and_guarded() -> None:
-    assert MIGRATION_NAMES[-1] == "0015_knowledge_source_retirement"
-    sql = MIGRATION_PATHS[-1].read_text(encoding="utf-8")
+    assert MIGRATION_NAMES[-2] == "0015_knowledge_source_retirement"
+    sql = MIGRATION_PATHS[-2].read_text(encoding="utf-8")
     statements = split_sql_statements(sql)
 
     assert "sourceFileId" in sql
@@ -278,18 +293,28 @@ def test_knowledge_migration_runner_uses_dependency_order() -> None:
 
 
 def test_file_provenance_migration_is_guarded() -> None:
-    assert MIGRATION_NAMES[-4] == "0012_knowledge_file_provenance"
-    sql = MIGRATION_PATHS[-4].read_text(encoding="utf-8")
+    assert MIGRATION_NAMES[-5] == "0012_knowledge_file_provenance"
+    sql = MIGRATION_PATHS[-5].read_text(encoding="utf-8")
     assert "legacy rows could not be matched" in sql
     assert 'ALTER COLUMN "sourceFileId" SET NOT NULL' in sql
 
 
 def test_qwen_embedding_migration_is_registered_and_resets_old_vectors() -> None:
-    assert MIGRATION_NAMES[-2] == "0014_knowledge_embedding_qwen"
-    sql = MIGRATION_PATHS[-2].read_text(encoding="utf-8")
+    assert MIGRATION_NAMES[-3] == "0014_knowledge_embedding_qwen"
+    sql = MIGRATION_PATHS[-3].read_text(encoding="utf-8")
     assert '"embedding" = NULL' in sql
     assert "vector(1024)" in sql
     assert '"embeddingModel"' in sql
+
+
+def test_business_import_review_migration_creates_review_and_field_provenance_tables() -> None:
+    assert MIGRATION_NAMES[-1] == "0016_business_import_review"
+    sql = MIGRATION_PATHS[-1].read_text(encoding="utf-8")
+
+    assert 'CREATE TABLE IF NOT EXISTS "ImportJob"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "ImportProposal"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "ImportedFact"' in sql
+    assert 'ADD COLUMN IF NOT EXISTS "sourceLocator" jsonb' in sql
 
 
 def test_knowledge_migration_runner_only_selects_pending_migrations() -> None:

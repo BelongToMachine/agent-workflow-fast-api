@@ -1,0 +1,193 @@
+version: "1"
+profile: product_and_price
+description: 从指定 ParsedDocument 中提取产品主体、运营信息、报价和相关产品文档的待审核候选。
+entities:
+  product:
+    description: 一个可识别的产品主体及其相对稳定的资料。
+    fields:
+      productName:
+        type: string
+        description: 来源明确指向的产品名称；不得根据品牌、图片或型号自行补全。
+        aliases: [产品名称, 商品名, Product Name]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: productName}
+      category:
+        type: string
+        description: 原文明确给出的产品分类。
+        aliases: [品类, 分类, Category]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: category}
+      brand:
+        type: string
+        description: 原文明确列出的品牌；没有明确品牌时保持为空。
+        aliases: [品牌, Brand]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: brand}
+      productIntro:
+        type: string
+        description: 产品介绍或用途说明。
+        aliases: [产品介绍, 产品描述, Introduction]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: productIntro}
+      productHighlights:
+        type: string
+        description: 原文明确列出的产品卖点。
+        aliases: [卖点, Highlights]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: productHighlights}
+      productFeatures:
+        type: string
+        description: 材质、功能、尺寸等产品特征。
+        aliases: [特点, 特征, Features]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: productFeatures}
+      procurementConditions:
+        type: string
+        description: MOQ、定制要求或采购限制。
+        aliases: [采购条件, MOQ, 起订量]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: procurementConditions}
+      shippingTime:
+        type: string
+        description: 原文给出的交期、发货时间或运输时效。
+        aliases: [交期, 发货时间, Lead time]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: shippingTime}
+      contactPerson:
+        type: string
+        description: 产品或供应商联系人姓名。
+        aliases: [联系人, Contact]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: contactPerson}
+      supplierContact:
+        type: string
+        description: 供应商联系方式或供应商联系说明。
+        aliases: [供应商联系方式, 联系方式]
+        evidenceRequired: true
+        persistence: {table: RealProductResearch, column: supplierContact}
+  operation:
+    description: 与产品相关的运营或商业状态；仅在原文有明确表述时提出。
+    fields:
+      logisticsTerm:
+        type: string
+        description: 已明确的贸易或物流条款，例如 FOB、EXW、DDP。
+        aliases: [贸易条款, 物流条款, Incoterm]
+        evidenceRequired: true
+        persistence: {table: ProductOperation, column: logisticsTerm}
+      operationStatus:
+        type: string
+        description: 已明确的产品运营状态；不确定时不要推断。
+        aliases: [运营状态]
+        evidenceRequired: true
+        persistence: {table: ProductOperation, column: operationStatus}
+      promotionStatus:
+        type: string
+        description: 已明确的推广状态。
+        aliases: [推广状态]
+        evidenceRequired: true
+        persistence: {table: ProductOperation, column: promotionStatus}
+      proposer:
+        type: string
+        description: 已明确列出的提案人或提交人。
+        aliases: [提案人, 提交人]
+        evidenceRequired: true
+        persistence: {table: ProductOperation, column: proposer}
+      qualifications:
+        type: string
+        description: 明确且当前有效的产品资质或认证；冲突或待确认时放入 unresolved。
+        aliases: [资质, 认证, Certifications]
+        evidenceRequired: true
+        persistence: {table: ProductOperation, column: qualifications}
+      targetChannels:
+        type: string
+        description: 已明确列出的目标销售渠道。
+        aliases: [目标渠道, 销售渠道]
+        evidenceRequired: true
+        persistence: {table: ProductOperation, column: targetChannels}
+      nextAction:
+        type: string
+        description: 原文明确要求的下一步运营动作。
+        aliases: [下一步, Next action]
+        evidenceRequired: true
+        persistence: {table: ProductOperation, column: nextAction}
+      notes:
+        type: string
+        description: 与产品运营直接相关的原文备注。
+        aliases: [运营备注, Notes]
+        evidenceRequired: true
+        persistence: {table: ProductOperation, column: notes}
+  price:
+    description: 某个产品在特定规格、币种和报价类型下的一条报价。
+    fields:
+      variant:
+        type: string
+        description: 报价对应的规格或变体。
+        aliases: [规格, 型号, Variant]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: ProductPrice, column: variant}
+      priceMin:
+        type: decimal
+        description: 原文明确给出的最低价格；不能从区间外推。
+        aliases: [最低价, 单价, Price]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: ProductPrice, column: priceMin}
+      priceMax:
+        type: decimal
+        description: 原文明确给出的最高价格；单一报价时保持为空。
+        aliases: [最高价]
+        evidenceRequired: true
+        persistence: {table: ProductPrice, column: priceMax}
+      currency:
+        type: currency
+        description: 原文明确给出的 ISO 货币代码；不得默认 CNY 或 USD。
+        aliases: [币种, Currency]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: ProductPrice, column: currency}
+      priceType:
+        type: string
+        description: 报价类型，例如批发价、零售价或 FOB 价。
+        aliases: [报价类型, Price type]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: ProductPrice, column: priceType}
+      rawText:
+        type: string
+        description: 包含规格、金额和币种的原文报价文本。
+        aliases: [报价原文]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: ProductPrice, column: rawText}
+  document:
+    description: 产品关联的说明书、规格书或报价附件；不能仅因当前文件存在就自动创建。
+    fields:
+      documentType:
+        type: string
+        description: 已明确的文档类型。
+        aliases: [文档类型, Document type]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: ProductDocument, column: documentType}
+      displayName:
+        type: string
+        description: 原文明确的文档展示名称。
+        aliases: [文档名称, Document name]
+        evidenceRequired: true
+        persistence: {table: ProductDocument, column: displayName}
+      fileReference:
+        type: string
+        description: 原文明确的文档引用、文件名或 URL。
+        aliases: [文件引用, 文件名, URL]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: ProductDocument, column: fileReference}
+      rawText:
+        type: string
+        description: 与该文档关联的简短原文说明。
+        aliases: [文档说明]
+        requiredForProposal: true
+        evidenceRequired: true
+        persistence: {table: ProductDocument, column: rawText}

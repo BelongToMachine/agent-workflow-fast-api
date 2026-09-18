@@ -470,7 +470,62 @@ MIGRATION_STATUS_QUERY = text(
                       'ContentRecord', 'RealProductResearch', 'ProductDocument'
                   )
                   AND column_name = 'sourceId'
-            ) AS knowledge_source_retired
+            ) AS knowledge_source_retired,
+        to_regclass('public."ImportJob"') IS NOT NULL AS import_job_table,
+        (
+            SELECT COUNT(*) = 17
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ImportJob'
+              AND column_name IN (
+                  'id', 'workspaceId', 'knowledgeBaseId', 'sourceFileId',
+                  'parsedDocumentId', 'profile', 'schemaVersion', 'promptVersion',
+                  'model', 'status', 'reviewReport', 'rawProviderOutput',
+                  'errorMessage', 'createdBy', 'createdAt', 'updatedAt', 'finishedAt'
+              )
+        ) AS import_job_required_columns,
+        to_regclass('public."ImportJob_document_updated_idx"') IS NOT NULL
+            AS import_job_indexes,
+        to_regclass('public."ImportProposal"') IS NOT NULL AS import_proposal_table,
+        (
+            SELECT COUNT(*) = 17
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ImportProposal'
+              AND column_name IN (
+                  'id', 'jobId', 'workspaceId', 'candidateRef', 'targetEntityType',
+                  'operation', 'patch', 'sourceReferences', 'reviewExplanation', 'status',
+                  'reviewComment', 'reviewedBy', 'reviewedAt', 'appliedAt', 'errorMessage',
+                  'createdAt', 'updatedAt'
+              )
+        ) AS import_proposal_required_columns,
+        to_regclass('public."ImportProposal_job_status_idx"') IS NOT NULL
+            AS import_proposal_indexes,
+        to_regclass('public."ImportedFact"') IS NOT NULL AS imported_fact_table,
+        (
+            SELECT COUNT(*) = 15
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'ImportedFact'
+              AND column_name IN (
+                  'id', 'workspaceId', 'proposalId', 'sourceFileId', 'parsedDocumentId',
+                  'entityType', 'entityId', 'fieldPath', 'valueJson', 'blockId', 'dataPath',
+                  'sourceLocator', 'quote', 'status', 'createdAt'
+              )
+        ) AS imported_fact_required_columns,
+        to_regclass('public."ImportedFact_entity_field_idx"') IS NOT NULL
+            AND to_regclass('public."ImportedFact_source_idx"') IS NOT NULL
+            AS imported_fact_indexes,
+        (
+            SELECT COUNT(*) = 5
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name IN (
+                  'ContentRecord', 'RealProductResearch', 'ProductOperation',
+                  'ProductPrice', 'ProductDocument'
+              )
+              AND column_name = 'sourceLocator'
+        ) AS business_source_locator_columns
     """
 )
 
@@ -628,6 +683,21 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             "chunks_repointed",
         )
     )
+    business_import_review_applied = all(
+        flag(key)
+        for key in (
+            "import_job_table",
+            "import_job_required_columns",
+            "import_job_indexes",
+            "import_proposal_table",
+            "import_proposal_required_columns",
+            "import_proposal_indexes",
+            "imported_fact_table",
+            "imported_fact_required_columns",
+            "imported_fact_indexes",
+            "business_source_locator_columns",
+        )
+    )
     return [
         MigrationStatus(
             "0001_knowledge_base_grants",
@@ -691,6 +761,11 @@ def build_migration_statuses(row: dict[str, object]) -> list[MigrationStatus]:
             and canonical_source_relationships_applied
             and canonical_source_relationships_required,
             "KnowledgeSource retired after canonical KnowledgeFile provenance is ready",
+        ),
+        MigrationStatus(
+            "0016_business_import_review",
+            business_import_review_applied,
+            "Review-only ImportJob, ImportProposal, ImportedFact, and sourceLocator fields",
         ),
     ]
 
