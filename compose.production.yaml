@@ -50,6 +50,7 @@ services:
         max-file: "3"
     networks:
       - asianode_internal
+      - asianode-storage
 
   redis:
     image: redis:7-alpine
@@ -87,3 +88,6 @@ services:
 networks:
   asianode_internal:
     name: asianode-production-internal
+  asianode-storage:
+    external: true
+    name: asianode-storage
