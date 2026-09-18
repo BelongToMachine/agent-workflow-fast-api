@@ -127,6 +127,14 @@ const permissionTranslationKeys: Record<Permission, string> = {
   "document.read": "documentRead",
   "document.write": "documentWrite",
   "audit.read": "auditRead",
+  "agent.tool.products.search": "agentProductsSearch",
+  "agent.tool.content.search": "agentContentSearch",
+  "agent.tool.knowledge_bases.list": "agentKnowledgeBasesList",
+  "agent.tool.knowledge_files.list": "agentKnowledgeFilesList",
+  "agent.tool.knowledge_base.read": "agentKnowledgeBaseRead",
+  "agent.tool.knowledge_file.read": "agentKnowledgeFileRead",
+  "agent.tool.knowledge_file.extract": "agentKnowledgeFileExtract",
+  "agent.tool.knowledge_base.search": "agentKnowledgeBaseSearch",
 };
 
 export function MemberPermissions() {
@@ -1024,51 +1032,80 @@ export function MemberPermissions() {
                     </p>
                   </div>
 
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {permissionCatalog.map(({ key }) => {
-                      const enabled = permissions.includes(key);
-                      const isAllowed = roleAllowsPermission(role, key);
-                      const permissionKey = permissionTranslationKeys[key];
-                      return (
-                        <button
-                          aria-pressed={enabled}
-                          className={cn(
-                            "group flex min-h-20 items-start gap-3 rounded-xl border p-4 text-left transition-colors",
-                            enabled
-                              ? "border-primary/30 bg-primary/[0.06]"
-                              : "border-border/70 bg-background/40 hover:bg-muted/40"
-                          )}
-                          data-permission={key}
-                          disabled={!canManageMembers || !isAllowed}
-                          key={key}
-                          onClick={handlePermissionClick}
-                          type="button"
-                        >
-                          <span
-                            className={cn(
-                              "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-                              enabled
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border text-transparent group-hover:border-muted-foreground"
-                            )}
-                          >
-                            <CheckIcon className="size-3.5" />
-                          </span>
-                          <span>
-                            <span className="block font-medium text-sm">
-                              {t("permissions." + permissionKey + ".label")}
-                            </span>
-                            <span className="mt-1 block text-muted-foreground text-xs leading-5">
-                              {t(
-                                "permissions." +
-                                  permissionKey +
-                                  ".description"
+                  <div className="grid gap-7">
+                    {[
+                      {
+                        key: "workspace",
+                        permissions: permissionCatalog.filter(({ key }) =>
+                          !key.startsWith("agent.tool.")
+                        ),
+                        title: null,
+                        description: null,
+                      },
+                      {
+                        key: "agentTools",
+                        permissions: permissionCatalog.filter(({ key }) =>
+                          key.startsWith("agent.tool.")
+                        ),
+                        title: t("settings.agentToolPermissions"),
+                        description: t("settings.agentToolPermissionsDescription"),
+                      },
+                    ].map((group) => (
+                      <div className="grid gap-2 sm:grid-cols-2" key={group.key}>
+                        {group.title ? (
+                          <div className="sm:col-span-2">
+                            <h3 className="font-medium text-sm">{group.title}</h3>
+                            <p className="mt-1 text-muted-foreground text-xs leading-5">
+                              {group.description}
+                            </p>
+                          </div>
+                        ) : null}
+                        {group.permissions.map(({ key }) => {
+                          const enabled = permissions.includes(key);
+                          const isAllowed = roleAllowsPermission(role, key);
+                          const permissionKey = permissionTranslationKeys[key];
+                          return (
+                            <button
+                              aria-pressed={enabled}
+                              className={cn(
+                                "group flex min-h-20 items-start gap-3 rounded-xl border p-4 text-left transition-colors",
+                                enabled
+                                  ? "border-primary/30 bg-primary/[0.06]"
+                                  : "border-border/70 bg-background/40 hover:bg-muted/40"
                               )}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
+                              data-permission={key}
+                              disabled={!canManageMembers || !isAllowed}
+                              key={key}
+                              onClick={handlePermissionClick}
+                              type="button"
+                            >
+                              <span
+                                className={cn(
+                                  "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                                  enabled
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : "border-border text-transparent group-hover:border-muted-foreground"
+                                )}
+                              >
+                                <CheckIcon className="size-3.5" />
+                              </span>
+                              <span>
+                                <span className="block font-medium text-sm">
+                                  {t("permissions." + permissionKey + ".label")}
+                                </span>
+                                <span className="mt-1 block text-muted-foreground text-xs leading-5">
+                                  {t(
+                                    "permissions." +
+                                      permissionKey +
+                                      ".description"
+                                  )}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
                   </div>
                 </div>
                 {visibleError ? (
@@ -1086,6 +1123,8 @@ export function MemberPermissions() {
 }
 
 function EmptyState({ message }: { message: string }) {
+  const { t } = useTranslation();
+
   return (
     <main className="grid min-h-full place-items-center bg-background px-6">
       <div className="max-w-md text-center">

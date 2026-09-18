@@ -53,6 +53,46 @@ export const permissionCatalog = [
     key: "audit.read",
     label: "View audit log",
   },
+  {
+    description: "Search product and supplier records with the AI agent.",
+    key: "agent.tool.products.search",
+    label: "Search product data",
+  },
+  {
+    description: "Search content operations records with the AI agent.",
+    key: "agent.tool.content.search",
+    label: "Search content operations",
+  },
+  {
+    description: "List knowledge bases the member is allowed to read.",
+    key: "agent.tool.knowledge_bases.list",
+    label: "List knowledge bases",
+  },
+  {
+    description: "List files and processing status in an authorized knowledge base.",
+    key: "agent.tool.knowledge_files.list",
+    label: "List knowledge files",
+  },
+  {
+    description: "Read details for one authorized knowledge base.",
+    key: "agent.tool.knowledge_base.read",
+    label: "Read knowledge base details",
+  },
+  {
+    description: "Read metadata and processing status for one authorized file.",
+    key: "agent.tool.knowledge_file.read",
+    label: "Read knowledge file details",
+  },
+  {
+    description: "Extract full text or structured content from an authorized file.",
+    key: "agent.tool.knowledge_file.extract",
+    label: "Extract knowledge file content",
+  },
+  {
+    description: "Search an authorized knowledge base by semantic similarity.",
+    key: "agent.tool.knowledge_base.search",
+    label: "Search knowledge base vectors",
+  },
 ] as const;
 
 export type Permission = (typeof permissionCatalog)[number]["key"];
@@ -69,6 +109,14 @@ export const defaultPermissionsByRole: Record<WorkspaceRole, Permission[]> = {
     "chat.delete",
     "document.read",
     "document.write",
+    "agent.tool.products.search",
+    "agent.tool.content.search",
+    "agent.tool.knowledge_bases.list",
+    "agent.tool.knowledge_files.list",
+    "agent.tool.knowledge_base.read",
+    "agent.tool.knowledge_file.read",
+    "agent.tool.knowledge_file.extract",
+    "agent.tool.knowledge_base.search",
   ],
   employee: [
     "knowledge.read",
@@ -77,9 +125,28 @@ export const defaultPermissionsByRole: Record<WorkspaceRole, Permission[]> = {
     "chat.delete",
     "document.read",
     "document.write",
+    "agent.tool.products.search",
+    "agent.tool.content.search",
+    "agent.tool.knowledge_bases.list",
+    "agent.tool.knowledge_files.list",
+    "agent.tool.knowledge_base.read",
+    "agent.tool.knowledge_file.read",
+    "agent.tool.knowledge_base.search",
   ],
   owner: allPermissions,
-  viewer: ["knowledge.read", "chat.read", "chat.write", "document.read"],
+  viewer: [
+    "knowledge.read",
+    "chat.read",
+    "chat.write",
+    "document.read",
+    "agent.tool.products.search",
+    "agent.tool.content.search",
+    "agent.tool.knowledge_bases.list",
+    "agent.tool.knowledge_files.list",
+    "agent.tool.knowledge_base.read",
+    "agent.tool.knowledge_file.read",
+    "agent.tool.knowledge_base.search",
+  ],
 };
 
 export const roleLabels: Record<WorkspaceRole, string> = {

@@ -39,7 +39,7 @@ export function LoadingState({ message }: { message: string }) {
   return (
     <main
       aria-busy="true"
-      className="flex min-h-dvh items-center justify-center bg-background px-6 text-center"
+      className="flex h-dvh min-h-0 w-full items-center justify-center bg-background px-6 text-center"
     >
       <LoadingIndicator message={message} />
     </main>
