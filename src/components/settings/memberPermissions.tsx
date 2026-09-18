@@ -45,11 +45,11 @@ import {
 import { useCurrentUserAccess } from "@/lib/auth/currentUser";
 import { fastApiWorkspaceId } from "@/lib/backend/mode";
 import {
-  defaultPermissionsByRole,
   type Permission,
   permissionCatalog,
   roleAllowsPermission,
   roleLabels,
+  type WorkspacePermission,
   type WorkspaceRole,
 } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -58,6 +58,7 @@ type Member = {
   effectivePermissions: Permission[];
   email: string | null;
   id: string;
+  isCustomRole: boolean;
   name: string | null;
   overrides: { effect: "grant" | "deny"; permission: string }[];
   role: WorkspaceRole;
@@ -75,6 +76,23 @@ type AccessCandidate = {
 type MembersResponse = {
   members: Member[];
   workspace: { id: string; name: string };
+};
+
+type AgentToolCatalogResponse = {
+  defaultPermissionsByRole: Record<WorkspaceRole, Permission[]>;
+  toolPermissionsByRole: Record<WorkspaceRole, Permission[]>;
+  tools: {
+    description: string;
+    functionName: string;
+    label: string;
+    permissionCode: Permission;
+  }[];
+};
+
+type PermissionCard = {
+  description: string;
+  key: Permission;
+  label: string;
 };
 
 type AccessCandidatesResponse = {
@@ -116,7 +134,7 @@ const invitationStatusLabels: Record<InvitationStatus, string> = {
   revoked: "settings.invitationRevokedStatus",
 };
 
-const permissionTranslationKeys: Record<Permission, string> = {
+const permissionTranslationKeys: Record<WorkspacePermission, string> = {
   "members.read": "membersRead",
   "members.manage": "membersManage",
   "knowledge.read": "knowledgeRead",
@@ -127,15 +145,16 @@ const permissionTranslationKeys: Record<Permission, string> = {
   "document.read": "documentRead",
   "document.write": "documentWrite",
   "audit.read": "auditRead",
-  "agent.tool.products.search": "agentProductsSearch",
-  "agent.tool.content.search": "agentContentSearch",
-  "agent.tool.knowledge_bases.list": "agentKnowledgeBasesList",
-  "agent.tool.knowledge_files.list": "agentKnowledgeFilesList",
-  "agent.tool.knowledge_base.read": "agentKnowledgeBaseRead",
-  "agent.tool.knowledge_file.read": "agentKnowledgeFileRead",
-  "agent.tool.knowledge_file.extract": "agentKnowledgeFileExtract",
-  "agent.tool.knowledge_base.search": "agentKnowledgeBaseSearch",
 };
+
+function haveSamePermissions(left: readonly string[], right: readonly string[]) {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  return (
+    leftSet.size === rightSet.size &&
+    [...leftSet].every((permission) => rightSet.has(permission))
+  );
+}
 
 export function MemberPermissions() {
   const { t, i18n } = useTranslation();
@@ -153,11 +172,18 @@ export function MemberPermissions() {
   const [pendingMemberId, setPendingMemberId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const identity = useBackendIdentity();
+  const agentToolLanguage = i18n.language.toLowerCase().startsWith("zh")
+    ? "zh"
+    : "en";
   const { hasPermission } = useCurrentUserAccess();
   const canManageMembers = hasPermission("members.manage");
   const membersQuery = useBackendQuery<MembersResponse>({
     path: "/api/admin/members",
     queryKey: backendQueryKeys.members(identity),
+  });
+  const agentToolCatalogQuery = useBackendQuery<AgentToolCatalogResponse>({
+    path: `/api/v1/agents/tool-catalog?language=${agentToolLanguage}`,
+    queryKey: backendQueryKeys.agentToolCatalog(identity, agentToolLanguage),
   });
   const candidatesQuery = useBackendQuery<AccessCandidatesResponse>({
     enabled: canManageMembers && membersQuery.isSuccess,
@@ -254,6 +280,11 @@ export function MemberPermissions() {
   const { isPending: isCreatingInvitation } = createInvitationMutation;
   const { isPending: isRegeneratingInvitation } = regenerateInvitationMutation;
   const { isPending: isRevokingInvitation } = revokeInvitationMutation;
+  const getDefaultPermissionsForRole = useCallback(
+    (selectedRole: WorkspaceRole) =>
+      agentToolCatalogQuery.data?.defaultPermissionsByRole[selectedRole] ?? [],
+    [agentToolCatalogQuery.data]
+  );
   const loadError = queryError
     ? queryError.status === 403
       ? t("settings.unableToManageMembers")
@@ -261,8 +292,29 @@ export function MemberPermissions() {
     : null;
 
   const selectedMember = data?.members.find(({ id }) => id === selectedId);
+  const isCustomRole = selectedMember
+    ? isDirty && agentToolCatalogQuery.data
+      ? !haveSamePermissions(permissions, getDefaultPermissionsForRole(role))
+      : selectedMember.isCustomRole
+    : false;
   const candidates = candidatesQuery.data?.candidates ?? [];
   const invitations = invitationsQuery.data?.invitations ?? [];
+  const workspacePermissionCards: PermissionCard[] = permissionCatalog
+    .filter(({ key }) => !key.startsWith("agent.tool."))
+    .map(({ key }) => {
+      const translationKey = permissionTranslationKeys[key as WorkspacePermission];
+      return {
+        description: t(`permissions.${translationKey}.description`),
+        key: key as WorkspacePermission,
+        label: t(`permissions.${translationKey}.label`),
+      };
+    });
+  const agentToolPermissionCards: PermissionCard[] =
+    agentToolCatalogQuery.data?.tools.map((tool) => ({
+      description: tool.description,
+      key: tool.permissionCode,
+      label: tool.label,
+    })) ?? [];
 
   useEffect(() => {
     if (data && !selectedId) {
@@ -316,20 +368,24 @@ export function MemberPermissions() {
 
   const changeRole = useCallback(
     (nextRole: string) => {
-      if (!canManageMembers) {
+      if (!canManageMembers || !agentToolCatalogQuery.data) {
         return;
       }
       const roleValue = nextRole as WorkspaceRole;
       setRole(roleValue);
-      setPermissions([...defaultPermissionsByRole[roleValue]]);
+      setPermissions(getDefaultPermissionsForRole(roleValue));
       setIsDirty(true);
     },
-    [canManageMembers]
+    [agentToolCatalogQuery.data, canManageMembers, getDefaultPermissionsForRole]
   );
 
   const togglePermission = useCallback(
     (permission: Permission) => {
-      if (!canManageMembers || !roleAllowsPermission(role, permission)) {
+      if (
+        !canManageMembers ||
+        !agentToolCatalogQuery.data ||
+        !roleAllowsPermission(role, permission)
+      ) {
         return;
       }
       setPermissions((current) =>
@@ -339,7 +395,7 @@ export function MemberPermissions() {
       );
       setIsDirty(true);
     },
-    [canManageMembers, role]
+    [agentToolCatalogQuery.data, canManageMembers, role]
   );
 
   const handlePermissionClick = useCallback(
@@ -392,14 +448,14 @@ export function MemberPermissions() {
   }, [canManageMembers, identity, permissions, queryClient, role, saveMutation, selectedMember, t]);
 
   const addMember = useCallback(async () => {
-    if (!candidateId || !canManageMembers) {
+    if (!candidateId || !canManageMembers || !agentToolCatalogQuery.data) {
       return;
     }
 
     setError(null);
     try {
       const result = await addMutation.mutateAsync({
-        permissions: defaultPermissionsByRole[candidateRole],
+        permissions: getDefaultPermissionsForRole(candidateRole),
         role: candidateRole,
         userId: candidateId,
       });
@@ -420,7 +476,17 @@ export function MemberPermissions() {
       setError(message);
       toast.error(message);
     }
-  }, [addMutation, candidateId, candidateRole, canManageMembers, identity, queryClient, t]);
+  }, [
+    addMutation,
+    agentToolCatalogQuery.data,
+    candidateId,
+    candidateRole,
+    canManageMembers,
+    getDefaultPermissionsForRole,
+    identity,
+    queryClient,
+    t,
+  ]);
 
   const createInvitation = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -855,7 +921,9 @@ export function MemberPermissions() {
                   </Select>
                 </div>
                 <Select
-                  disabled={!candidateId || isAdding}
+                  disabled={
+                    !candidateId || isAdding || !agentToolCatalogQuery.data
+                  }
                   onValueChange={(value) => setCandidateRole(value as WorkspaceRole)}
                   value={candidateRole}
                 >
@@ -873,7 +941,12 @@ export function MemberPermissions() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Button disabled={!candidateId || isAdding} onClick={addMember}>
+                <Button
+                  disabled={
+                    !candidateId || isAdding || !agentToolCatalogQuery.data
+                  }
+                  onClick={addMember}
+                >
                   {isAdding ? <Spinner /> : <UserPlusIcon />}
                   {isAdding ? t("settings.adding") : t("settings.addMember")}
                 </Button>
@@ -921,6 +994,15 @@ export function MemberPermissions() {
             <div className="space-y-1">
               {data.members.map((member) => {
                 const isSelected = member.id === selectedId;
+                const displayedRole = isSelected
+                  ? isCustomRole
+                    ? "custom"
+                    : isDirty
+                      ? role
+                      : member.role
+                  : member.isCustomRole
+                    ? "custom"
+                    : member.role;
                 return (
                   <button
                     aria-pressed={isSelected}
@@ -949,7 +1031,9 @@ export function MemberPermissions() {
                       ) : null}
                     </span>
                     <span className="text-muted-foreground text-[11px]">
-                      {t("roles." + member.role)}
+                      {displayedRole === "custom"
+                        ? t("roles.custom")
+                        : t("roles." + displayedRole)}
                     </span>
                   </button>
                 );
@@ -957,26 +1041,28 @@ export function MemberPermissions() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-border/70 bg-card/50 shadow-sm">
+          <section className="min-w-0 rounded-2xl border border-border/70 bg-card/50 shadow-sm">
             {selectedMember ? (
               <>
-                <div className="flex flex-col gap-5 border-b border-border/70 p-5 md:flex-row md:items-start md:justify-between md:p-7">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="font-semibold text-xl tracking-tight">
+                <div className="flex flex-col gap-5 border-b border-border/70 p-5 md:p-7 2xl:flex-row 2xl:items-start 2xl:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <h2 className="min-w-0 break-words font-semibold text-xl tracking-tight">
                         {selectedMember.name || selectedMember.email}
                       </h2>
                       {isDirty ? (
-                        <Badge variant="secondary">{t("settings.unsaved")}</Badge>
+                        <Badge className="shrink-0" variant="secondary">
+                          {t("settings.unsaved")}
+                        </Badge>
                       ) : null}
                     </div>
-                    <p className="mt-1 text-muted-foreground text-sm">
+                    <p className="mt-1 break-words text-muted-foreground text-sm">
                       {selectedMember.name
                         ? selectedMember.email
                         : t("settings.workspaceMember")}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 2xl:justify-end">
                     <Button
                       disabled={!canManageMembers || isChangingStatus || isSaving}
                       onClick={changeMemberStatus}
@@ -990,9 +1076,14 @@ export function MemberPermissions() {
                           : t("settings.restoreMember")}
                     </Button>
                     <Select
-                      disabled={!canManageMembers || isSaving || isChangingStatus}
+                      disabled={
+                        !canManageMembers ||
+                        isSaving ||
+                        isChangingStatus ||
+                        !agentToolCatalogQuery.data
+                      }
                       onValueChange={changeRole}
-                      value={role}
+                      value={isCustomRole ? "custom" : role}
                     >
                       <SelectTrigger
                         aria-label={t("settings.memberRole")}
@@ -1001,6 +1092,11 @@ export function MemberPermissions() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        {isCustomRole ? (
+                          <SelectItem disabled value="custom">
+                            {t("roles.custom")}
+                          </SelectItem>
+                        ) : null}
                         {Object.entries(roleLabels).map(([value]) => (
                           <SelectItem key={value} value={value}>
                             {t("roles." + value)}
@@ -1025,7 +1121,11 @@ export function MemberPermissions() {
                       {t("settings.roleBaseline")}
                     </div>
                     <p className="mt-2 text-muted-foreground text-sm leading-6">
-                      {t(roleDescriptions[role])}
+                      {isCustomRole
+                        ? t("roles.customDescription", {
+                            role: t(`roles.${role}`),
+                          })
+                        : t(roleDescriptions[role])}
                     </p>
                     <p className="mt-4 text-muted-foreground text-xs leading-5">
                       {t("settings.roleBaselineDescription")}
@@ -1036,17 +1136,13 @@ export function MemberPermissions() {
                     {[
                       {
                         key: "workspace",
-                        permissions: permissionCatalog.filter(({ key }) =>
-                          !key.startsWith("agent.tool.")
-                        ),
+                        permissions: workspacePermissionCards,
                         title: null,
                         description: null,
                       },
                       {
                         key: "agentTools",
-                        permissions: permissionCatalog.filter(({ key }) =>
-                          key.startsWith("agent.tool.")
-                        ),
+                        permissions: agentToolPermissionCards,
                         title: t("settings.agentToolPermissions"),
                         description: t("settings.agentToolPermissionsDescription"),
                       },
@@ -1060,10 +1156,21 @@ export function MemberPermissions() {
                             </p>
                           </div>
                         ) : null}
-                        {group.permissions.map(({ key }) => {
+                        {group.key === "agentTools" &&
+                        agentToolCatalogQuery.isLoading ? (
+                          <p className="sm:col-span-2 text-muted-foreground text-xs">
+                            {t("settings.loadingAgentToolPermissions")}
+                          </p>
+                        ) : null}
+                        {group.key === "agentTools" &&
+                        agentToolCatalogQuery.error ? (
+                          <p className="sm:col-span-2 text-destructive text-xs">
+                            {t("settings.unableToLoadAgentToolPermissions")}
+                          </p>
+                        ) : null}
+                        {group.permissions.map(({ key, label, description }) => {
                           const enabled = permissions.includes(key);
                           const isAllowed = roleAllowsPermission(role, key);
-                          const permissionKey = permissionTranslationKeys[key];
                           return (
                             <button
                               aria-pressed={enabled}
@@ -1074,7 +1181,11 @@ export function MemberPermissions() {
                                   : "border-border/70 bg-background/40 hover:bg-muted/40"
                               )}
                               data-permission={key}
-                              disabled={!canManageMembers || !isAllowed}
+                              disabled={
+                                !canManageMembers ||
+                                !agentToolCatalogQuery.data ||
+                                !isAllowed
+                              }
                               key={key}
                               onClick={handlePermissionClick}
                               type="button"
@@ -1090,15 +1201,9 @@ export function MemberPermissions() {
                                 <CheckIcon className="size-3.5" />
                               </span>
                               <span>
-                                <span className="block font-medium text-sm">
-                                  {t("permissions." + permissionKey + ".label")}
-                                </span>
+                                <span className="block font-medium text-sm">{label}</span>
                                 <span className="mt-1 block text-muted-foreground text-xs leading-5">
-                                  {t(
-                                    "permissions." +
-                                      permissionKey +
-                                      ".description"
-                                  )}
+                                  {description}
                                 </span>
                               </span>
                             </button>

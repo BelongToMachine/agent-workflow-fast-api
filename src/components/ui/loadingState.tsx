@@ -48,9 +48,11 @@ export function LoadingState({ message }: { message: string }) {
 
 export function InlineLoadingState({
   className,
+  fillViewport = false,
   message,
 }: {
   className?: string;
+  fillViewport?: boolean;
   message: string;
 }) {
   return (
@@ -58,6 +60,7 @@ export function InlineLoadingState({
       aria-busy="true"
       className={cn(
         "flex min-h-80 items-center justify-center bg-background px-6 text-center",
+        fillViewport && "min-h-dvh",
         className
       )}
     >

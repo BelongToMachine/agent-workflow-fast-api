@@ -1,5 +1,4 @@
 import { Link } from "@/lib/router";
-import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { memo, useCallback } from "react";
 import type { ChatHistoryEntry } from "@/lib/backend/chatHistoryCache";
@@ -18,7 +17,7 @@ import {
   MoreHorizontalIcon,
   TrashIcon,
 } from "./icons";
-import { sidebarSelectedMenuItemClassName } from "./sidebarStyles";
+import { getSidebarNavigationItemClassName } from "./sidebarStyles";
 
 const PureChatItem = ({
   chat,
@@ -44,13 +43,14 @@ const PureChatItem = ({
     <SidebarMenuItem>
       <SidebarMenuButton
         asChild
-        className={cn(
-          sidebarSelectedMenuItemClassName,
-          !isActive && "border-transparent text-sidebar-foreground/50"
-        )}
+        className={getSidebarNavigationItemClassName(isActive)}
         isActive={isActive}
       >
-        <Link href={`/chat/${chat.id}`} onClick={closeMobile}>
+        <Link
+          aria-current={isActive ? "page" : undefined}
+          href={`/chat/${chat.id}`}
+          onClick={closeMobile}
+        >
           <span className="truncate">{chat.title}</span>
         </Link>
       </SidebarMenuButton>

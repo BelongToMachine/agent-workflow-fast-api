@@ -34,6 +34,8 @@ export const backendQueryKeys = {
     ["backend", "user", identity, "invitations"] as const,
   models: (identity: string) =>
     ["backend", "user", identity, "models"] as const,
+  agentToolCatalog: (identity: string, language: string) =>
+    ["backend", "user", identity, "agent-tool-catalog", language] as const,
   knowledgeBases: (identity: string) =>
     ["backend", "user", identity, "knowledge-bases"] as const,
 };

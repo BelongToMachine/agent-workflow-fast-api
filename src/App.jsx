@@ -17,8 +17,7 @@ import { ThemeProvider } from "./components/themeProvider";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { LoadingState } from "./components/ui/loadingState";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
-import { KnowledgeBaseManagement } from "./components/settings/knowledgeBaseManagement";
-import { KnowledgeBaseGrants } from "./components/settings/knowledgeBaseGrants";
+import { KnowledgeBaseWorkspace } from "./components/settings/knowledgeBaseWorkspace";
 import { MemberPermissions } from "./components/settings/memberPermissions";
 import { AppearanceSettings } from "./components/settings/appearanceSettings";
 import { FastApiConnectionTest } from "./components/fastapiConnectionTest";
@@ -260,8 +259,11 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="knowledge.manage">
-                  <SettingsPage titleKey="settings.knowledgeBaseAccess">
-                    <KnowledgeBaseGrants />
+                  <SettingsPage
+                    descriptionKey="settings.knowledgeBaseWorkspaceDescription"
+                    titleKey="settings.knowledgeBases"
+                  >
+                    <KnowledgeBaseWorkspace />
                   </SettingsPage>
                 </PermissionRoute>
               }
@@ -279,10 +281,10 @@ function ChatLayout() {
               element={
                 <PermissionRoute permission="knowledge.manage">
                   <SettingsPage
-                    descriptionKey="settings.knowledgeBaseManagementDescription"
+                    descriptionKey="settings.knowledgeBaseWorkspaceDescription"
                     titleKey="settings.knowledgeBases"
                   >
-                    <KnowledgeBaseManagement />
+                    <KnowledgeBaseWorkspace />
                   </SettingsPage>
                 </PermissionRoute>
               }

@@ -616,18 +616,18 @@ function PureMultimodalInput({
           />
           <div className="flex shrink-0 items-center gap-2 px-3">
             <PromptInputTools className="ml-auto">
-              {knowledgeBases.length > 0 && (
-                <ComposerKnowledgeBaseSelector
-                  automaticLabel={t("chat.autoKnowledgeBase")}
-                  availableLabel={t("chat.available")}
-                  emptyMessage={t("chat.noKnowledgeBaseMatches")}
-                  knowledgeBases={knowledgeBases}
-                  label={t("chat.knowledgeBaseScope")}
-                  onChange={onKnowledgeBaseChange}
-                  searchPlaceholder={t("chat.searchKnowledgeBase")}
-                  selectedKnowledgeBaseId={selectedKnowledgeBaseId}
-                />
-              )}
+              <ComposerKnowledgeBaseSelector
+                automaticLabel={t("chat.autoKnowledgeBase")}
+                availableLabel={t("chat.available")}
+                emptyMessage={t("chat.noKnowledgeBaseMatches")}
+                isLoading={knowledgeBasesLoading}
+                loadingLabel={t("common.loadingShort")}
+                knowledgeBases={knowledgeBases}
+                label={t("chat.knowledgeBaseScope")}
+                onChange={onKnowledgeBaseChange}
+                searchPlaceholder={t("chat.searchKnowledgeBase")}
+                selectedKnowledgeBaseId={selectedKnowledgeBaseId}
+              />
               <ModelSelectorCompact
                 onModelChange={onModelChange}
                 selectedModelId={selectedModelId}

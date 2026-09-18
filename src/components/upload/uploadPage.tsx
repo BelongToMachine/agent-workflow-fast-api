@@ -34,6 +34,7 @@ import {
 } from "@/lib/backend/request";
 import { Link } from "@/lib/router";
 import { cn } from "@/lib/utils";
+import { waitForAutomatedIngestion } from "./automatedIngestion.mjs";
 import { KnowledgeFileLibrary } from "./knowledgeFileLibrary";
 
 const ACCEPTED_EXTENSIONS = [
@@ -76,6 +77,8 @@ type UploadItem = {
   status: UploadItemStatus;
 };
 
+type AutomationStage = "idle" | "uploading" | "parsing" | "chunking" | "complete" | "failed";
+
 type KnowledgeBaseListResponse = {
   knowledgeBases: KnowledgeBase[];
 };
@@ -113,6 +116,7 @@ function uploadItemId(file: File) {
 export function UploadPage() {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeTab, setActiveTab] = useState<"manual" | "automation">("manual");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState("");
   const [items, setItems] = useState<UploadItem[]>([]);
@@ -331,7 +335,7 @@ export function UploadPage() {
     : 0;
 
   if (isLoadingBases) {
-    return <InlineLoadingState message={t("common.loading")} />;
+    return <InlineLoadingState fillViewport message={t("common.loading")} />;
   }
 
   return (
@@ -347,13 +351,23 @@ export function UploadPage() {
               {t("upload.title")}
             </h1>
             <p className="mt-3 max-w-xl text-muted-foreground text-sm leading-7 md:text-base">
-              {t("upload.description")}
+              {t(
+                activeTab === "manual"
+                  ? "upload.description"
+                  : "upload.automationDescription"
+              )}
             </p>
           </div>
           <div className="flex items-center gap-3 text-muted-foreground text-xs">
             <span className="font-mono text-foreground">01</span>
             <span aria-hidden="true" className="h-px w-8 bg-border" />
-            <span>{t("upload.stepLabel")}</span>
+            <span>
+              {t(
+                activeTab === "manual"
+                  ? "upload.stepLabel"
+                  : "upload.automationStepLabel"
+              )}
+            </span>
           </div>
         </header>
 
@@ -376,6 +390,56 @@ export function UploadPage() {
         ) : null}
 
         <div className="w-full">
+          <div
+            aria-label={t("upload.modeLabel")}
+            className="mb-5 flex border-b border-border/70"
+            onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                return;
+              }
+              event.preventDefault();
+              const nextTab =
+                event.key === "Home"
+                  ? "manual"
+                  : event.key === "End"
+                    ? "automation"
+                    : activeTab === "manual"
+                      ? "automation"
+                      : "manual";
+              setActiveTab(nextTab);
+              document.getElementById(`upload-tab-${nextTab}`)?.focus();
+            }}
+            role="tablist"
+          >
+            {(["manual", "automation"] as const).map((tab) => (
+              <button
+                aria-controls={`upload-panel-${tab}`}
+                aria-selected={activeTab === tab}
+                className={cn(
+                  "-mb-px min-h-11 border-b-2 px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  activeTab === tab
+                    ? "border-foreground text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+                id={`upload-tab-${tab}`}
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                role="tab"
+                tabIndex={activeTab === tab ? 0 : -1}
+                type="button"
+              >
+                {t(tab === "manual" ? "upload.tabManual" : "upload.tabAutomation")}
+              </button>
+            ))}
+          </div>
+
+          <div
+            aria-labelledby="upload-tab-manual"
+            hidden={activeTab !== "manual"}
+            id="upload-panel-manual"
+            role="tabpanel"
+            tabIndex={0}
+          >
           <section className="w-full rounded-2xl border border-border/70 bg-card/50 shadow-[var(--shadow-card)]">
             <div className="border-b border-border/70 p-5 md:p-7">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -562,9 +626,504 @@ export function UploadPage() {
               refreshKey={storedFilesRefreshKey}
             />
           ) : null}
+          </div>
+
+          <div
+            aria-labelledby="upload-tab-automation"
+            hidden={activeTab !== "automation"}
+            id="upload-panel-automation"
+            role="tabpanel"
+            tabIndex={0}
+          >
+            <AutomatedUploadPanel
+              disabled={featureDisabled || knowledgeBases.length === 0}
+              knowledgeBases={knowledgeBases}
+              onUploaded={() => setStoredFilesRefreshKey((current) => current + 1)}
+              selectedKnowledgeBaseId={selectedKnowledgeBaseId}
+              setSelectedKnowledgeBaseId={setSelectedKnowledgeBaseId}
+            />
+          </div>
         </div>
       </div>
     </main>
+  );
+}
+
+function AutomatedUploadPanel({
+  disabled,
+  knowledgeBases,
+  onUploaded,
+  selectedKnowledgeBaseId,
+  setSelectedKnowledgeBaseId,
+}: {
+  disabled: boolean;
+  knowledgeBases: KnowledgeBase[];
+  onUploaded: () => void;
+  selectedKnowledgeBaseId: string;
+  setSelectedKnowledgeBaseId: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [stage, setStage] = useState<AutomationStage>("idle");
+  const [failedAt, setFailedAt] = useState<"uploading" | "parsing" | "chunking" | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    chunkCount: number;
+    fileName: string;
+    parsedDocumentId: string;
+  } | null>(null);
+  const isRunning = ["uploading", "parsing", "chunking"].includes(stage);
+
+  useEffect(
+    () => () => {
+      abortControllerRef.current?.abort();
+    },
+    []
+  );
+
+  const selectFile = (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+    setResult(null);
+    setErrorMessage(null);
+    setFailedAt(null);
+    setUploadProgress(0);
+    if (file.size > 100 * 1024 * 1024) {
+      setSelectedFile(null);
+      setStage("failed");
+      setFailedAt("uploading");
+      setErrorMessage(t("upload.fileTooLarge", { name: file.name }));
+      return;
+    }
+    if (!isAcceptedFile(file)) {
+      setSelectedFile(null);
+      setStage("failed");
+      setFailedAt("uploading");
+      setErrorMessage(t("upload.unsupportedType", { name: file.name }));
+      return;
+    }
+    setSelectedFile(file);
+    setStage("idle");
+  };
+
+  const runAutomation = async () => {
+    if (!selectedFile || !selectedKnowledgeBaseId || isRunning || disabled) {
+      return;
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    let currentStage: "uploading" | "parsing" | "chunking" = "uploading";
+    let didUpload = false;
+    setErrorMessage(null);
+    setResult(null);
+    setFailedAt(null);
+    setUploadProgress(0);
+    setStage("uploading");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      const response = await requestBackendUpload<{ file: KnowledgeFile }>(
+        `/api/knowledge-bases/${encodeURIComponent(selectedKnowledgeBaseId)}/files?automation=true`,
+        formData,
+        (loaded, total) => {
+          setUploadProgress(
+            total ? Math.min(99, Math.round((loaded / total) * 100)) : 0
+          );
+        }
+      );
+      setUploadProgress(100);
+      didUpload = true;
+      currentStage = "parsing";
+      setStage("parsing");
+
+      const completed = await waitForAutomatedIngestion({
+        fileId: response.file.fileId,
+        intervalMs: 1200,
+        knowledgeBaseId: selectedKnowledgeBaseId,
+        onStage: (nextStage: "parsing" | "chunking" | "complete") => {
+          if (nextStage !== "complete") {
+            currentStage = nextStage;
+          }
+          setStage(nextStage);
+        },
+        request: (path: string, init?: RequestInit) =>
+          requestBackend(path, init),
+        signal: controller.signal,
+        timeoutMessage: t("upload.automationTimeout"),
+      });
+
+      setResult({
+        chunkCount: completed.parsedDocument.chunkCount,
+        fileName: response.file.originalName,
+        parsedDocumentId: completed.parsedDocument.parsedDocumentId,
+      });
+      setStage("complete");
+      toast.success(t("upload.automationCompleteToast"));
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      setFailedAt(currentStage);
+      setStage("failed");
+      setErrorMessage(
+        error instanceof Error ? error.message : t("upload.automationFailed")
+      );
+      toast.error(t("upload.automationFailed"));
+    } finally {
+      abortControllerRef.current = null;
+      if (didUpload && !controller.signal.aborted) {
+        onUploaded();
+      }
+    }
+  };
+
+  const resetWorkflow = () => {
+    if (isRunning) {
+      return;
+    }
+    setSelectedFile(null);
+    setStage("idle");
+    setFailedAt(null);
+    setErrorMessage(null);
+    setResult(null);
+    setUploadProgress(0);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const stageIndex =
+    stage === "uploading"
+      ? 0
+      : stage === "parsing"
+        ? 1
+        : stage === "chunking"
+          ? 2
+          : stage === "complete"
+            ? 3
+            : stage === "failed"
+              ? failedAt === "uploading"
+                ? 0
+                : failedAt === "parsing"
+                  ? 1
+                  : failedAt === "chunking"
+                    ? 2
+                    : -1
+              : -1;
+  const connectorWidth = stage === "complete" ? "100%" : `${Math.max(0, stageIndex) * 50}%`;
+  const steps = [
+    { key: "upload", title: t("upload.automationStepUpload") },
+    { key: "parse", title: t("upload.automationStepParse") },
+    { key: "chunks", title: t("upload.automationStepChunks") },
+  ];
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border/70 bg-card/50 shadow-[var(--shadow-card)]">
+      <div className="flex flex-col gap-4 border-b border-border/70 p-5 sm:flex-row sm:items-end sm:justify-between md:p-7">
+        <div>
+          <p className="text-muted-foreground text-xs uppercase tracking-[0.16em]">
+            {t("upload.destinationLabel")}
+          </p>
+          <label className="mt-2 block">
+            <span className="sr-only">{t("upload.destinationLabel")}</span>
+            <select
+              aria-label={t("upload.destinationLabel")}
+              className="h-10 max-w-full rounded-lg border border-input bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring"
+              disabled={disabled || isRunning}
+              onChange={(event) => setSelectedKnowledgeBaseId(event.target.value)}
+              value={selectedKnowledgeBaseId}
+            >
+              {knowledgeBases.map((knowledgeBase) => (
+                <option
+                  key={knowledgeBase.knowledgeBaseId}
+                  value={knowledgeBase.knowledgeBaseId}
+                >
+                  {knowledgeBase.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <p className="max-w-xl text-muted-foreground text-xs leading-5">
+          {t("upload.automationScope")}
+        </p>
+      </div>
+
+      <div className="p-5 md:p-7">
+        {knowledgeBases.length === 0 ? (
+          <div className="mb-6 flex flex-col items-start gap-3 rounded-xl border border-dashed border-border/80 px-5 py-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-sm">{t("upload.noKnowledgeBase")}</p>
+              <p className="mt-1 text-muted-foreground text-xs leading-5">
+                {t("upload.noKnowledgeBaseDescription")}
+              </p>
+            </div>
+            <Button asChild variant="outline">
+              <Link href="/settings/knowledge-bases">
+                <PlusIcon />
+                {t("upload.createKnowledgeBase")}
+              </Link>
+            </Button>
+          </div>
+        ) : null}
+
+        <div className="relative">
+          <div
+            aria-hidden="true"
+            className="absolute left-[16.67%] right-[16.67%] top-4 h-px bg-border"
+          >
+            <div
+              className="h-full bg-primary transition-[width] duration-500"
+              style={{ width: connectorWidth }}
+            />
+          </div>
+          <ol
+            aria-label={t("upload.automationFlowLabel")}
+            aria-live="polite"
+            className="grid grid-cols-3 gap-2"
+          >
+            {steps.map((step, index) => {
+              const complete = stage === "complete" || (stageIndex >= 0 && index < stageIndex);
+              const current = stageIndex === index && stage !== "complete";
+              const failed = stage === "failed" && index === stageIndex;
+              return (
+                <li className="relative flex min-w-0 flex-col items-center text-center" key={step.key}>
+                  <span
+                    className={cn(
+                      "flex size-8 items-center justify-center rounded-full border text-xs font-semibold transition-colors duration-300",
+                      complete
+                        ? "border-emerald-600 bg-emerald-600 text-background"
+                        : failed
+                          ? "border-destructive bg-destructive text-background"
+                          : current
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border bg-background text-muted-foreground"
+                    )}
+                  >
+                    {complete ? (
+                      <CheckCircle2Icon aria-hidden="true" className="size-4" />
+                    ) : failed ? (
+                      <AlertTriangleIcon aria-hidden="true" className="size-4" />
+                    ) : current && isRunning ? (
+                      <LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />
+                    ) : (
+                      index + 1
+                    )}
+                  </span>
+                  <span className="mt-3 max-w-40 text-pretty text-xs font-medium leading-5 sm:text-sm">
+                    {step.title}
+                  </span>
+                  <span className="mt-1 min-h-4 text-[10px] text-muted-foreground sm:text-xs">
+                    {complete
+                      ? t("upload.automationStepComplete")
+                      : failed
+                        ? t("upload.automationStepFailed")
+                        : current && isRunning
+                          ? t("upload.automationStepActive")
+                          : t("upload.automationStepWaiting")}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+
+        <p aria-live="polite" className="mt-6 text-center text-sm text-muted-foreground" role="status">
+          {stage === "complete" && result
+            ? t("upload.automationCompleteDescription", { count: result.chunkCount })
+            : stage === "uploading"
+              ? t("upload.automationUploading")
+              : stage === "parsing"
+                ? t("upload.automationParsing")
+                : stage === "chunking"
+                  ? t("upload.automationChunking")
+                  : stage === "failed"
+                    ? t("upload.automationStopped")
+                    : t("upload.automationReady")}
+        </p>
+
+        {errorMessage ? (
+          <div
+            className="mx-auto mt-4 flex max-w-2xl items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2.5 text-left text-destructive text-sm"
+            role="alert"
+          >
+            <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        ) : null}
+
+        {result ? (
+          <div className="mx-auto mt-4 flex max-w-2xl items-center gap-3 rounded-lg border border-emerald-600/20 bg-emerald-600/[0.04] px-3 py-3">
+            <CheckCircle2Icon className="size-5 shrink-0 text-emerald-600" />
+            <div className="min-w-0">
+              <p className="truncate font-medium text-sm">{result.fileName}</p>
+              <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
+                ParsedDocument {result.parsedDocumentId}
+              </p>
+            </div>
+            <Badge className="ml-auto shrink-0" variant="outline">
+              {t("upload.automationChunkCount", { count: result.chunkCount })}
+            </Badge>
+          </div>
+        ) : null}
+
+        {selectedFile ? (
+          <div className="mx-auto mt-6 flex max-w-2xl items-center gap-3 rounded-xl border border-border/70 bg-background/45 px-3 py-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              {stage === "complete" ? (
+                <CheckCircle2Icon className="size-4 text-emerald-600" />
+              ) : stage === "failed" ? (
+                <AlertTriangleIcon className="size-4 text-destructive" />
+              ) : isRunning ? (
+                <LoaderCircleIcon className="size-4 animate-spin" />
+              ) : (
+                <FileIcon className="size-4" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium text-sm">{selectedFile.name}</p>
+              <p className="mt-1 text-muted-foreground text-xs">
+                {formatBytes(selectedFile.size)} · {fileKind(selectedFile.name)}
+              </p>
+              {stage === "uploading" ? (
+                <div className="mt-2 flex items-center gap-2">
+                  <div
+                    aria-label={t("upload.fileProgress", { progress: uploadProgress })}
+                    aria-valuemax={100}
+                    aria-valuemin={0}
+                    aria-valuenow={uploadProgress}
+                    className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-border"
+                    role="progressbar"
+                  >
+                    <div
+                      className="h-full rounded-full bg-primary transition-[width] duration-200"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {uploadProgress}%
+                  </span>
+                </div>
+              ) : null}
+            </div>
+            {!isRunning ? (
+              <button
+                aria-label={t("upload.removeFile", { name: selectedFile.name })}
+                className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                onClick={resetWorkflow}
+                type="button"
+              >
+                <XIcon className="size-4" />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div
+          aria-describedby="automation-dropzone-hint"
+          aria-label={t("upload.automationDropTitle")}
+          className={cn(
+            "group mx-auto mt-6 flex min-h-40 max-w-2xl cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed px-6 py-7 text-center outline-none transition-colors",
+            isDragging
+              ? "border-foreground bg-muted/70"
+              : "border-border/90 bg-background/35 hover:border-foreground/50 hover:bg-muted/30",
+            (disabled || isRunning) && "pointer-events-none opacity-60",
+            selectedFile && "min-h-28"
+          )}
+          aria-disabled={disabled || isRunning}
+          onClick={() => fileInputRef.current?.click()}
+          onDragEnter={(event: DragEvent<HTMLDivElement>) => {
+            event.preventDefault();
+            setIsDragging(true);
+          }}
+          onDragLeave={(event: DragEvent<HTMLDivElement>) => {
+            event.preventDefault();
+            setIsDragging(false);
+          }}
+          onDragOver={(event: DragEvent<HTMLDivElement>) => event.preventDefault()}
+          onDrop={(event: DragEvent<HTMLDivElement>) => {
+            event.preventDefault();
+            setIsDragging(false);
+            selectFile(event.dataTransfer.files[0]);
+          }}
+          onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
+          role="button"
+          tabIndex={disabled || isRunning ? -1 : 0}
+        >
+          {!selectedFile ? (
+            <>
+              <UploadCloudIcon className="size-6 text-muted-foreground" strokeWidth={1.5} />
+              <p className="mt-3 font-medium text-sm">{t("upload.automationDropTitle")}</p>
+              <p className="mt-1 text-muted-foreground text-xs">
+                {t("upload.dropDescription")}
+              </p>
+              <Button className="mt-4" disabled={disabled || isRunning} type="button" variant="outline">
+                <FileUpIcon />
+                {t("upload.chooseFiles")}
+              </Button>
+            </>
+          ) : (
+            <p className="font-medium text-sm">{t("upload.automationChooseAnother")}</p>
+          )}
+          <p className="mt-3 max-w-sm text-muted-foreground text-xs leading-5" id="automation-dropzone-hint">
+            {t("upload.formats")} · {t("upload.maxFileSize")}
+          </p>
+          <input
+            accept={ACCEPT_ATTRIBUTE}
+            className="sr-only"
+            disabled={disabled || isRunning}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+              selectFile(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+            ref={fileInputRef}
+            type="file"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 border-t border-border/70 bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between md:px-7">
+        <span className="text-muted-foreground text-xs">
+          {selectedFile ? t("upload.maxFileSize") : t("upload.automationQueueHint")}
+        </span>
+        <div className="flex items-center gap-2">
+          {stage === "complete" || stage === "failed" ? (
+            <Button disabled={isRunning} onClick={resetWorkflow} variant="outline">
+              {t("upload.automationAnotherFile")}
+            </Button>
+          ) : null}
+          <Button
+            disabled={disabled || !selectedKnowledgeBaseId || !selectedFile || isRunning || stage === "complete"}
+            onClick={runAutomation}
+          >
+            {isRunning ? (
+              <LoaderCircleIcon className="animate-spin" />
+            ) : stage === "complete" ? (
+              <CheckCircle2Icon />
+            ) : (
+              <FileUpIcon />
+            )}
+            {isRunning
+              ? t("upload.automationRunning")
+              : stage === "complete"
+                ? t("upload.automationDone")
+                : t("upload.automationStart")}
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }
 

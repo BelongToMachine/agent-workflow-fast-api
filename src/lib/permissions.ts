@@ -53,52 +53,26 @@ export const permissionCatalog = [
     key: "audit.read",
     label: "View audit log",
   },
-  {
-    description: "Search product and supplier records with the AI agent.",
-    key: "agent.tool.products.search",
-    label: "Search product data",
-  },
-  {
-    description: "Search content operations records with the AI agent.",
-    key: "agent.tool.content.search",
-    label: "Search content operations",
-  },
-  {
-    description: "List knowledge bases the member is allowed to read.",
-    key: "agent.tool.knowledge_bases.list",
-    label: "List knowledge bases",
-  },
-  {
-    description: "List files and processing status in an authorized knowledge base.",
-    key: "agent.tool.knowledge_files.list",
-    label: "List knowledge files",
-  },
-  {
-    description: "Read details for one authorized knowledge base.",
-    key: "agent.tool.knowledge_base.read",
-    label: "Read knowledge base details",
-  },
-  {
-    description: "Read metadata and processing status for one authorized file.",
-    key: "agent.tool.knowledge_file.read",
-    label: "Read knowledge file details",
-  },
-  {
-    description: "Extract full text or structured content from an authorized file.",
-    key: "agent.tool.knowledge_file.extract",
-    label: "Extract knowledge file content",
-  },
-  {
-    description: "Search an authorized knowledge base by semantic similarity.",
-    key: "agent.tool.knowledge_base.search",
-    label: "Search knowledge base vectors",
-  },
+  // Keep identifiers for legacy server-only role helpers. The member settings UI
+  // loads tool names and bilingual responsibility copy from FastAPI.
+  { key: "agent.tool.products.search" },
+  { key: "agent.tool.content.search" },
+  { key: "agent.tool.knowledge_bases.list" },
+  { key: "agent.tool.knowledge_files.list" },
+  { key: "agent.tool.knowledge_base.read" },
+  { key: "agent.tool.knowledge_file.read" },
+  { key: "agent.tool.knowledge_file.extract" },
+  { key: "agent.tool.knowledge_base.search" },
 ] as const;
 
-export type Permission = (typeof permissionCatalog)[number]["key"];
+type PermissionKey = (typeof permissionCatalog)[number]["key"];
+export type WorkspacePermission = Exclude<PermissionKey, `agent.tool.${string}`>;
+export type Permission = PermissionKey | (string & {});
 
 const allPermissions = permissionCatalog.map(({ key }) => key) as Permission[];
 
+// Legacy server-only role helpers still use these values. The settings page
+// replaces the Agent tool portion with the role defaults returned by FastAPI.
 export const defaultPermissionsByRole: Record<WorkspaceRole, Permission[]> = {
   admin: allPermissions,
   editor: [
@@ -189,7 +163,10 @@ export function getEffectivePermissions(
   }
 
   for (const override of overrides) {
-    if (!permissionCatalog.some(({ key }) => key === override.permission)) {
+    if (
+      !permissionCatalog.some(({ key }) => key === override.permission) &&
+      !override.permission.startsWith("agent.tool.")
+    ) {
       continue;
     }
 

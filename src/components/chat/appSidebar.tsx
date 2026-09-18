@@ -3,7 +3,6 @@
 import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
 import {
   DatabaseIcon,
-  KeyRoundIcon,
   MessageSquareIcon,
   PanelLeftIcon,
   PenSquareIcon,
@@ -12,7 +11,7 @@ import {
   UploadCloudIcon,
 } from "lucide-react";
 import type { User } from "@/lib/auth";
-import { Link, useRouter } from "@/lib/router";
+import { Link, usePathname, useRouter } from "@/lib/router";
 import { type MouseEvent, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -43,7 +42,7 @@ import {
 } from "@/lib/backend/chatHistoryCache";
 import { requestBackend } from "@/lib/backend/request";
 import { getNewChatPath } from "@/lib/utils";
-import { sidebarSelectedMenuItemClassName } from "./sidebarStyles";
+import { getSidebarNavigationItemClassName } from "./sidebarStyles";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,10 +66,19 @@ export function AppSidebar({
   user: User | undefined;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { i18n, t } = useTranslation();
   const { setOpenMobile, toggleSidebar } = useSidebar();
   const queryClient = useQueryClient();
   const identity = useBackendIdentity(user?.id);
+  const activePathname = pathname.replace(/\/+$/, "") || "/";
+  const isNewChatActive = activePathname === "/";
+  const isPermissionsActive = activePathname === "/settings/members";
+  const isUploadActive = activePathname === "/upload";
+  const isKnowledgeBasesActive = activePathname.startsWith(
+    "/settings/knowledge-bases"
+  );
+  const isBusinessDataActive = activePathname === "/admin/data-tables";
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
@@ -173,7 +181,9 @@ export function AppSidebar({
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    className={sidebarSelectedMenuItemClassName}
+                    aria-current={isNewChatActive ? "page" : undefined}
+                    className={getSidebarNavigationItemClassName(isNewChatActive)}
+                    isActive={isNewChatActive}
                     onClick={handleNewChat}
                     tooltip={t("sidebar.newChat")}
                   >
@@ -185,11 +195,15 @@ export function AppSidebar({
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       asChild
-                      className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                      className={getSidebarNavigationItemClassName(isPermissionsActive)}
+                      isActive={isPermissionsActive}
                       onClick={closeMobile}
                       tooltip={t("sidebar.permissions")}
                     >
-                      <Link href="/settings/members">
+                      <Link
+                        aria-current={isPermissionsActive ? "page" : undefined}
+                        href="/settings/members"
+                      >
                         <ShieldCheckIcon className="size-4" />
                         <span className="text-[13px]">{t("sidebar.permissions")}</span>
                       </Link>
@@ -200,26 +214,15 @@ export function AppSidebar({
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       asChild
-                      className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                      onClick={closeMobile}
-                      tooltip={t("sidebar.knowledgeAccess")}
-                    >
-                      <Link href="/settings/knowledge-bases">
-                        <KeyRoundIcon className="size-4" />
-                        <span className="text-[13px]">{t("sidebar.knowledgeAccess")}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ) : null}
-                {canManageKnowledgeBases ? (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                      className={getSidebarNavigationItemClassName(isUploadActive)}
+                      isActive={isUploadActive}
                       onClick={closeMobile}
                       tooltip={t("sidebar.upload")}
                     >
-                      <Link href="/upload">
+                      <Link
+                        aria-current={isUploadActive ? "page" : undefined}
+                        href="/upload"
+                      >
                         <UploadCloudIcon className="size-4" />
                         <span className="text-[13px]">{t("sidebar.upload")}</span>
                       </Link>
@@ -230,11 +233,15 @@ export function AppSidebar({
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       asChild
-                      className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                      className={getSidebarNavigationItemClassName(isKnowledgeBasesActive)}
+                      isActive={isKnowledgeBasesActive}
                       onClick={closeMobile}
                       tooltip={t("sidebar.knowledgeBases")}
                     >
-                      <Link href="/settings/knowledge-bases/files">
+                      <Link
+                        aria-current={isKnowledgeBasesActive ? "page" : undefined}
+                        href="/settings/knowledge-bases/files"
+                      >
                         <DatabaseIcon className="size-4" />
                         <span className="text-[13px]">{t("sidebar.knowledgeBases")}</span>
                       </Link>
@@ -245,11 +252,15 @@ export function AppSidebar({
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       asChild
-                      className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                      className={getSidebarNavigationItemClassName(isBusinessDataActive)}
+                      isActive={isBusinessDataActive}
                       onClick={closeMobile}
                       tooltip={i18n.language.toLowerCase().startsWith("zh") ? "业务数据表" : "Business data tables"}
                     >
-                      <Link href="/admin/data-tables">
+                      <Link
+                        aria-current={isBusinessDataActive ? "page" : undefined}
+                        href="/admin/data-tables"
+                      >
                         <DatabaseIcon className="size-4" />
                         <span className="text-[13px]">
                           {i18n.language.toLowerCase().startsWith("zh") ? "业务数据表" : "Business data"}
