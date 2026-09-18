@@ -1,3 +1,5 @@
+import json
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -30,6 +32,12 @@ class KnowledgeSearchResult(BaseModel):
     content: str
     file_id: str = Field(alias="fileId")
     file_name: str = Field(alias="fileName")
+    chunk_index: int = Field(alias="chunkIndex")
+    locator: dict[str, str | int] | None = None
+    source_locators: list[dict[str, str | int]] = Field(
+        default_factory=list,
+        alias="sourceLocators",
+    )
     score: float
 
 
@@ -41,8 +49,10 @@ SEARCH_QUERY = text(
     """
     SELECT
         chunk."id" AS chunk_id,
+        chunk."chunkIndex" AS chunk_index,
         chunk."content" AS content,
         chunk."fileId" AS file_id,
+        chunk."metadata" AS metadata,
         file."originalName" AS file_name,
         1 - (chunk."embedding" <=> CAST(:embedding AS vector)) AS score
     FROM "KnowledgeChunk" AS chunk
@@ -72,6 +82,18 @@ def _feature_disabled() -> JSONResponse:
             ),
         },
     )
+
+
+def _chunk_metadata(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
 
 
 @router.post("/{knowledge_base_id}/search", response_model=KnowledgeSearchResponse)
@@ -138,6 +160,12 @@ async def search_knowledge_base(
                 content=str(row["content"]),
                 fileId=str(row["file_id"]),
                 fileName=str(row["file_name"]),
+                chunkIndex=int(row["chunk_index"]),
+                locator=_chunk_metadata(row.get("metadata")).get("locator"),
+                sourceLocators=_chunk_metadata(row.get("metadata")).get(
+                    "sourceLocators",
+                    [],
+                ),
                 score=float(row["score"]),
             )
             for row in rows

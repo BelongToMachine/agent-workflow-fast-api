@@ -99,6 +99,7 @@ class KnowledgeParsedDocumentListItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     chunk_count: int = Field(alias="chunkCount")
+    embedded_chunk_count: int = Field(alias="embeddedChunkCount")
     chunk_error_message: str | None = Field(
         default=None,
         alias="chunkErrorMessage",
@@ -300,6 +301,14 @@ PARSED_DOCUMENT_LIST_QUERY = text(
               AND chunk."knowledgeBaseId" = parsed."knowledgeBaseId"
               AND chunk."workspaceId" = parsed."workspaceId"
         ) AS chunk_count,
+        (
+            SELECT COUNT(*)
+            FROM "KnowledgeChunk" AS chunk
+            WHERE chunk."fileId" = parsed."fileId"
+              AND chunk."knowledgeBaseId" = parsed."knowledgeBaseId"
+              AND chunk."workspaceId" = parsed."workspaceId"
+              AND chunk."embedding" IS NOT NULL
+        ) AS embedded_chunk_count,
         parsed."chunkErrorMessage" AS chunk_error_message,
         parsed."chunkStatus" AS chunk_status,
         parsed."createdAt" AS created_at,
@@ -433,6 +442,21 @@ CHUNKS_SELECT_FOR_EMBEDDING_QUERY = text(
     """
 )
 
+CHUNKS_SELECT_FOR_ALL_EMBEDDING_QUERY = text(
+    """
+    SELECT "id" AS chunk_id, "content" AS content
+    FROM "KnowledgeChunk"
+    WHERE "fileId" = :file_id
+      AND "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+      AND (
+          "embedding" IS NULL
+          OR "embeddingModel" IS DISTINCT FROM :embedding_model
+      )
+    ORDER BY "chunkIndex" ASC, "id" ASC
+    """
+)
+
 CHUNK_EMBEDDING_UPDATE_QUERY = text(
     """
     UPDATE "KnowledgeChunk"
@@ -541,6 +565,7 @@ def _parsed_document_list_item(
     )
     return KnowledgeParsedDocumentListItem(
         chunkCount=chunk_count,
+        embeddedChunkCount=int(row["embedded_chunk_count"]),
         chunkErrorMessage=(
             row["chunk_error_message"]
             if isinstance(row.get("chunk_error_message"), str)
@@ -629,20 +654,92 @@ def _extract_text(filename: str, content: bytes) -> str:
 
 
 def _chunk_text(content: str) -> list[str]:
+    return [chunk for _start, _end, chunk in _chunk_text_ranges(content)]
+
+
+def _chunk_text_ranges(content: str) -> list[tuple[int, int, str]]:
     normalized = content.replace("\r\n", "\n").strip()
     if not normalized:
         return []
-    chunks: list[str] = []
+    chunks: list[tuple[int, int, str]] = []
     start = 0
     while start < len(normalized):
         end = min(start + CHUNK_SIZE, len(normalized))
-        chunk = normalized[start:end].strip()
+        untrimmed = normalized[start:end]
+        chunk = untrimmed.strip()
         if chunk:
-            chunks.append(chunk)
+            left_trim = len(untrimmed) - len(untrimmed.lstrip())
+            right_trim = len(untrimmed) - len(untrimmed.rstrip())
+            chunks.append((start + left_trim, end - right_trim, chunk))
         if end == len(normalized):
             break
         start = max(end - CHUNK_OVERLAP, start + 1)
     return chunks
+
+
+def _chunk_parsed_document(
+    document: ParsedDocument,
+) -> list[tuple[str, list[dict[str, str | int]]]]:
+    """Chunk rendered source text and retain the locators covered by each chunk."""
+    lines: list[str] = []
+    block_spans: list[tuple[int, int, dict[str, str | int]]] = []
+    cursor = 0
+    last_slide: int | None = None
+    last_shape: int | None = None
+
+    def append_line(line: str) -> tuple[int, int]:
+        nonlocal cursor
+        if lines:
+            cursor += 1
+        start = cursor
+        lines.append(line)
+        cursor += len(line)
+        return start, cursor
+
+    for block in document.blocks:
+        locator = block.locator
+        if "slide" in locator:
+            slide_number = int(locator["slide"])
+            if slide_number != last_slide:
+                append_line(f"[Slide: {slide_number}]")
+                last_slide = slide_number
+                last_shape = None
+            if "shape" in locator:
+                shape_number = int(locator["shape"])
+                if shape_number != last_shape:
+                    append_line(f"[Shape: {shape_number}]")
+                    last_shape = shape_number
+        if block.text:
+            start, end = append_line(block.text.replace("\r\n", "\n"))
+            block_spans.append((start, end, locator))
+
+    rendered = "\n".join(lines)
+    leading_trim = len(rendered) - len(rendered.lstrip())
+    normalized = rendered.strip()
+    result: list[tuple[str, list[dict[str, str | int]]]] = []
+    block_index = 0
+    for chunk_start, chunk_end, chunk in _chunk_text_ranges(normalized):
+        source_start = chunk_start + leading_trim
+        source_end = chunk_end + leading_trim
+        locators: list[dict[str, str | int]] = []
+        while (
+            block_index < len(block_spans)
+            and block_spans[block_index][1] <= source_start
+        ):
+            block_index += 1
+        current_block_index = block_index
+        while current_block_index < len(block_spans):
+            block_start, block_end, locator = block_spans[current_block_index]
+            if block_start >= source_end:
+                break
+            current_block_index += 1
+            if block_end <= source_start:
+                continue
+            normalized_locator = dict(locator)
+            if normalized_locator and normalized_locator not in locators:
+                locators.append(normalized_locator)
+        result.append((chunk, locators))
+    return result
 
 
 async def _mark_knowledge_chunks_failed(
@@ -839,8 +936,7 @@ async def materialize_knowledge_chunks(
         parsed_document = ParsedDocument.model_validate(
             _parsed_document_value(parsed_row["document"])
         )
-        extracted_text = render_document_text(parsed_document, include_markers=True)
-        chunks = _chunk_text(extracted_text)
+        chunks = _chunk_parsed_document(parsed_document)
         if not chunks:
             raise ValueError("No extractable text was found in the parsed document.")
 
@@ -863,12 +959,16 @@ async def materialize_knowledge_chunks(
                                     "parsedDocumentId": str(parsed_document_id),
                                     "parser": parsed_document.parser,
                                     "parserVersion": parsed_document.parser_version,
+                                    "locator": source_locators[0]
+                                    if source_locators
+                                    else None,
+                                    "sourceLocators": source_locators,
                                 },
                                 separators=(",", ":"),
                             ),
                             "workspace_id": workspace_id,
                         }
-                        for index, chunk in enumerate(chunks)
+                        for index, (chunk, source_locators) in enumerate(chunks)
                     ],
                 )
                 await connection.execute(
@@ -1172,6 +1272,69 @@ async def list_knowledge_file_chunks(
     )
 
 
+async def _embed_and_save_knowledge_chunks(
+    rows: list[dict[str, object]],
+    *,
+    file_id: UUID,
+    knowledge_base_id: UUID,
+    workspace_id: UUID,
+    settings: Settings,
+) -> KnowledgeChunkEmbeddingResponse | JSONResponse:
+    if not rows:
+        return KnowledgeChunkEmbeddingResponse(
+            dimensions=EMBEDDING_DIMENSIONS,
+            embeddedCount=0,
+            embeddingModel=settings.embedding_model,
+        )
+
+    try:
+        vectors = await embed_texts([str(row["content"]) for row in rows], settings)
+    except EmbeddingConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except EmbeddingProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(error),
+        ) from error
+
+    try:
+        async with get_db_connection() as connection:
+            async with connection.begin():
+                for row, vector in zip(rows, vectors, strict=True):
+                    chunk_id = UUID(str(row["chunk_id"]))
+                    update_result = await connection.execute(
+                        CHUNK_EMBEDDING_UPDATE_QUERY,
+                        {
+                            "chunk_id": chunk_id,
+                            "embedding": vector_literal(vector),
+                            "embedding_model": settings.embedding_model,
+                            "file_id": file_id,
+                            "knowledge_base_id": knowledge_base_id,
+                            "workspace_id": workspace_id,
+                        },
+                    )
+                    if update_result.scalar_one_or_none() is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="A knowledge chunk changed before its embedding was saved.",
+                        )
+    except HTTPException:
+        raise
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except SQLAlchemyError:
+        return _database_error("FastAPI could not save knowledge chunk embeddings.")
+
+    return KnowledgeChunkEmbeddingResponse(
+        dimensions=EMBEDDING_DIMENSIONS,
+        embeddedCount=len(rows),
+        embeddingModel=settings.embedding_model,
+    )
+
+
 @router.post(
     "/{knowledge_base_id}/files/{file_id}/chunks/embeddings",
     response_model=KnowledgeChunkEmbeddingResponse,
@@ -1225,51 +1388,67 @@ async def embed_knowledge_file_chunks(
             detail="One or more selected chunks were not found for this file.",
         )
 
-    try:
-        vectors = await embed_texts([str(row["content"]) for row in rows], settings)
-    except EmbeddingConfigurationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(error),
-        ) from error
-    except EmbeddingProviderError as error:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(error),
-        ) from error
+    return await _embed_and_save_knowledge_chunks(
+        rows,
+        file_id=file_id,
+        knowledge_base_id=knowledge_base_id,
+        workspace_id=workspace_id,
+        settings=settings,
+    )
+
+
+@router.post(
+    "/{knowledge_base_id}/files/{file_id}/chunks/embeddings/all",
+    response_model=KnowledgeChunkEmbeddingResponse,
+)
+async def embed_all_knowledge_file_chunks(
+    knowledge_base_id: UUID,
+    file_id: UUID,
+    workspace_id: UUID = Query(..., alias="workspace_id"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> KnowledgeChunkEmbeddingResponse | JSONResponse:
+    """Embed every unembedded or outdated-model chunk belonging to this file."""
+    await require_knowledge_base_permission(
+        current_user,
+        workspace_id,
+        knowledge_base_id,
+        "manage",
+    )
+    if not settings.knowledge_ingestion_enabled:
+        return _feature_disabled()
+    if not settings.knowledge_embeddings_enabled:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "code": "knowledge_embeddings:disabled",
+                "message": "Knowledge embeddings are disabled until the provider is configured.",
+            },
+        )
 
     try:
         async with get_db_connection() as connection:
-            async with connection.begin():
-                for row, vector in zip(rows, vectors, strict=True):
-                    chunk_id = UUID(str(row["chunk_id"]))
-                    update_result = await connection.execute(
-                        CHUNK_EMBEDDING_UPDATE_QUERY,
-                        {
-                            "chunk_id": chunk_id,
-                            "embedding": vector_literal(vector),
-                            "embedding_model": settings.embedding_model,
-                            "file_id": file_id,
-                            "knowledge_base_id": knowledge_base_id,
-                            "workspace_id": workspace_id,
-                        },
-                    )
-                    if update_result.scalar_one_or_none() is None:
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail="A selected chunk changed before its embedding was saved.",
-                        )
-    except HTTPException:
-        raise
+            result = await connection.execute(
+                CHUNKS_SELECT_FOR_ALL_EMBEDDING_QUERY,
+                {
+                    "embedding_model": settings.embedding_model,
+                    "file_id": file_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            rows = result.mappings().all()
     except RuntimeError as error:
         return _database_error(str(error))
     except SQLAlchemyError:
-        return _database_error("FastAPI could not save the selected knowledge embeddings.")
+        return _database_error("FastAPI could not load knowledge file chunks for embedding.")
 
-    return KnowledgeChunkEmbeddingResponse(
-        dimensions=EMBEDDING_DIMENSIONS,
-        embeddedCount=len(rows),
-        embeddingModel=settings.embedding_model,
+    return await _embed_and_save_knowledge_chunks(
+        rows,
+        file_id=file_id,
+        knowledge_base_id=knowledge_base_id,
+        workspace_id=workspace_id,
+        settings=settings,
     )
 
 

@@ -4,7 +4,7 @@
 
 本层负责让 AI Agent 通过受控工具读取已经存储在 S3/MinIO 中的知识文件，并将文件内容转换为统一的文本或结构化结果。
 
-解析层不直接写入业务表，也不直接把原始文件内容交给模型。它先生成可追溯的中间结果，再由 Agent 将结果分流到 PostgreSQL 业务数据通道或向量数据通道。
+解析层不直接写入业务表，也不直接把原始文件内容交给模型。它先生成可追溯的中间结果，再将结构化事实写入 PostgreSQL 业务表，或将选定文本块的 embedding 写入 PostgreSQL 的 pgvector 列。
 
 ```text
 S3/MinIO 原始文件
@@ -24,7 +24,7 @@ KnowledgeChunk
 AI Agent / Embedding / RAG
 ```
 
-当前实现把解析和切片拆成两个显式动作：上传只保存原始文件；点击“开始解析”后生成并保存 `ParsedDocument`；审核确认后点击“生成知识片段”才会替换该文件对应的 `KnowledgeChunk`。结构化业务入库和 Qdrant 仍是后续独立流程。
+当前实现把解析、切片和向量化拆成显式动作：上传只保存原始文件；点击“开始解析”后生成并保存 `ParsedDocument`；审核确认后点击“生成知识片段”才会替换该文件对应的 `KnowledgeChunk`；然后可选择片段生成 embedding，并将向量写入 PostgreSQL 的 `KnowledgeChunk.embedding`（pgvector）。结构化业务入库仍是后续独立流程。
 
 ## 2. 核心原则
 
@@ -32,8 +32,8 @@ AI Agent / Embedding / RAG
 2. `KnowledgeFile` 代表一个实际上传的原始文件，是所有解析结果和业务数据的来源锚点。
 3. Agent 只能通过 `fileId` 读取文件，不能直接传入任意 bucket、object key 或文件系统路径。
 4. Parser 负责确定性解析，Agent 负责理解、分类和生成入库草稿。
-5. Agent 不直接执行任意 SQL，也不直接修改业务表或 Qdrant。
-6. 精确数值由 PostgreSQL 作为事实来源，语义文本由 Qdrant 作为召回来源。
+5. Agent 不直接执行任意 SQL，也不直接修改业务表或 `KnowledgeChunk`；向量写入和检索由后端受权限控制的 API 执行。
+6. 精确数值由 PostgreSQL 业务表作为事实来源，语义文本由 PostgreSQL 中的 pgvector 索引作为召回来源。
 7. 同一文件或同一内容块可以同时产生结构化事实和语义文本。
 
 ## 3. Agent 工具边界
@@ -99,13 +99,14 @@ getImportProposalTool
 
 Agent 根据解析结果生成待审核的结构化入库草稿。开发人员审核通过后，由后端事务性写入业务表。
 
-向量索引也应使用受控的发布流程，例如：
+向量生成由用户显式选择片段并调用后端 API：
 
 ```text
-publishApprovedChunks
+GET  /api/v1/knowledge-bases/{knowledgeBaseId}/files/{fileId}/chunks
+POST /api/v1/knowledge-bases/{knowledgeBaseId}/files/{fileId}/chunks/embeddings
 ```
 
-是否自动发布向量数据，应由业务策略决定，不能由模型自行决定。
+请求体中的 `chunkIds` 指定要向量化的片段。后端重新校验当前用户的知识库管理权限，以及 chunk 所属的 workspace、knowledge base 和文件范围；不会由 Agent 或浏览器自行写数据库。当前流程是人工选择后同步调用 embedding provider，再事务性保存向量。
 
 ## 4. 统一解析输出格式
 
@@ -220,9 +221,9 @@ ImportProposal
 
 价格、库存、尺寸和日期等信息不能依赖向量相似度作为最终答案，必须从 PostgreSQL 精确查询。
 
-## 7. Qdrant 语义数据通道
+## 7. PostgreSQL + pgvector 语义数据通道
 
-适合进入 Qdrant 的内容包括：
+适合生成语义向量的内容包括：
 
 - 产品介绍；
 - 使用说明和说明书；
@@ -230,37 +231,33 @@ ImportProposal
 - 活动方案和市场分析；
 - 大量自然语言描述。
 
-Qdrant 中的每个向量点应携带最少以下 payload：
+向量与 chunk 内容保存在同一条 PostgreSQL `KnowledgeChunk` 记录中。当前关键字段为：
 
-```json
-{
-  "fileId": "file-id",
-  "knowledgeBaseId": "base-id",
-  "workspaceId": "workspace-id",
-  "content": "该产品适用于户外场景……",
-  "locator": {
-    "page": 3
-  },
-  "parserVersion": "1.0",
-  "embeddingModel": "text-embedding-3-small",
-  "contentHash": "sha256..."
-}
+```text
+KnowledgeChunk.content          文本片段
+KnowledgeChunk.metadata         来源定位等 JSONB 元数据
+KnowledgeChunk.embedding        pgvector vector(1024)，未向量化时为 NULL
+KnowledgeChunk.embeddingModel   生成该向量的模型标识
 ```
 
-Qdrant 只负责召回相关内容，不负责保存精确业务事实。查询“产品价格”时应查询 PostgreSQL；查询“产品适合什么场景”时才主要查询 Qdrant；混合问题需要同时查询两者。
+`0003_knowledge_embeddings` 安装 PostgreSQL `vector` 扩展，并为 `KnowledgeChunk.embedding` 建立 HNSW cosine 索引；`0014_knowledge_embedding_qwen` 将向量列切换为当前使用的 `vector(1024)`，并记录 `embeddingModel`。当前 embedding provider 使用 OpenAI-compatible `/embeddings` 接口，模型名由 `EMBEDDING_MODEL` 配置，应用校验向量维度后写入 PostgreSQL。
 
-当前项目已经存在 `KnowledgeChunk` 和 pgvector 相关能力。若正式采用 Qdrant，应明确唯一的向量事实来源，不要让 pgvector 和 Qdrant 在没有同步策略的情况下同时承担生产索引职责。可以保留 `KnowledgeChunk` 作为解析块和生命周期目录，再将 Qdrant 作为向量索引；也可以完全由 Qdrant 管理 chunk，但必须保留文件 ID、内容哈希和解析版本等审计元数据。
+语义检索通过 pgvector cosine distance（`<=>`）排序，并按当前 embedding 模型、workspace、knowledge base、文件状态和 chunk 状态过滤。`POST /api/v1/knowledge-bases/{knowledgeBaseId}/search` 会先为查询文本生成 embedding，再在 PostgreSQL 中检索已向量化的 `KnowledgeChunk`。价格等精确事实仍应从 PostgreSQL 业务表查询；语义描述由 pgvector 召回；混合问题可以同时使用两类查询。
+
+当前没有 Qdrant 服务，也没有独立向量数据库。PostgreSQL 是 `KnowledgeChunk` 和向量数据的持久化位置；对象存储只保存原始文件及其对象，不保存向量。
 
 ## 8. 文件、解析和入库状态
 
-当前代码复用已有的 `KnowledgeFile.status` 表示解析任务状态：`pending` 表示已上传待解析，`processing` 表示解析中，`ready` 表示 ParsedDocument 已保存，`failed` 表示解析失败。新增的 `KnowledgeParsedDocument` 表保存中间态正文和 chunk 生成状态；结构化事实和未来向量索引仍需各自独立的状态。
+当前代码复用已有的 `KnowledgeFile.status` 表示文件解析状态；`KnowledgeParsedDocument.chunkStatus` 表示 chunk 生成状态。向量状态没有单独的 `vectorStatus` 列，而是从 `KnowledgeChunk.embedding` 是否为 NULL 推导；`embeddingModel` 记录已保存向量使用的模型。chunk 已生成不代表它已向量化，搜索只使用已有 embedding 且模型匹配的 chunk。
 
 ```text
 KnowledgeFile.status                    pending / processing / ready / failed
 KnowledgeParsedDocument.chunkStatus     pending / processing / ready / failed
-factsStatus                              pending / reviewing / approved / rejected / applied
-vectorStatus                             pending / indexing / ready / failed / retired
+KnowledgeChunk.embedding                NULL / vector(1024)
+KnowledgeChunk.embeddingModel           NULL / 当前模型标识
 ```
+
+`factsStatus` 和独立的 `vectorStatus` 目前都不是数据库字段。若未来结构化入库草稿或异步向量任务需要独立审核/任务状态，再按实际工作流新增状态字段或任务表。
 
 ### 8.1 KnowledgeParsedDocument
 
@@ -284,7 +281,7 @@ createdAt
 updatedAt
 ```
 
-这张表保留的是“确定性解析结果”，不是业务表，也不是向量数据库。它让开发人员可以审核和重跑切片；原始文件仍保存在 S3/MinIO，`KnowledgeFile` 是原文件和业务来源的锚点。
+这张表保留的是“确定性解析结果”，不是业务表，也不存放向量。它让开发人员可以审核和重跑切片；原始文件仍保存在 S3/MinIO，`KnowledgeFile` 是原文件和业务来源的锚点；embedding 与 chunk 文本保存在 PostgreSQL 的 `KnowledgeChunk` 中。
 
 当前阶段暂不做文件版本管理：一个 `KnowledgeFile` 只对应一条当前的 `KnowledgeParsedDocument`，重新解析会更新这条中间态记录；知识库级列表接口返回当前知识库下所有文件的 ParsedDocument。后续如果需要历史版本，再单独引入逻辑文件和版本表。
 
@@ -337,11 +334,11 @@ sourceLocator
 
 1. 停止或取消该文件的未完成解析任务；
 2. 删除或标记失效的结构化业务记录；
-3. 根据 `fileId` 删除 Qdrant 中的向量点；
+3. 删除 `KnowledgeFile` 时，由 PostgreSQL 外键级联删除对应的 `KnowledgeChunk` 及其 pgvector embedding；
 4. 删除 S3/MinIO 原始文件和解析产物；
 5. 写入审计日志。
 
-数据库中的 `sourceFileId` 外键可以用于级联删除结构化业务记录；对象存储和 Qdrant 的删除仍需由应用层显式执行。
+数据库中的 `sourceFileId` 外键可以用于级联删除结构化业务记录；`KnowledgeChunk` 及其 embedding 由 PostgreSQL 外键级联删除；原始对象仍需由应用层从 S3/MinIO 显式删除。
 
 ## 10. 安全和运行约束
 
@@ -352,7 +349,7 @@ sourceLocator
 - 解析内容视为不可信文档内容，不能把文件中的指令当成 Agent 系统指令；
 - 大文件使用流式读取、分页解析和后台 Worker；
 - 解析失败要保存明确错误和解析器版本；
-- 记录每次下载、解析、入库草稿和向量发布的操作者与时间。
+- 记录每次下载、解析、入库草稿和向量化操作的操作者与时间。
 
 开发环境可以暂时使用 FastAPI 后台任务；生产环境建议使用 Redis 队列和独立 Worker，避免阻塞 API 进程。
 
@@ -382,10 +379,12 @@ sourceLocator
 4. 开发人员审核；
 5. 后端事务性写入 PostgreSQL。
 
-### 第三阶段：语义索引
+### 当前已实现：pgvector embedding 与语义检索
 
-1. 对已审核的文本块进行语义切分；
-2. 生成 embedding；
-3. 写入 Qdrant 并保存文件、块和模型元数据；
-4. 按 `fileId` 支持删除、重建和版本切换；
-5. 实现 PostgreSQL 精确查询与 Qdrant 语义查询的混合 Agent 路由。
+1. 从知识库文件管理界面分页查看 `KnowledgeChunk`，选择要向量化的 chunk；
+2. 后端按 `EMBEDDING_MODEL` 调用兼容 OpenAI 的 embedding provider，验证 1024 维响应；
+3. 将向量和 `embeddingModel` 写回 PostgreSQL 的 `KnowledgeChunk`；
+4. 用 pgvector HNSW cosine 索引执行语义检索，并按 workspace、knowledge base、文件和模型隔离；
+5. 删除文件时由 PostgreSQL 级联删除 chunk 与向量。更换 embedding 模型或维度时，需要按 migration/配置要求重建相应向量。
+
+结构化业务查询与 pgvector 语义检索目前由不同 API 能力提供；后续可以再完善 Agent 对两类查询的组合路由，以及大批量向量任务的异步调度。

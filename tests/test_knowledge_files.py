@@ -468,6 +468,9 @@ def test_materialize_knowledge_chunks_is_a_separate_explicit_step(
     metadata = json.loads(connection.inserted_chunks[0]["metadata"])
     assert metadata["fileHash"] == "hash-123"
     assert metadata["parsedDocumentId"] == str(parsed_document_id)
+    assert metadata["chunkIndex"] == 0
+    assert metadata["locator"] == {"row": 1}
+    assert metadata["sourceLocators"] == [{"row": 1}, {"row": 2}]
     assert connection.chunk_status_updates[-1]["chunk_status"] == "ready"
 
 
@@ -979,6 +982,7 @@ def test_knowledge_base_parsed_document_list_returns_all_parsed_files(
         {
             "file_byte_size": 20,
             "chunk_count": 2,
+            "embedded_chunk_count": 2,
             "chunk_error_message": None,
             "chunk_status": "ready",
             "created_at": datetime(2026, 8, 17, 12, 30),
@@ -994,6 +998,7 @@ def test_knowledge_base_parsed_document_list_returns_all_parsed_files(
         {
             "file_byte_size": 21,
             "chunk_count": 0,
+            "embedded_chunk_count": 0,
             "chunk_error_message": None,
             "chunk_status": "pending",
             "created_at": datetime(2026, 8, 17, 12, 31),
@@ -1046,6 +1051,8 @@ def test_knowledge_base_parsed_document_list_returns_all_parsed_files(
     ]
     assert result.items[0].file_name == "first.csv"
     assert result.items[0].parsed_document.blocks
+    assert result.items[0].embedded_chunk_count == 2
+    assert result.items[1].embedded_chunk_count == 0
     assert result.items[1].chunk_status == "pending"
 
 
