@@ -149,6 +149,62 @@ export async function requestBackend<TData>(
   }
 }
 
+export type BackendStreamEvent = Record<string, unknown>;
+
+export async function requestBackendEventStream(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  onEvent: (event: BackendStreamEvent) => void
+): Promise<void> {
+  const response = await apiFetch(input, normalizeInit(init));
+  if (!response.ok) {
+    await parseBackendResponse<never>(response);
+    return;
+  }
+  if (!response.body) {
+    throw new BackendRequestError(502, {
+      code: "backend:invalid_stream",
+      message: "The backend did not return a readable event stream.",
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      pending += decoder.decode(value, { stream: !done });
+      const frames = pending.split("\n\n");
+      pending = frames.pop() ?? "";
+      for (const frame of frames) {
+        const payload = frame
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trim())
+          .join("\n");
+        if (!payload) {
+          continue;
+        }
+        try {
+          const event = JSON.parse(payload) as unknown;
+          if (event && typeof event === "object" && !Array.isArray(event)) {
+            onEvent(event as BackendStreamEvent);
+          }
+        } catch {
+          // Ignore a malformed provider frame: the terminal backend event holds
+          // the actionable error, while a partial frame must not break the UI.
+        }
+      }
+      if (done) {
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function requestBackendUpload<TData>(
   input: RequestInfo | URL,
   formData: FormData,

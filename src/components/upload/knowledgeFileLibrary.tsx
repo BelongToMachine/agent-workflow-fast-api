@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BotMessageSquareIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -20,9 +21,16 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InlineLoadingState } from "@/components/ui/loadingState";
+import { BusinessImportReview } from "@/components/upload/businessImportReview";
+import {
+  ParsedDocumentBlocks,
+  type ParsedDocumentBlock,
+} from "@/components/upload/parsedDocumentBlocks";
 import { BackendRequestError, requestBackend } from "@/lib/backend/request";
 import {
+  getAllKnowledgeChunksEmbeddingPath,
   getKnowledgeChunkActionLabelKey,
+  getKnowledgeChunkDisplayStatus,
   getKnowledgeChunkSelectorKey,
 } from "@/lib/knowledgeChunkAction";
 import { cn } from "@/lib/utils";
@@ -45,17 +53,8 @@ type KnowledgeFileListResponse = {
   files: KnowledgeFile[];
 };
 
-type ParsedBlock = {
-  blockId: string;
-  data?: unknown;
-  extractionMethod: string;
-  kind: string;
-  locator: Record<string, string | number>;
-  text: string;
-};
-
 type ParsedDocument = {
-  blocks: ParsedBlock[];
+  blocks: ParsedDocumentBlock[];
   contentType: string;
   fileHash: string;
   fileId: string | null;
@@ -75,6 +74,7 @@ type ParsedDocumentListItem = {
   chunkErrorMessage: string | null;
   chunkStatus: string;
   createdAt: string;
+  embeddedChunkCount: number;
   fileByteSize: number;
   fileHash: string;
   fileId: string;
@@ -167,16 +167,10 @@ function chunkStatusVariant(
   if (status === "failed") {
     return "destructive";
   }
-  if (status === "ready") {
+  if (status === "ready" || status === "embedded") {
     return "default";
   }
   return "outline";
-}
-
-function formatLocator(locator: Record<string, string | number>) {
-  return Object.entries(locator)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join(" · ");
 }
 
 function shortHash(value: string) {
@@ -606,6 +600,9 @@ export function KnowledgeFileLibrary({
         i18nLanguage={i18n.language}
         isLoading={isLoadingParsedDocuments}
         knowledgeBaseId={knowledgeBaseId}
+        onEmbeddingComplete={() => {
+          void loadParsedDocuments(parsedDocuments?.offset ?? 0);
+        }}
         onGenerateChunks={(fileId) =>
           void generateChunksForFiles([fileId])
         }
@@ -704,6 +701,7 @@ function ParsedDocumentLibrary({
   isLoading,
   isGeneratingChunks,
   knowledgeBaseId,
+  onEmbeddingComplete,
   onGenerateChunks,
   onNext,
   onPrevious,
@@ -716,6 +714,7 @@ function ParsedDocumentLibrary({
   isLoading: boolean;
   isGeneratingChunks: boolean;
   knowledgeBaseId: string;
+  onEmbeddingComplete: () => void;
   onGenerateChunks: (fileId: string) => void;
   onNext: () => void;
   onPrevious: () => void;
@@ -773,6 +772,7 @@ function ParsedDocumentLibrary({
                 item={item}
                 knowledgeBaseId={knowledgeBaseId}
                 key={item.parsedDocumentId}
+                onEmbeddingComplete={onEmbeddingComplete}
                 onGenerateChunks={onGenerateChunks}
                 t={t}
               />
@@ -819,6 +819,7 @@ function ParsedDocumentCard({
   isGeneratingChunks,
   item,
   knowledgeBaseId,
+  onEmbeddingComplete,
   onGenerateChunks,
   t,
 }: {
@@ -827,12 +828,19 @@ function ParsedDocumentCard({
   isGeneratingChunks: boolean;
   item: ParsedDocumentListItem;
   knowledgeBaseId: string;
+  onEmbeddingComplete: () => void;
   onGenerateChunks: (fileId: string) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const document = item.parsedDocument;
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isBusinessImportOpen, setIsBusinessImportOpen] = useState(false);
   const detailsId = `parsed-document-details-${item.parsedDocumentId}`;
+  const displayChunkStatus = getKnowledgeChunkDisplayStatus(
+    item.chunkStatus,
+    item.chunkCount,
+    item.embeddedChunkCount
+  );
 
   return (
     <article className="overflow-hidden rounded-xl border border-border/70 bg-background/60">
@@ -847,9 +855,18 @@ function ParsedDocumentCard({
           <Badge variant={item.fileStatus === "failed" ? "destructive" : "outline"}>
             {item.fileStatus}
           </Badge>
-          <Badge variant={chunkStatusVariant(item.chunkStatus)}>
-            {t(`settings.chunkStatus.${item.chunkStatus}`)}
+          <Badge variant={chunkStatusVariant(displayChunkStatus)}>
+            {t(`settings.chunkStatus.${displayChunkStatus}`)}
           </Badge>
+          <Button
+            aria-label={t("settings.openBusinessImport", { fileName: item.fileName })}
+            onClick={() => setIsBusinessImportOpen(true)}
+            size="sm"
+            variant="outline"
+          >
+            <BotMessageSquareIcon />
+            {t("settings.openBusinessImport")}
+          </Button>
           <Button
             aria-controls={detailsId}
             aria-expanded={isExpanded}
@@ -920,6 +937,7 @@ function ParsedDocumentCard({
               disabled={disabled}
               fileId={item.fileId}
               knowledgeBaseId={knowledgeBaseId}
+              onEmbeddingComplete={onEmbeddingComplete}
               key={getKnowledgeChunkSelectorKey(
                 item.chunkStatus,
                 item.chunkCount,
@@ -929,44 +947,22 @@ function ParsedDocumentCard({
             />
           </div>
 
-          <div className="space-y-3 p-4">
-            {document.blocks.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-border/80 px-4 py-8 text-center text-muted-foreground text-sm">
-                {t("settings.noParsedBlocks")}
-              </p>
-            ) : (
-              document.blocks.map((block, index) => (
-                <article
-                  className="rounded-xl border border-border/70 bg-card/60 p-4"
-                  key={block.blockId}
-                >
-                  <div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-                    <Badge variant="outline">{block.kind}</Badge>
-                    <span>{block.extractionMethod}</span>
-                    <span>#{index + 1}</span>
-                    <span>{formatLocator(block.locator)}</span>
-                  </div>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6">
-                    {block.text}
-                  </p>
-                  {block.data !== undefined && block.data !== null ? (
-                    <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-muted/70 p-3 text-xs leading-5">
-                      {JSON.stringify(block.data, null, 2)}
-                    </pre>
-                  ) : null}
-                </article>
-              ))
-            )}
-            {document.truncated ? (
-              <p className="text-muted-foreground text-xs">
-                {t("settings.parsedDocumentTruncated", {
-                  count: document.totalBlocks ?? document.blocks.length,
-                })}
-              </p>
-            ) : null}
-          </div>
+          <ParsedDocumentBlocks
+            blocks={document.blocks}
+            totalBlocks={document.totalBlocks}
+            truncated={document.truncated}
+            t={t}
+          />
         </div>
       ) : null}
+
+      <BusinessImportReview
+        disabled={disabled}
+        isOpen={isBusinessImportOpen}
+        knowledgeBaseId={knowledgeBaseId}
+        onOpenChange={setIsBusinessImportOpen}
+        parsedDocumentId={item.parsedDocumentId}
+      />
 
       <div className="flex flex-col gap-3 border-t border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-muted-foreground text-xs">
@@ -1002,6 +998,7 @@ function KnowledgeChunkSelector({
   disabled,
   fileId,
   knowledgeBaseId,
+  onEmbeddingComplete,
   t,
 }: {
   chunkCount: number;
@@ -1009,6 +1006,7 @@ function KnowledgeChunkSelector({
   disabled: boolean;
   fileId: string;
   knowledgeBaseId: string;
+  onEmbeddingComplete: () => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const [offset, setOffset] = useState(0);
@@ -1021,6 +1019,7 @@ function KnowledgeChunkSelector({
     chunkCount > 0 || chunkStatus === "processing"
   );
   const [isEmbedding, setIsEmbedding] = useState(false);
+  const [isEmbeddingAll, setIsEmbeddingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadChunkPage = useCallback(async (pageOffset: number) => {
@@ -1109,6 +1108,7 @@ function KnowledgeChunkSelector({
       );
       setSelectedChunkIds(new Set());
       setReloadIndex((current) => current + 1);
+      onEmbeddingComplete();
     } catch (embedError) {
       const message =
         embedError instanceof Error
@@ -1118,6 +1118,50 @@ function KnowledgeChunkSelector({
       toast.error(message);
     } finally {
       setIsEmbedding(false);
+    }
+  };
+
+  const embedAllChunks = async () => {
+    if (chunkCount === 0 || isEmbedding) {
+      return;
+    }
+
+    setIsEmbedding(true);
+    setIsEmbeddingAll(true);
+    setError(null);
+    try {
+      const result = await requestBackend<KnowledgeChunkEmbeddingResponse>(
+        getAllKnowledgeChunksEmbeddingPath(knowledgeBaseId, fileId),
+        { method: "POST" }
+      );
+      if (result.embeddedCount === 0) {
+        toast.success(
+          t("settings.knowledgeChunksAlreadyEmbedded", {
+            model: result.embeddingModel,
+          })
+        );
+      } else {
+        toast.success(
+          t("settings.knowledgeChunksEmbedded", {
+            count: result.embeddedCount,
+            dimensions: result.dimensions,
+            model: result.embeddingModel,
+          })
+        );
+      }
+      setSelectedChunkIds(new Set());
+      setReloadIndex((current) => current + 1);
+      onEmbeddingComplete();
+    } catch (embedError) {
+      const message =
+        embedError instanceof Error
+          ? embedError.message
+          : t("settings.knowledgeChunksEmbeddingAllFailed");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsEmbedding(false);
+      setIsEmbeddingAll(false);
     }
   };
 
@@ -1133,18 +1177,38 @@ function KnowledgeChunkSelector({
           </p>
         </div>
         {chunkPage && chunkPage.items.length > 0 ? (
-          <Button
-            disabled={disabled || isEmbedding}
-            onClick={togglePageSelection}
-            size="sm"
-            variant="ghost"
-          >
-            {t(
-              allPageChunksSelected
-                ? "settings.clearChunkSelection"
-                : "settings.selectChunkPage"
-            )}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <Button
+              disabled={disabled || isEmbedding}
+              onClick={togglePageSelection}
+              size="sm"
+              variant="ghost"
+            >
+              {t(
+                allPageChunksSelected
+                  ? "settings.clearChunkSelection"
+                  : "settings.selectChunkPage"
+              )}
+            </Button>
+            <Button
+              aria-busy={isEmbedding && isEmbeddingAll}
+              disabled={disabled || isEmbedding}
+              onClick={() => void embedAllChunks()}
+              size="sm"
+              variant="outline"
+            >
+              {isEmbedding && isEmbeddingAll ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <ScanTextIcon />
+              )}
+              {t(
+                isEmbedding && isEmbeddingAll
+                  ? "settings.embeddingAllKnowledgeChunks"
+                  : "settings.embedAllKnowledgeChunks"
+              )}
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -1233,17 +1297,18 @@ function KnowledgeChunkSelector({
                 <ChevronRightIcon />
               </Button>
               <Button
+                aria-busy={isEmbedding && !isEmbeddingAll}
                 disabled={disabled || isEmbedding || selectedChunkIds.size === 0}
                 onClick={() => void embedSelectedChunks()}
                 size="sm"
               >
-                {isEmbedding ? (
+                {isEmbedding && !isEmbeddingAll ? (
                   <LoaderCircleIcon className="animate-spin" />
                 ) : (
                   <ScanTextIcon />
                 )}
                 {t(
-                  isEmbedding
+                  isEmbedding && !isEmbeddingAll
                     ? "settings.embeddingSelectedChunks"
                     : "settings.embedSelectedChunks",
                   { count: selectedChunkIds.size }

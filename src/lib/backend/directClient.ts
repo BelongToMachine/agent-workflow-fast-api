@@ -38,6 +38,7 @@ function appendWorkspaceId(url: URL) {
     path.startsWith("/api/v1/documents") ||
     path.startsWith("/api/v1/suggestions") ||
     path.startsWith("/api/v1/knowledge-") ||
+    path.startsWith("/api/v1/business-import") ||
     path.startsWith("/api/v1/admin/") ||
     path === "/api/v1/files/upload" ||
     path === "/api/v1/products" ||
@@ -120,7 +121,10 @@ function mapLegacyApiPath(
   }
 
   if (!targetPath) {
-    return `${source.pathname}${source.search}`;
+    const target = new URL(source.pathname, "http://vite-fastapi-proxy.local");
+    target.search = query.toString();
+    appendWorkspaceId(target);
+    return `${target.pathname}${target.search}`;
   }
 
   const target = new URL(targetPath, "http://vite-fastapi-proxy.local");

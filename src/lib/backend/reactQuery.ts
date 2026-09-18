@@ -34,6 +34,8 @@ export const backendQueryKeys = {
     ["backend", "user", identity, "invitations"] as const,
   models: (identity: string) =>
     ["backend", "user", identity, "models"] as const,
+  knowledgeBases: (identity: string) =>
+    ["backend", "user", identity, "knowledge-bases"] as const,
 };
 
 type BackendQueryOptions<TData> = {
