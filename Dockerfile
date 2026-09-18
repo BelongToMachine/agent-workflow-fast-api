@@ -18,6 +18,17 @@ RUN pip install --no-cache-dir "uv>=0.6,<1.0" \
 
 COPY app ./app
 
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+        libgl1 \
+        libglib2.0-0 \
+        libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fail the image build rather than waiting for deployment if RapidOCR's native
+# OpenCV runtime dependencies are missing from the slim base image.
+RUN python -c "import cv2; from rapidocr_pdf import RapidOCRPDF"
+
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app
 
