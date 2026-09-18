@@ -34,6 +34,7 @@ class WorkspaceMemberView(BaseModel):
     effective_permissions: list[str] = Field(alias="effectivePermissions")
     email: str | None
     id: str
+    is_custom_role: bool = Field(alias="isCustomRole")
     name: str | None = None
     overrides: list[PermissionOverride]
     role: WorkspaceRole
@@ -254,27 +255,34 @@ def _build_member_views(
             )
         )
 
-    return [
-        WorkspaceMemberView(
-            effectivePermissions=get_effective_permissions(
-                str(row["role"]),
-                (
-                    (override.effect, override.permission)
-                    for override in overrides_by_member.get(str(row["id"]), [])
-                ),
+    member_views: list[WorkspaceMemberView] = []
+    for row in member_rows:
+        role = str(row["role"])
+        member_overrides = overrides_by_member.get(str(row["id"]), [])
+        effective_permissions = get_effective_permissions(
+            role,
+            (
+                (override.effect, override.permission)
+                for override in member_overrides
             ),
-            email=row["email"] if isinstance(row["email"], str) else None,
-            id=str(row["id"]),
-            name=row["name"] if isinstance(row["name"], str) else None,
-            overrides=overrides_by_member.get(str(row["id"]), []),
-            role=str(row["role"]),
-            status=str(row["status"]),
-            userId=str(row["user_id"]),
-            workspaceId=str(row["workspace_id"]),
-            workspaceName=str(row["workspace_name"]),
         )
-        for row in member_rows
-    ]
+        baseline_permissions = get_effective_permissions(role, ())
+        member_views.append(
+            WorkspaceMemberView(
+                effectivePermissions=effective_permissions,
+                email=row["email"] if isinstance(row["email"], str) else None,
+                id=str(row["id"]),
+                isCustomRole=set(effective_permissions) != set(baseline_permissions),
+                name=row["name"] if isinstance(row["name"], str) else None,
+                overrides=member_overrides,
+                role=role,
+                status=str(row["status"]),
+                userId=str(row["user_id"]),
+                workspaceId=str(row["workspace_id"]),
+                workspaceName=str(row["workspace_name"]),
+            )
+        )
+    return member_views
 
 
 def _build_access_candidate_views(

@@ -73,7 +73,31 @@ def test_member_views_include_role_defaults_and_overrides() -> None:
         "agent.tool.knowledge_file.read",
         "agent.tool.knowledge_base.search",
     ]
+    assert views[0].is_custom_role is True
+    assert views[0].model_dump(by_alias=True)["isCustomRole"] is True
     assert views[0].user_id == "00000000-0000-0000-0000-000000000011"
+
+
+def test_member_views_mark_standard_role_permissions_as_not_custom() -> None:
+    member_id = UUID("00000000-0000-0000-0000-000000000010")
+    views = _build_member_views(
+        [
+            {
+                "id": member_id,
+                "role": "viewer",
+                "status": "active",
+                "user_id": UUID("00000000-0000-0000-0000-000000000011"),
+                "workspace_id": UUID("00000000-0000-0000-0000-000000000012"),
+                "email": "viewer@example.com",
+                "name": "Viewer",
+                "workspace_name": "Asianode",
+            }
+        ],
+        [],
+    )
+
+    assert views[0].is_custom_role is False
+    assert views[0].model_dump(by_alias=True)["isCustomRole"] is False
 
 
 def test_member_views_apply_agent_tool_permission_denials() -> None:

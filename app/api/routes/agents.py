@@ -5,8 +5,13 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.agent_tool_catalog import AgentToolLanguage, get_agent_tool_catalog
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
+from app.core.permissions import (
+    get_agent_tool_permissions_by_role,
+    get_default_permissions_by_role,
+)
 from app.core.workspace_access import require_workspace_permission
 from app.services.agent_tools import AgentToolError, execute_agent_tool
 from app.services.agent_workflow import (
@@ -70,6 +75,36 @@ class AgentRunResponse(BaseModel):
     answer: str
     steps: int
     tool_calls: list[AgentToolExecutionResponse] = Field(alias="toolCalls")
+
+
+class AgentToolCatalogEntry(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    description: str
+    function_name: str = Field(alias="functionName")
+    label: str
+    permission_code: str = Field(alias="permissionCode")
+
+
+class AgentToolCatalogResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    default_permissions_by_role: dict[str, list[str]] = Field(alias="defaultPermissionsByRole")
+    tool_permissions_by_role: dict[str, list[str]] = Field(alias="toolPermissionsByRole")
+    tools: list[AgentToolCatalogEntry]
+
+
+@router.get("/tool-catalog", response_model=AgentToolCatalogResponse)
+async def list_agent_tool_catalog(
+    language: AgentToolLanguage = Query(default="en"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> AgentToolCatalogResponse:
+    del current_user  # Authentication is required; catalog copy is not member-specific.
+    return AgentToolCatalogResponse(
+        tools=get_agent_tool_catalog(language),
+        defaultPermissionsByRole=get_default_permissions_by_role(),
+        toolPermissionsByRole=get_agent_tool_permissions_by_role(),
+    )
 
 
 @router.post("/query", response_model=AgentQueryResponse)

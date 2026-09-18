@@ -368,6 +368,7 @@ PARSED_DOCUMENT_UPSERT_QUERY = text(
         "warningCount" = EXCLUDED."warningCount",
         "updatedAt" = CURRENT_TIMESTAMP,
         "workspaceId" = EXCLUDED."workspaceId"
+    RETURNING "id"
     """
 )
 
@@ -787,7 +788,11 @@ async def _mark_knowledge_chunks_failed(
             return
 
 
-async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
+async def process_knowledge_file(
+    file_id: UUID,
+    workspace_id: UUID,
+    create_chunks: bool = False,
+) -> None:
     """Read one stored file and persist its ParsedDocument intermediate state."""
     settings = get_settings()
     try:
@@ -837,9 +842,10 @@ async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
         )
         document = parsed_document.model_dump(by_alias=True)
 
+        parsed_document_id: UUID | None = None
         async with get_db_connection() as connection:
             async with connection.begin():
-                await connection.execute(
+                parsed_result = await connection.execute(
                     PARSED_DOCUMENT_UPSERT_QUERY,
                     {
                         "block_count": len(parsed_document.blocks),
@@ -855,6 +861,7 @@ async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
                         "workspace_id": workspace_id,
                     },
                 )
+                parsed_document_id = parsed_result.scalar_one_or_none()
                 await connection.execute(
                     FILE_STATUS_QUERY,
                     {
@@ -863,6 +870,34 @@ async def process_knowledge_file(file_id: UUID, workspace_id: UUID) -> None:
                         "status": "ready",
                         "workspace_id": workspace_id,
                     },
+                )
+
+        if create_chunks and parsed_document_id is not None:
+            try:
+                async with get_db_connection() as connection:
+                    async with connection.begin():
+                        claim = await connection.execute(
+                            PARSED_DOCUMENT_CHUNK_CLAIM_QUERY,
+                            {
+                                "file_id": file_id,
+                                "knowledge_base_id": row["knowledge_base_id"],
+                                "parsed_document_id": parsed_document_id,
+                                "workspace_id": workspace_id,
+                            },
+                        )
+                        claimed_id = claim.scalar_one_or_none()
+                if claimed_id is not None:
+                    await materialize_knowledge_chunks(
+                        file_id,
+                        workspace_id,
+                        parsed_document_id,
+                    )
+            except (RuntimeError, SQLAlchemyError) as error:
+                await _mark_knowledge_chunks_failed(
+                    error=error,
+                    file_id=file_id,
+                    parsed_document_id=parsed_document_id,
+                    workspace_id=workspace_id,
                 )
     except Exception as error:
         try:
@@ -1579,10 +1614,12 @@ async def list_knowledge_files(
 @router.post("/{knowledge_base_id}/files", response_model=None, status_code=202)
 async def upload_knowledge_file(
     knowledge_base_id: UUID,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     workspace_id: UUID = Query(..., alias="workspace_id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
+    automation: bool = False,
 ) -> dict[str, KnowledgeFileSummary] | JSONResponse:
     await require_knowledge_base_permission(
         current_user,
@@ -1690,6 +1727,14 @@ async def upload_knowledge_file(
     except SQLAlchemyError:
         await _best_effort_delete(settings, storage_key)
         return _database_error("FastAPI could not create the knowledge file record.")
+
+    if automation:
+        background_tasks.add_task(
+            process_knowledge_file,
+            UUID(str(inserted_id)),
+            workspace_id,
+            True,
+        )
 
     return {"file": _file_summary(dict(row))}
 

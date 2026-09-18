@@ -1,6 +1,5 @@
 import asyncio
 from contextlib import asynccontextmanager
-from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -15,8 +14,10 @@ from app.api.routes.knowledge_search import (
     KnowledgeSearchResponse,
     search_knowledge_base,
 )
+from app.core.agent_tool_catalog import AGENT_TOOL_CATALOG
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
+from app.core.permissions import DEFAULT_PERMISSIONS_BY_ROLE
 from app.main import app
 from app.services.agent_tools import (
     AGENT_TOOL_PERMISSION_CODES,
@@ -91,13 +92,9 @@ def test_agent_tools_expose_only_read_only_enterprise_search_tools() -> None:
 
 
 def test_agent_tool_definitions_are_filtered_by_individual_tool_permissions() -> None:
-    definitions = agent_tool_definitions(
-        allowed_tool_permissions={"agent.tool.products.search"}
-    )
+    definitions = agent_tool_definitions(allowed_tool_permissions={"agent.tool.products.search"})
 
-    assert [item["function"]["name"] for item in definitions] == [
-        "searchProductsTool"
-    ]
+    assert [item["function"]["name"] for item in definitions] == ["searchProductsTool"]
 
 
 def test_agent_tool_permission_mapping_covers_every_defined_tool() -> None:
@@ -108,24 +105,51 @@ def test_agent_tool_permission_mapping_covers_every_defined_tool() -> None:
     assert len(set(AGENT_TOOL_PERMISSION_CODES.values())) == len(tool_names)
 
 
-def test_agent_tool_permission_document_matches_schema_names_and_descriptions() -> None:
-    document = (Path(__file__).parents[1] / "docs/AI_AGENT_TOOL_PERMISSIONS.md").read_text()
-    normalized_document = " ".join(document.split())
+def test_agent_tool_schemas_use_runtime_catalog_entries() -> None:
+    definitions = agent_tool_definitions()
 
-    for definition in agent_tool_definitions():
+    assert {item["function"]["name"] for item in definitions} == set(AGENT_TOOL_CATALOG)
+    for definition in definitions:
         function = definition["function"]
-        function_name = function["name"]
-        permission = AGENT_TOOL_PERMISSION_CODES[function_name]
+        metadata = AGENT_TOOL_CATALOG[function["name"]]
+        assert function["description"] == metadata["model_description"]
+        assert AGENT_TOOL_PERMISSION_CODES[function["name"]] == metadata["permission_code"]
 
-        assert f"| `{permission}` | `{function_name}` |" in document
-        assert " ".join(function["description"].split()) in normalized_document
+
+def test_agent_tool_catalog_serves_bilingual_responsibilities() -> None:
+    chinese = client.get("/api/v1/agents/tool-catalog?language=zh")
+    english = client.get("/api/v1/agents/tool-catalog?language=en")
+
+    assert chinese.status_code == 200
+    assert english.status_code == 200
+    chinese_tools = chinese.json()["tools"]
+    english_tools = english.json()["tools"]
+    assert len(chinese_tools) == len(english_tools) == 8
+    assert chinese_tools[0] == {
+        "functionName": "searchProductsTool",
+        "permissionCode": "agent.tool.products.search",
+        "label": "搜索产品数据",
+        "description": "检索产品和供应商记录，包括产品规格、价格与运营信息。",
+    }
+    assert english_tools[0] == {
+        "functionName": "searchProductsTool",
+        "permissionCode": "agent.tool.products.search",
+        "label": "Search product data",
+        "description": (
+            "Search product and supplier records, including specifications, prices, and "
+            "operational details."
+        ),
+    }
+    tool_permissions_by_role = chinese.json()["toolPermissionsByRole"]
+    assert "agent.tool.knowledge_file.extract" not in tool_permissions_by_role["employee"]
+    assert "agent.tool.knowledge_file.extract" in tool_permissions_by_role["admin"]
+    assert chinese.json()["defaultPermissionsByRole"] == {
+        role: list(permissions) for role, permissions in DEFAULT_PERMISSIONS_BY_ROLE.items()
+    }
 
 
 def test_agent_search_tools_describe_source_scoped_grounding() -> None:
-    definitions = {
-        item["function"]["name"]: item["function"]
-        for item in agent_tool_definitions()
-    }
+    definitions = {item["function"]["name"]: item["function"] for item in agent_tool_definitions()}
 
     for tool_name, input_model in (
         ("searchProductsTool", ProductToolInput),
@@ -135,9 +159,10 @@ def test_agent_search_tools_describe_source_scoped_grounding() -> None:
         schema = input_model.model_json_schema()
 
         assert "sourceFileNames" in schema["properties"]
-        assert "Exact source file display names" in schema["properties"][
-            "sourceFileNames"
-        ]["description"]
+        assert (
+            "Exact source file display names"
+            in schema["properties"]["sourceFileNames"]["description"]
+        )
         assert "only returned" in description
 
     assert ProductToolInput.model_validate(
@@ -322,16 +347,12 @@ def test_knowledge_search_is_disabled_by_default() -> None:
 
 def test_knowledge_base_tool_requires_a_valid_knowledge_base_id() -> None:
     with pytest.raises(ValueError):
-        KnowledgeBaseToolInput.model_validate(
-            {"knowledgeBaseId": "not-a-uuid", "query": "pricing"}
-        )
+        KnowledgeBaseToolInput.model_validate({"knowledgeBaseId": "not-a-uuid", "query": "pricing"})
 
 
 def test_knowledge_file_list_tool_requires_a_valid_knowledge_base_id() -> None:
     with pytest.raises(ValueError):
-        KnowledgeFileListToolInput.model_validate(
-            {"knowledgeBaseId": "not-a-uuid"}
-        )
+        KnowledgeFileListToolInput.model_validate({"knowledgeBaseId": "not-a-uuid"})
 
 
 def test_knowledge_file_extract_tool_validates_scoped_arguments() -> None:
@@ -396,9 +417,7 @@ def test_knowledge_base_tool_calls_permission_checked_search(monkeypatch) -> Non
     )
 
     assert result == {"query": "pricing", "limit": 3}
-    assert captured["knowledge_base_id"] == UUID(
-        "00000000-0000-0000-0000-000000000002"
-    )
+    assert captured["knowledge_base_id"] == UUID("00000000-0000-0000-0000-000000000002")
     assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
 
 
@@ -454,9 +473,7 @@ def test_list_knowledge_files_tool_calls_permission_checked_listing(monkeypatch)
     )
 
     assert result == {"files": []}
-    assert captured["knowledge_base_id"] == UUID(
-        "00000000-0000-0000-0000-000000000002"
-    )
+    assert captured["knowledge_base_id"] == UUID("00000000-0000-0000-0000-000000000002")
     assert captured["workspace_id"] == UUID("00000000-0000-0000-0000-000000000001")
 
 
@@ -618,9 +635,7 @@ def test_get_knowledge_file_tool_returns_only_the_authorized_resource(monkeypatc
     )
 
     assert result["file"]["status"] == "ready"
-    assert captured["knowledge_base_id"] == UUID(
-        "00000000-0000-0000-0000-000000000002"
-    )
+    assert captured["knowledge_base_id"] == UUID("00000000-0000-0000-0000-000000000002")
 
 
 def test_get_knowledge_base_tool_rejects_a_resource_outside_authorized_listing(
@@ -639,12 +654,10 @@ def test_get_knowledge_base_tool_rejects_a_resource_outside_authorized_listing(
             execute_agent_tool(
                 "getKnowledgeBaseTool",
                 {"knowledgeBaseId": "00000000-0000-0000-0000-000000000002"},
-                current_user=AuthenticatedUser(
-                    user_id="development-user", is_development=True
-                ),
+                current_user=AuthenticatedUser(user_id="development-user", is_development=True),
                 workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
                 can_query_knowledge=True,
-            allowed_tool_permissions=ALL_AGENT_TOOL_PERMISSIONS,
+                allowed_tool_permissions=ALL_AGENT_TOOL_PERMISSIONS,
             )
         )
 
@@ -668,12 +681,10 @@ def test_get_knowledge_file_tool_rejects_a_resource_outside_authorized_listing(
                     "fileId": "00000000-0000-0000-0000-000000000003",
                     "knowledgeBaseId": "00000000-0000-0000-0000-000000000002",
                 },
-                current_user=AuthenticatedUser(
-                    user_id="development-user", is_development=True
-                ),
+                current_user=AuthenticatedUser(user_id="development-user", is_development=True),
                 workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
                 can_query_knowledge=True,
-            allowed_tool_permissions=ALL_AGENT_TOOL_PERMISSIONS,
+                allowed_tool_permissions=ALL_AGENT_TOOL_PERMISSIONS,
             )
         )
 

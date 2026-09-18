@@ -86,6 +86,7 @@ class FakeTransaction:
 class FakeIngestionConnection:
     def __init__(self, row: dict[str, object]) -> None:
         self.row = row
+        self.parsed_document_id = UUID("00000000-0000-0000-0000-000000000011")
         self.status_updates: list[dict[str, object]] = []
         self.inserted_chunks: list[dict[str, object]] = []
         self.parsed_documents: list[dict[str, object]] = []
@@ -99,7 +100,7 @@ class FakeIngestionConnection:
             return FakeResult(self.row)
         if 'INSERT INTO "KnowledgeParsedDocument"' in sql:
             self.parsed_documents.append(parameters or {})
-            return FakeResult()
+            return FakeResult(scalar_value=self.parsed_document_id)
         if 'UPDATE "KnowledgeParsedDocument"' in sql:
             self.chunk_status_updates.append(parameters or {})
             if 'RETURNING "id"' in sql:
@@ -749,6 +750,7 @@ def test_upload_route_persists_workspace_scoped_file_without_scheduling_processi
     )
     connection = FakeUploadConnection()
     storage = FakeUploadStorage()
+    background_tasks = FakeBackgroundTasks()
     permission: dict[str, object] = {}
 
     async def fake_require_permission(
@@ -789,6 +791,7 @@ def test_upload_route_persists_workspace_scoped_file_without_scheduling_processi
             workspace_id=workspace_id,
             current_user=AuthenticatedUser(user_id=str(user_id)),
             settings=settings,
+            background_tasks=background_tasks,
         )
     )
 
@@ -806,6 +809,120 @@ def test_upload_route_persists_workspace_scoped_file_without_scheduling_processi
     assert stored_content == b"name,price\nchair,10"
     assert connection.calls[0][1]["workspace_id"] == workspace_id
     assert connection.calls[1][1]["workspace_id"] == workspace_id
+    assert background_tasks.tasks == []
+
+
+def test_automated_upload_schedules_parse_and_chunk_processing(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    user_id = UUID("00000000-0000-0000-0000-000000000010")
+    settings = Settings(
+        knowledge_ingestion_enabled=True,
+        knowledge_storage_dir="storage/knowledge",
+    )
+    connection = FakeUploadConnection()
+    storage = FakeUploadStorage()
+    background_tasks = FakeBackgroundTasks()
+
+    async def fake_require_permission(*_args):
+        return None
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_knowledge_storage",
+        lambda _settings: storage,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(connection),
+    )
+
+    result = asyncio.run(
+        upload_knowledge_file(
+            knowledge_base_id=knowledge_base_id,
+            file=UploadFile(
+                file=io.BytesIO(b"name,price\nchair,10"),
+                filename="data.csv",
+                headers=Headers({"content-type": "text/csv"}),
+            ),
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(user_id=str(user_id)),
+            settings=settings,
+            automation=True,
+            background_tasks=background_tasks,
+        )
+    )
+
+    assert result["file"].status == "pending"
+    assert background_tasks.tasks == [
+        (
+            process_knowledge_file,
+            (UUID(result["file"].file_id), workspace_id, True),
+        )
+    ]
+
+
+def test_automated_file_processing_chunks_only_after_persisting_parsed_document(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000010")
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    storage_key = "workspace/knowledge/data.csv"
+    row = {
+        "storage_provider": "local",
+        "storage_key": storage_key,
+        "original_name": "data.csv",
+        "knowledge_base_id": knowledge_base_id,
+    }
+    settings = Settings(
+        knowledge_ingestion_enabled=True,
+        knowledge_embeddings_enabled=False,
+        knowledge_storage_dir=str(tmp_path),
+    )
+    storage = LocalKnowledgeStorage(str(tmp_path))
+    connection = FakeIngestionConnection(row)
+    materialized: list[tuple[UUID, UUID, UUID]] = []
+
+    async def record_materialization(
+        requested_file_id: UUID,
+        requested_workspace_id: UUID,
+        parsed_document_id: UUID,
+    ) -> None:
+        assert connection.parsed_documents
+        materialized.append(
+            (requested_file_id, requested_workspace_id, parsed_document_id)
+        )
+
+    asyncio.run(storage.put(storage_key, b"name,price\nchair,10"))
+    monkeypatch.setattr("app.api.routes.knowledge_files.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_knowledge_storage_for_provider",
+        lambda _settings, _provider: storage,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        lambda: FakeConnectionContext(connection),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.materialize_knowledge_chunks",
+        record_materialization,
+    )
+
+    asyncio.run(process_knowledge_file(file_id, workspace_id, create_chunks=True))
+
+    assert [update["status"] for update in connection.status_updates] == [
+        "processing",
+        "ready",
+    ]
+    assert len(connection.parsed_documents) == 1
+    assert materialized == [
+        (file_id, workspace_id, connection.parsed_document_id)
+    ]
 
 
 def test_parse_route_claims_file_and_schedules_processing(monkeypatch) -> None:
@@ -1093,6 +1210,7 @@ def test_duplicate_upload_removes_object_after_database_conflict(monkeypatch) ->
                     user_id="00000000-0000-0000-0000-000000000010"
                 ),
                 settings=settings,
+                background_tasks=FakeBackgroundTasks(),
             )
         )
 

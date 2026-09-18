@@ -65,19 +65,23 @@ validation error 的标准结构由 FastAPI 生成：
 | PATCH | `/api/v1/knowledge-bases/{knowledge_base_id}` | `knowledge.manage` | query：`workspace_id`；body：`{displayName,sourceType?}` | `KnowledgeBaseSummary` |
 | DELETE | `/api/v1/knowledge-bases/{knowledge_base_id}` | knowledge-base `manage` | query：`workspace_id` | `{deleted:true,storageCleanup}`；对象清理失败时返回 `202` 和 `failedFileCount` |
 | GET | `/api/v1/knowledge-bases/{knowledge_base_id}/files` | knowledge-base `read` + `KNOWLEDGE_INGESTION_ENABLED` | query：`workspace_id` | `{files:[KnowledgeFileSummary]}` |
-| POST | `/api/v1/knowledge-bases/{knowledge_base_id}/files` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | multipart `file`；query：`workspace_id` | `202 {file:KnowledgeFileSummary}`，PDF/XLSX/PPTX 会先校验 magic bytes，后台处理为 `ready`/`failed`；后续业务记录使用返回的 `fileId` 作为 `sourceFileId` |
+| POST | `/api/v1/knowledge-bases/{knowledge_base_id}/files` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | multipart `file`；query：`workspace_id`、`automation?`（默认 `false`） | `202 {file:KnowledgeFileSummary}`；始终校验 PDF/XLSX/PPTX magic bytes。默认只保存文件并保持 `pending`；`automation=true` 时后台依次解析并保存 `ParsedDocument`、生成 `KnowledgeChunk`，文件状态更新为 `ready`/`failed`。自动模式不执行 embedding 或 AI 分析 |
+| POST | `/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}/parse` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | query：`workspace_id` | `202 {file:KnowledgeFileSummary}`；为原手动流程排队执行 `parseDocument` |
+| GET | `/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}/parsed-document` | knowledge-base `read` + `KNOWLEDGE_INGESTION_ENABLED` | query：`workspace_id` | `KnowledgeParsedDocumentResponse`，包含 `parsedDocument`、`chunkStatus` 和 `chunkCount` |
+| POST | `/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}/chunks` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | query：`workspace_id` | `202 KnowledgeParsedDocumentResponse`；为原手动流程单独排队生成 `KnowledgeChunk` |
 | DELETE | `/api/v1/knowledge-bases/{knowledge_base_id}/files/{file_id}` | knowledge-base `manage` + `KNOWLEDGE_INGESTION_ENABLED` | query：`workspace_id` | `{deleted:true}` |
 | POST | `/api/v1/knowledge-bases/{knowledge_base_id}/search` | knowledge-base `read` + `KNOWLEDGE_EMBEDDINGS_ENABLED` | query：`workspace_id`；body：`{query,limit?}` | `{results:[{chunkId,content,fileId,fileName,score}]}`；Embedding provider 请求受 `EMBEDDING_PROVIDER_TIMEOUT_SECONDS`（1–300 秒）限制 |
-| GET | `/api/v1/admin/members` | `members.read` | query：`workspace_id` | `MembersResponse` |
+| GET | `/api/v1/admin/members` | `members.read` | query：`workspace_id` | `MembersResponse`；每个成员包含标准基准 `role`、`effectivePermissions`、`overrides` 和 `isCustomRole`，当有效权限集合与该标准 role 的默认权限不同时，`isCustomRole=true` |
 | GET | `/api/v1/admin/access-candidates` | `members.manage` | query：`workspace_id`、`query?` | `{candidates:[{userId,email,name,status}]}`；只返回已完成本地 bootstrap 且尚未拥有该 workspace membership 的用户 |
-| POST | `/api/v1/admin/members` | `members.manage` | query：`workspace_id`；body：`{userId,role,permissions?}` | `201 {member:WorkspaceMemberView}`；不能重复添加，只有 owner 能授予 owner |
-| PATCH | `/api/v1/admin/members` | `members.manage` | query：`workspace_id`；body：`{memberId,role,permissions}` | `{member:WorkspaceMemberView|null}` |
+| POST | `/api/v1/admin/members` | `members.manage` | query：`workspace_id`；body：`{userId,role,permissions?}` | `201 {member:WorkspaceMemberView}`；权限偏离所选标准 role 的基线时 `isCustomRole=true`；不能重复添加，只有 owner 能授予 owner |
+| PATCH | `/api/v1/admin/members` | `members.manage` | query：`workspace_id`；body：`{memberId,role,permissions}` | `{member:WorkspaceMemberView|null}`；`role` 保留为基准 role，权限集合偏离该基线时以 `isCustomRole=true` 标识自定义权限 |
 | PATCH | `/api/v1/admin/members/{member_id}/status` | `members.manage` | query：`workspace_id`；body：`{status:"active"|"suspended"}` | `{member:WorkspaceMemberView|null}`；不能停用自己或最后一个 active owner |
 | GET | `/api/v1/admin/knowledge-base-grants` | `members.manage` + `KNOWLEDGE_GRANTS_ENABLED` | query：`workspace_id`、`knowledge_base_id?` | `{grants:[KnowledgeBaseGrantView]}` |
 | PUT | `/api/v1/admin/knowledge-base-grants` | `members.manage` + `KNOWLEDGE_GRANTS_ENABLED` | query：`workspace_id`；body：`{knowledgeBaseId,subjectType,subjectId,accessLevel}` | `{grant:KnowledgeBaseGrantView|null}` |
 | DELETE | `/api/v1/admin/knowledge-base-grants/{grant_id}` | `members.manage` + `KNOWLEDGE_GRANTS_ENABLED` | query：`workspace_id` | `{deleted:true}` |
 | POST | `/api/v1/agents/query` | `knowledge.read` | query：`workspace_id`；body：`{tool,arguments}` | `{tool,result}` |
 | POST | `/api/v1/agents/run` | `knowledge.read` | query：`workspace_id`；body：`{prompt,maxSteps?}` | `{answer,steps,toolCalls}`；不写入 Chat/Message |
+| GET | `/api/v1/agents/tool-catalog` | authenticated | query：`language=en|zh` | `{tools:[{functionName,permissionCode,label,description}],toolPermissionsByRole,defaultPermissionsByRole}`；名称和双语职责来自 `app/core/agent_tool_catalog.py`，各角色完整权限基线来自后端运行时权限目录 |
 | POST | `/api/v1/files/upload` | `document.write` + `CHAT_ATTACHMENTS_ENABLED` | multipart `file`；query：`workspace_id` | `{url,pathname,contentType}`；只接受匹配 PNG/JPEG magic bytes 的内容 |
 | GET | `/api/v1/files/attachments/{token}` | signed local URL；不需要 Bearer | path：`token` | JPEG/PNG bytes |
 | POST | `/api/v1/chat` | `chat.write` | query：`workspace_id?`；body：`ChatRequest` | AI SDK-compatible `text/event-stream` |

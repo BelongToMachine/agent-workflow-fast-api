@@ -1,14 +1,10 @@
 from collections.abc import Iterable
 
+from app.core.agent_tool_catalog import AGENT_TOOL_CATALOG
+
 AGENT_TOOL_PERMISSION_CODES = {
-    "searchProductsTool": "agent.tool.products.search",
-    "searchContentTool": "agent.tool.content.search",
-    "listKnowledgeBasesTool": "agent.tool.knowledge_bases.list",
-    "listKnowledgeFilesTool": "agent.tool.knowledge_files.list",
-    "getKnowledgeBaseTool": "agent.tool.knowledge_base.read",
-    "getKnowledgeFileTool": "agent.tool.knowledge_file.read",
-    "extractKnowledgeFileTool": "agent.tool.knowledge_file.extract",
-    "searchKnowledgeBaseTool": "agent.tool.knowledge_base.search",
+    function_name: metadata["permission_code"]
+    for function_name, metadata in AGENT_TOOL_CATALOG.items()
 }
 
 AGENT_TOOL_PERMISSION_CATALOG = tuple(AGENT_TOOL_PERMISSION_CODES.values())
@@ -32,6 +28,7 @@ _STANDARD_AGENT_TOOL_PERMISSIONS = tuple(
     for permission in AGENT_TOOL_PERMISSION_CATALOG
     if permission != "agent.tool.knowledge_file.extract"
 )
+
 
 DEFAULT_PERMISSIONS_BY_ROLE = {
     "owner": PERMISSION_CATALOG,
@@ -64,9 +61,24 @@ DEFAULT_PERMISSIONS_BY_ROLE = {
     ),
 }
 
+
+def get_agent_tool_permissions_by_role() -> dict[str, list[str]]:
+    agent_permissions = set(AGENT_TOOL_PERMISSION_CATALOG)
+    return {
+        role: [permission for permission in permissions if permission in agent_permissions]
+        for role, permissions in DEFAULT_PERMISSIONS_BY_ROLE.items()
+    }
+
 ROLE_FORBIDDEN_PERMISSIONS = {
     "employee": frozenset(("knowledge.manage",)),
 }
+
+
+def get_default_permissions_by_role() -> dict[str, list[str]]:
+    return {
+        role: list(permissions)
+        for role, permissions in DEFAULT_PERMISSIONS_BY_ROLE.items()
+    }
 
 
 def get_forbidden_permissions(role: str) -> frozenset[str]:
