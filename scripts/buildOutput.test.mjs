@@ -133,3 +133,31 @@ test("Docker production builds pass the Pages asset base to Vite", () => {
   assert.match(composeFile, /VITE_RELEASE_ID:\s*\$\{VITE_RELEASE_ID:-dev\}/);
   assert.match(deployScript, /export VITE_RELEASE_ID="\$SHA"/);
 });
+
+test("production builds send FastAPI requests through the SG Caddy origin", () => {
+  const productionEnv = readFileSync(
+    path.join(projectRoot, "deploy/frontend.build.production.example"),
+    "utf8",
+  );
+
+  assert.match(
+    productionEnv,
+    /^FRONTEND_API_URL=https:\/\/copilot\.asianodeatlas\.com$/m,
+    "Production FastAPI requests should use the same-origin Caddy entrypoint",
+  );
+  assert.match(productionEnv, /^NEXT_PUBLIC_API_MODE=fastapi-direct$/m);
+});
+
+test("FastAPI browser configuration has one canonical Vite URL variable", () => {
+  const viteConfig = readFileSync(path.join(projectRoot, "vite.config.js"), "utf8");
+  const modeConfig = readFileSync(path.join(projectRoot, "src/lib/backend/mode.ts"), "utf8");
+  const dockerfile = readFileSync(path.join(projectRoot, "Dockerfile"), "utf8");
+  const productionCompose = readFileSync(path.join(projectRoot, "compose.production.yaml"), "utf8");
+  const stagingCompose = readFileSync(path.join(projectRoot, "compose.staging.yaml"), "utf8");
+
+  assert.match(viteConfig, /env\.VITE_FASTAPI_URL/);
+  assert.match(modeConfig, /import\.meta\.env\.VITE_FASTAPI_URL/);
+  for (const source of [viteConfig, modeConfig, dockerfile, productionCompose, stagingCompose]) {
+    assert.doesNotMatch(source, /(?:NEXT_PUBLIC_)?FASTAPI_BASE_URL/);
+  }
+});

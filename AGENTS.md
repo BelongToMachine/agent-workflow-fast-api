@@ -132,7 +132,6 @@ bun run preview
 
 - `VITE_FASTAPI_URL`：Vite dev proxy 的 FastAPI 地址；
 - `VITE_WORKSPACE_ID`：本地开发的默认 workspace ID，只是开发上下文，不是安全身份；
-- `NEXT_PUBLIC_FASTAPI_BASE_URL`：direct mode 使用的浏览器可访问 FastAPI 地址；
 - `NEXT_PUBLIC_API_MODE=fastapi-proxy|fastapi-direct`：开发环境请求模式，默认 proxy；
 - `NEXT_PUBLIC_USE_FASTAPI_BACKEND=1`：启用 FastAPI chat 兼容路径，Vite 配置默认注入为 `1`。
 

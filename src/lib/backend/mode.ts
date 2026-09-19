@@ -17,5 +17,5 @@ export const fastApiWorkspaceId =
   "00000000-0000-0000-0000-000000000001";
 
 export const fastApiBrowserBaseUrl = (
-  process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || "http://127.0.0.1:8000"
+  import.meta.env.VITE_FASTAPI_URL || "http://127.0.0.1:8000"
 ).replace(/\/$/, "");

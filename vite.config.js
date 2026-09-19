@@ -95,11 +95,7 @@ export default defineConfig(({ mode }) => {
   const assetBase = env.VITE_ASSET_BASE_URL || '/'
   const releaseId = normalizeReleaseId(env.VITE_RELEASE_ID || env.CF_PAGES_COMMIT_SHA || 'dev')
   const assetDirectory = `assets/${releaseId}`
-  const fastApiTarget =
-    env.VITE_FASTAPI_URL ||
-    env.NEXT_PUBLIC_FASTAPI_BASE_URL ||
-    env.FASTAPI_BASE_URL ||
-    'http://127.0.0.1:8000'
+  const fastApiTarget = env.VITE_FASTAPI_URL || 'http://127.0.0.1:8000'
   const workspaceId =
     env.VITE_WORKSPACE_ID ||
     env.NEXT_PUBLIC_WORKSPACE_ID ||
@@ -114,7 +110,6 @@ export default defineConfig(({ mode }) => {
     define: {
       'process.env.NEXT_PUBLIC_API_MODE': JSON.stringify(env.NEXT_PUBLIC_API_MODE || 'fastapi-proxy'),
       'process.env.NEXT_PUBLIC_BASE_PATH': JSON.stringify(env.NEXT_PUBLIC_BASE_PATH ?? ''),
-      'process.env.NEXT_PUBLIC_FASTAPI_BASE_URL': JSON.stringify(fastApiTarget),
       'process.env.NEXT_PUBLIC_WORKSPACE_ID': JSON.stringify(workspaceId),
       'process.env.NEXT_PUBLIC_SINGLE_WORKSPACE_MODE': JSON.stringify(singleWorkspaceMode),
       'process.env.NEXT_PUBLIC_USE_FASTAPI_BACKEND': JSON.stringify(env.NEXT_PUBLIC_USE_FASTAPI_BACKEND || '1'),
