@@ -156,6 +156,11 @@ test("FastAPI browser configuration has one canonical Vite URL variable", () => 
   const stagingCompose = readFileSync(path.join(projectRoot, "compose.staging.yaml"), "utf8");
 
   assert.match(viteConfig, /env\.VITE_FASTAPI_URL/);
+  assert.match(
+    viteConfig,
+    /['"]process\.env\.VITE_FASTAPI_URL['"]:\s*JSON\.stringify\(fastApiTarget\)/,
+    "The canonical Vite API URL must also be available to legacy process.env consumers",
+  );
   assert.match(modeConfig, /import\.meta\.env\.VITE_FASTAPI_URL/);
   for (const source of [viteConfig, modeConfig, dockerfile, productionCompose, stagingCompose]) {
     assert.doesNotMatch(source, /(?:NEXT_PUBLIC_)?FASTAPI_BASE_URL/);

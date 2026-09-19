@@ -108,6 +108,7 @@ export default defineConfig(({ mode }) => {
   return {
     base: assetBase,
     define: {
+      'process.env.VITE_FASTAPI_URL': JSON.stringify(fastApiTarget),
       'process.env.NEXT_PUBLIC_API_MODE': JSON.stringify(env.NEXT_PUBLIC_API_MODE || 'fastapi-proxy'),
       'process.env.NEXT_PUBLIC_BASE_PATH': JSON.stringify(env.NEXT_PUBLIC_BASE_PATH ?? ''),
       'process.env.NEXT_PUBLIC_WORKSPACE_ID': JSON.stringify(workspaceId),
