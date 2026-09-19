@@ -109,6 +109,7 @@ git pull --ff-only origin "$BRANCH"
 SHA="$(git rev-parse HEAD)"
 RELEASE="$ROOT/releases/$SHA"
 export RELEASE
+export VITE_RELEASE_ID="$SHA"
 log "Preparing ${ENVIRONMENT} frontend commit $SHA."
 
 git ls-files --error-unmatch "$COMPOSE_FILE_NAME" >/dev/null 2>&1 \

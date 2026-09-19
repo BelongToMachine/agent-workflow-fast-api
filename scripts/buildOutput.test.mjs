@@ -7,6 +7,21 @@ import { brotliDecompressSync } from "node:zlib";
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const distRoot = path.join(projectRoot, "dist");
 
+function collectFiles(directory, suffix) {
+  const files = [];
+
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...collectFiles(filePath, suffix));
+    } else if (entry.name.endsWith(suffix)) {
+      files.push(filePath);
+    }
+  }
+
+  return files;
+}
+
 function getEntryAsset() {
   assert.ok(existsSync(path.join(distRoot, "index.html")), "Run `bun run build` before this test");
 
@@ -40,6 +55,27 @@ test("production asset references honor the configured Pages asset base", () => 
   }
 });
 
+test("production asset references use the shared release directory", () => {
+  const expectedReleaseId = process.env.EXPECTED_ASSET_RELEASE_ID;
+  if (!expectedReleaseId) {
+    return;
+  }
+
+  const html = readFileSync(path.join(distRoot, "index.html"), "utf8");
+  const assetReferences = [...html.matchAll(/(?:src|href)="([^"]+)"/g)]
+    .map((match) => match[1])
+    .filter((reference) => reference.includes("/assets/"));
+
+  assert.ok(assetReferences.length > 0, "index.html should reference built assets");
+  for (const reference of assetReferences) {
+    assert.match(
+      reference,
+      new RegExp(`/assets/${expectedReleaseId}/`),
+      `Asset reference should use release directory ${expectedReleaseId}: ${reference}`,
+    );
+  }
+});
+
 test("Pages builds include cross-origin headers for static assets", () => {
   if (!process.env.EXPECTED_ASSET_BASE_URL) {
     return;
@@ -61,9 +97,8 @@ test("production browser code uses the configured FastAPI origin", () => {
   }
 
   const assetsDirectory = path.join(distRoot, "assets");
-  const javascriptFiles = readdirSync(assetsDirectory)
-    .filter((fileName) => fileName.endsWith(".js"))
-    .map((fileName) => readFileSync(path.join(assetsDirectory, fileName), "utf8"));
+  const javascriptFiles = collectFiles(assetsDirectory, ".js")
+    .map((filePath) => readFileSync(filePath, "utf8"));
 
   assert.ok(
     javascriptFiles.some((source) => source.includes(expectedApiBase)),
@@ -88,8 +123,13 @@ test("production entry JavaScript is split and precompressed", () => {
 test("Docker production builds pass the Pages asset base to Vite", () => {
   const dockerfile = readFileSync(path.join(projectRoot, "Dockerfile"), "utf8");
   const composeFile = readFileSync(path.join(projectRoot, "compose.production.yaml"), "utf8");
+  const deployScript = readFileSync(path.join(projectRoot, "deploy/deploy-frontend.sh"), "utf8");
 
   assert.match(dockerfile, /ARG VITE_ASSET_BASE_URL/);
   assert.match(dockerfile, /VITE_ASSET_BASE_URL=\$\{VITE_ASSET_BASE_URL\}/);
+  assert.match(dockerfile, /ARG VITE_RELEASE_ID=dev/);
+  assert.match(dockerfile, /VITE_RELEASE_ID=\$\{VITE_RELEASE_ID\}/);
   assert.match(composeFile, /VITE_ASSET_BASE_URL:\s*\$\{VITE_ASSET_BASE_URL:-\/\}/);
+  assert.match(composeFile, /VITE_RELEASE_ID:\s*\$\{VITE_RELEASE_ID:-dev\}/);
+  assert.match(deployScript, /export VITE_RELEASE_ID="\$SHA"/);
 });
