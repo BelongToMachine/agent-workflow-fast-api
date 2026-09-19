@@ -57,6 +57,7 @@ function brotliStaticAssets() {
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, import.meta.dirname, '')
+  const assetBase = env.VITE_ASSET_BASE_URL || '/'
   const fastApiTarget =
     env.VITE_FASTAPI_URL ||
     env.NEXT_PUBLIC_FASTAPI_BASE_URL ||
@@ -72,6 +73,7 @@ export default defineConfig(({ mode }) => {
     'true'
 
   return {
+    base: assetBase,
     define: {
       'process.env.NEXT_PUBLIC_API_MODE': JSON.stringify(env.NEXT_PUBLIC_API_MODE || 'fastapi-proxy'),
       'process.env.NEXT_PUBLIC_BASE_PATH': JSON.stringify(env.NEXT_PUBLIC_BASE_PATH ?? ''),

@@ -2,6 +2,7 @@
 # bundle. Do not put passwords, API keys, or other secrets in this file.
 FRONTEND_ENVIRONMENT=production
 FRONTEND_API_URL=https://api.asianodeatlas.com
+VITE_ASSET_BASE_URL=https://static.copilot.asianodeatlas.com/
 VITE_WORKSPACE_ID=00000000-0000-0000-0000-000000000001
 VITE_SINGLE_WORKSPACE_MODE=true
 NEXT_PUBLIC_API_MODE=fastapi-direct
