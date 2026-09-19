@@ -33,6 +33,7 @@ from app.api.routes.knowledge_files import (
     embed_knowledge_file_chunks,
     get_parsed_knowledge_document,
     list_knowledge_file_chunks,
+    list_knowledge_files,
     list_parsed_knowledge_documents,
     materialize_knowledge_chunks,
     materialize_knowledge_file_chunks,
@@ -818,6 +819,8 @@ def test_automated_upload_schedules_parse_and_chunk_processing(monkeypatch) -> N
     user_id = UUID("00000000-0000-0000-0000-000000000010")
     settings = Settings(
         knowledge_ingestion_enabled=True,
+        knowledge_embeddings_enabled=True,
+        embedding_api_key="test-key",
         knowledge_storage_dir="storage/knowledge",
     )
     connection = FakeUploadConnection()
@@ -860,9 +863,129 @@ def test_automated_upload_schedules_parse_and_chunk_processing(monkeypatch) -> N
     assert background_tasks.tasks == [
         (
             process_knowledge_file,
-            (UUID(result["file"].file_id), workspace_id, True),
+            (UUID(result["file"].file_id), workspace_id, True, True),
         )
     ]
+
+
+def test_automated_upload_requires_embeddings_to_be_enabled(monkeypatch) -> None:
+    async def fake_require_permission(*_args):
+        return None
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+
+    result = asyncio.run(
+        upload_knowledge_file(
+            knowledge_base_id=UUID("00000000-0000-0000-0000-000000000002"),
+            file=UploadFile(
+                file=io.BytesIO(b"name,price\nchair,10"),
+                filename="data.csv",
+                headers=Headers({"content-type": "text/csv"}),
+            ),
+            workspace_id=UUID("00000000-0000-0000-0000-000000000001"),
+            current_user=AuthenticatedUser(
+                user_id="00000000-0000-0000-0000-000000000010"
+            ),
+            settings=Settings(
+                knowledge_ingestion_enabled=True,
+                knowledge_embeddings_enabled=False,
+            ),
+            automation=True,
+            background_tasks=FakeBackgroundTasks(),
+        )
+    )
+
+    assert result.status_code == 409
+    assert json.loads(result.body) == {
+        "code": "knowledge_embeddings:disabled",
+        "message": "Automated ingestion requires knowledge embeddings to be enabled.",
+    }
+
+
+def test_automated_file_processing_embeds_all_materialized_chunks(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000010")
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    storage_key = "workspace/knowledge/data.csv"
+    row = {
+        "storage_provider": "local",
+        "storage_key": storage_key,
+        "original_name": "data.csv",
+        "knowledge_base_id": knowledge_base_id,
+    }
+    settings = Settings(
+        knowledge_ingestion_enabled=True,
+        knowledge_embeddings_enabled=True,
+        embedding_api_key="test-key",
+        knowledge_storage_dir=str(tmp_path),
+    )
+    storage = LocalKnowledgeStorage(str(tmp_path))
+    connection = FakeIngestionConnection(row)
+    materialized: list[tuple[UUID, UUID, UUID]] = []
+    embedding_calls: list[tuple[UUID, UUID, UUID]] = []
+
+    async def record_materialization(
+        requested_file_id: UUID,
+        requested_workspace_id: UUID,
+        parsed_document_id: UUID,
+    ) -> bool:
+        materialized.append(
+            (requested_file_id, requested_workspace_id, parsed_document_id)
+        )
+        return True
+
+    async def record_embedding(
+        requested_file_id: UUID,
+        requested_knowledge_base_id: UUID,
+        requested_workspace_id: UUID,
+        _settings: Settings,
+    ) -> object:
+        embedding_calls.append(
+            (
+                requested_file_id,
+                requested_knowledge_base_id,
+                requested_workspace_id,
+            )
+        )
+        return object()
+
+    awaitable = storage.put(storage_key, b"name,price\nchair,10")
+    asyncio.run(awaitable)
+    monkeypatch.setattr("app.api.routes.knowledge_files.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_knowledge_storage_for_provider",
+        lambda _settings, _provider: storage,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        lambda: FakeConnectionContext(connection),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.materialize_knowledge_chunks",
+        record_materialization,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files._embed_all_knowledge_chunks_for_file",
+        record_embedding,
+    )
+
+    asyncio.run(
+        process_knowledge_file(
+            file_id,
+            workspace_id,
+            create_chunks=True,
+            create_embeddings=True,
+        )
+    )
+
+    assert materialized == [(file_id, workspace_id, connection.parsed_document_id)]
+    assert embedding_calls == [(file_id, knowledge_base_id, workspace_id)]
 
 
 def test_automated_file_processing_chunks_only_after_persisting_parsed_document(
@@ -977,6 +1100,116 @@ def test_parse_route_claims_file_and_schedules_processing(monkeypatch) -> None:
 
     assert result["file"].status == "processing"
     assert background_tasks.tasks == [(process_knowledge_file, (file_id, workspace_id))]
+
+
+def test_parse_route_requeues_stale_processing_file(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    file_id = UUID("00000000-0000-0000-0000-000000000003")
+    background_tasks = FakeBackgroundTasks()
+
+    class StaleParseConnection(FakeUploadConnection):
+        async def execute(self, query: object, params: dict[str, object]) -> FakeUploadResult:
+            sql = str(query)
+            if 'UPDATE "KnowledgeFile"' in sql and 'RETURNING "id"' in sql:
+                self.calls.append((sql, params))
+                self.file_row["status"] = "processing"
+                return FakeUploadResult(scalar_value=file_id)
+            return await super().execute(query, params)
+
+    connection = StaleParseConnection()
+    connection.file_row.update(
+        {
+            "file_id": file_id,
+            "knowledge_base_id": knowledge_base_id,
+            "workspace_id": workspace_id,
+            "status": "processing",
+        }
+    )
+
+    async def fake_require_permission(*_args, **_kwargs):
+        return SimpleNamespace(role="owner")
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(connection),
+    )
+
+    result = asyncio.run(
+        parse_knowledge_file(
+            knowledge_base_id=knowledge_base_id,
+            file_id=file_id,
+            background_tasks=background_tasks,
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(user_id=str(UUID(int=10))),
+            settings=Settings(
+                knowledge_ingestion_enabled=True,
+                knowledge_processing_stale_seconds=60,
+            ),
+        )
+    )
+
+    assert result["file"].status == "processing"
+    assert background_tasks.tasks == [(process_knowledge_file, (file_id, workspace_id))]
+    assert connection.calls[-1][1]["stale_seconds"] == 60
+
+
+def test_list_route_marks_stale_processing_file_failed(monkeypatch) -> None:
+    workspace_id = UUID("00000000-0000-0000-0000-000000000001")
+    knowledge_base_id = UUID("00000000-0000-0000-0000-000000000002")
+    file_id = UUID("00000000-0000-0000-0000-000000000003")
+
+    class ListConnection(FakeUploadConnection):
+        async def execute(self, query: object, params: dict[str, object]) -> FakeUploadResult:
+            sql = str(query)
+            if 'UPDATE "KnowledgeFile"' in sql and '"status" = \'failed\'' in sql:
+                self.calls.append((sql, params))
+                self.file_row["status"] = "failed"
+                self.file_row["error_message"] = "The parsing task expired; retry parsing."
+                return FakeUploadResult()
+            return await super().execute(query, params)
+
+    connection = ListConnection()
+    connection.file_row.update(
+        {
+            "file_id": file_id,
+            "knowledge_base_id": knowledge_base_id,
+            "workspace_id": workspace_id,
+            "status": "processing",
+        }
+    )
+
+    async def fake_require_permission(*_args, **_kwargs):
+        return SimpleNamespace(role="owner")
+
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.require_knowledge_base_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.knowledge_files.get_db_connection",
+        upload_connection_context(connection),
+    )
+
+    result = asyncio.run(
+        list_knowledge_files(
+            knowledge_base_id=knowledge_base_id,
+            workspace_id=workspace_id,
+            current_user=AuthenticatedUser(user_id=str(UUID(int=10))),
+            settings=Settings(
+                knowledge_ingestion_enabled=True,
+                knowledge_processing_stale_seconds=60,
+            ),
+        )
+    )
+
+    assert result.files[0].status == "failed"
+    assert result.files[0].error_message == "The parsing task expired; retry parsing."
+    assert connection.calls[0][1]["stale_seconds"] == 60
 
 
 def test_parsed_document_is_readable_and_chunking_is_a_separate_manual_action(

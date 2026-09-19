@@ -656,7 +656,7 @@ def paginate_parsed_document(
     limit: int = 20,
 ) -> ParsedDocument:
     """Filter and page a parsed document without changing evidence ordering."""
-    if offset < 0 or limit < 1:
+    if offset < 0 or limit < 0:
         raise ValueError("Document pagination arguments are invalid.")
 
     def matches(block: ParsedBlock) -> bool:
@@ -668,10 +668,14 @@ def paginate_parsed_document(
         )
 
     filtered = [block for block in document.blocks if matches(block)]
-    selected = filtered[offset : offset + limit]
+    selected = filtered[offset : offset + limit] if limit else []
     if output == "text":
         selected = [block.model_copy(update={"data": None}) for block in selected]
-    next_cursor = offset + limit if offset + limit < len(filtered) else None
+    next_cursor = (
+        offset + limit
+        if limit and offset + limit < len(filtered)
+        else None
+    )
     return document.model_copy(
         update={
             "blocks": selected,

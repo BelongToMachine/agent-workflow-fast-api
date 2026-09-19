@@ -286,6 +286,15 @@ class Settings(BaseSettings):
             "ASIANODE_KNOWLEDGE_INGESTION_ENABLED",
         ),
     )
+    knowledge_processing_stale_seconds: int = Field(
+        default=15 * 60,
+        ge=60,
+        le=7 * 24 * 60 * 60,
+        validation_alias=AliasChoices(
+            "KNOWLEDGE_PROCESSING_STALE_SECONDS",
+            "ASIANODE_KNOWLEDGE_PROCESSING_STALE_SECONDS",
+        ),
+    )
     knowledge_storage_dir: str = Field(
         default="storage/knowledge",
         validation_alias=AliasChoices(

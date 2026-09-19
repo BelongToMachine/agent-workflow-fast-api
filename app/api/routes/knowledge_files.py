@@ -253,8 +253,29 @@ FILE_PARSE_CLAIM_QUERY = text(
     WHERE "id" = :file_id
       AND "knowledgeBaseId" = :knowledge_base_id
       AND "workspaceId" = :workspace_id
-      AND "status" <> 'processing'
+      AND (
+          "status" <> 'processing'
+          OR "updatedAt" < CURRENT_TIMESTAMP
+              - make_interval(secs => CAST(:stale_seconds AS double precision))
+      )
     RETURNING "id"
+    """
+)
+
+FILE_RECOVER_STALE_QUERY = text(
+    """
+    UPDATE "KnowledgeFile"
+    SET "errorMessage" = COALESCE(
+            "errorMessage",
+            'The parsing task expired; retry parsing.'
+        ),
+        "status" = 'failed',
+        "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "knowledgeBaseId" = :knowledge_base_id
+      AND "workspaceId" = :workspace_id
+      AND "status" = 'processing'
+      AND "updatedAt" < CURRENT_TIMESTAMP
+          - make_interval(secs => CAST(:stale_seconds AS double precision))
     """
 )
 
@@ -792,6 +813,7 @@ async def process_knowledge_file(
     file_id: UUID,
     workspace_id: UUID,
     create_chunks: bool = False,
+    create_embeddings: bool = False,
 ) -> None:
     """Read one stored file and persist its ParsedDocument intermediate state."""
     settings = get_settings()
@@ -887,12 +909,28 @@ async def process_knowledge_file(
                         )
                         claimed_id = claim.scalar_one_or_none()
                 if claimed_id is not None:
-                    await materialize_knowledge_chunks(
+                    chunks_ready = await materialize_knowledge_chunks(
                         file_id,
                         workspace_id,
                         parsed_document_id,
                     )
-            except (RuntimeError, SQLAlchemyError) as error:
+                    if create_embeddings and chunks_ready:
+                        if not settings.knowledge_embeddings_enabled:
+                            raise EmbeddingConfigurationError(
+                                "Knowledge embeddings are disabled until the provider "
+                                "is configured."
+                            )
+                        embedded = await _embed_all_knowledge_chunks_for_file(
+                            file_id,
+                            row["knowledge_base_id"],
+                            workspace_id,
+                            settings,
+                        )
+                        if isinstance(embedded, JSONResponse):
+                            raise RuntimeError(
+                                "FastAPI could not save knowledge chunk embeddings."
+                            )
+            except Exception as error:
                 await _mark_knowledge_chunks_failed(
                     error=error,
                     file_id=file_id,
@@ -920,7 +958,7 @@ async def materialize_knowledge_chunks(
     file_id: UUID,
     workspace_id: UUID,
     parsed_document_id: UUID,
-) -> None:
+) -> bool:
     """Turn a persisted ParsedDocument into searchable KnowledgeChunk rows."""
     try:
         async with get_db_connection() as connection:
@@ -936,7 +974,7 @@ async def materialize_knowledge_chunks(
             parsed_document_id=parsed_document_id,
             workspace_id=workspace_id,
         )
-        return
+        return False
 
     if file_row is None:
         await _mark_knowledge_chunks_failed(
@@ -945,7 +983,7 @@ async def materialize_knowledge_chunks(
             parsed_document_id=parsed_document_id,
             workspace_id=workspace_id,
         )
-        return
+        return False
 
     try:
         async with get_db_connection() as connection:
@@ -965,7 +1003,7 @@ async def materialize_knowledge_chunks(
                 parsed_document_id=parsed_document_id,
                 workspace_id=workspace_id,
             )
-            return
+            return False
 
         parsed_document_id = UUID(str(parsed_row["parsed_document_id"]))
         parsed_document = ParsedDocument.model_validate(
@@ -1023,6 +1061,8 @@ async def materialize_knowledge_chunks(
             parsed_document_id=parsed_document_id,
             workspace_id=workspace_id,
         )
+        return False
+    return True
 
 
 @router.post(
@@ -1070,9 +1110,6 @@ async def parse_knowledge_file(
             detail="Knowledge file not found.",
         )
 
-    if str(row["status"]) == "processing":
-        return {"file": _file_summary(dict(row))}
-
     try:
         async with get_db_connection() as connection:
             async with connection.begin():
@@ -1082,6 +1119,7 @@ async def parse_knowledge_file(
                         "file_id": file_id,
                         "knowledge_base_id": knowledge_base_id,
                         "workspace_id": workspace_id,
+                        "stale_seconds": settings.knowledge_processing_stale_seconds,
                     },
                 )
                 claimed_id = claim.scalar_one_or_none()
@@ -1108,7 +1146,7 @@ async def list_parsed_knowledge_documents(
     offset: int = Query(default=0, ge=0, le=100_000),
     limit: int = Query(default=20, ge=1, le=100),
     block_offset: int = Query(default=0, ge=0, le=100_000),
-    block_limit: int = Query(default=30, ge=1, le=100),
+    block_limit: int = Query(default=30, ge=0, le=100),
     current_user: AuthenticatedUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> KnowledgeParsedDocumentListResponse | JSONResponse:
@@ -1370,6 +1408,39 @@ async def _embed_and_save_knowledge_chunks(
     )
 
 
+async def _embed_all_knowledge_chunks_for_file(
+    file_id: UUID,
+    knowledge_base_id: UUID,
+    workspace_id: UUID,
+    settings: Settings,
+) -> KnowledgeChunkEmbeddingResponse | JSONResponse:
+    """Embed every chunk for a file that is missing the current model."""
+    try:
+        async with get_db_connection() as connection:
+            result = await connection.execute(
+                CHUNKS_SELECT_FOR_ALL_EMBEDDING_QUERY,
+                {
+                    "embedding_model": settings.embedding_model,
+                    "file_id": file_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            rows = result.mappings().all()
+    except RuntimeError as error:
+        return _database_error(str(error))
+    except SQLAlchemyError:
+        return _database_error("FastAPI could not load knowledge file chunks for embedding.")
+
+    return await _embed_and_save_knowledge_chunks(
+        rows,
+        file_id=file_id,
+        knowledge_base_id=knowledge_base_id,
+        workspace_id=workspace_id,
+        settings=settings,
+    )
+
+
 @router.post(
     "/{knowledge_base_id}/files/{file_id}/chunks/embeddings",
     response_model=KnowledgeChunkEmbeddingResponse,
@@ -1595,14 +1666,15 @@ async def list_knowledge_files(
 
     try:
         async with get_db_connection() as connection:
-            result = await connection.execute(
-                FILE_LIST_QUERY,
-                {
+            async with connection.begin():
+                query_parameters = {
                     "knowledge_base_id": knowledge_base_id,
                     "workspace_id": workspace_id,
-                },
-            )
-            rows = result.mappings().all()
+                    "stale_seconds": settings.knowledge_processing_stale_seconds,
+                }
+                await connection.execute(FILE_RECOVER_STALE_QUERY, query_parameters)
+                result = await connection.execute(FILE_LIST_QUERY, query_parameters)
+                rows = result.mappings().all()
     except RuntimeError as error:
         return _database_error(str(error))
     except SQLAlchemyError:
@@ -1629,6 +1701,14 @@ async def upload_knowledge_file(
     )
     if not settings.knowledge_ingestion_enabled:
         return _feature_disabled()
+    if automation and not settings.knowledge_embeddings_enabled:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "code": "knowledge_embeddings:disabled",
+                "message": "Automated ingestion requires knowledge embeddings to be enabled.",
+            },
+        )
 
     if current_user.is_development:
         raise HTTPException(
@@ -1733,6 +1813,7 @@ async def upload_knowledge_file(
             process_knowledge_file,
             UUID(str(inserted_id)),
             workspace_id,
+            True,
             True,
         )
 

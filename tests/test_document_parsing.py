@@ -165,6 +165,17 @@ def test_pagination_can_return_text_without_structured_payload() -> None:
     assert page.blocks[0].data is None
 
 
+def test_pagination_can_return_metadata_without_blocks() -> None:
+    document = parse_document("products.csv", b"name,price\nChair,10\n")
+
+    page = paginate_parsed_document(document, offset=0, limit=0)
+
+    assert page.blocks == []
+    assert page.total_blocks == len(document.blocks)
+    assert page.next_cursor is None
+    assert page.truncated is False
+
+
 def test_legacy_ppt_extension_is_rejected() -> None:
     with pytest.raises(ValueError, match="Unsupported knowledge file type"):
         parse_document("legacy.ppt", b"presentation")
