@@ -77,7 +77,14 @@ type UploadItem = {
   status: UploadItemStatus;
 };
 
-type AutomationStage = "idle" | "uploading" | "parsing" | "chunking" | "complete" | "failed";
+type AutomationStage =
+  | "idle"
+  | "uploading"
+  | "parsing"
+  | "chunking"
+  | "embedding"
+  | "complete"
+  | "failed";
 
 type KnowledgeBaseListResponse = {
   knowledgeBases: KnowledgeBase[];
@@ -668,7 +675,9 @@ function AutomatedUploadPanel({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [stage, setStage] = useState<AutomationStage>("idle");
-  const [failedAt, setFailedAt] = useState<"uploading" | "parsing" | "chunking" | null>(null);
+  const [failedAt, setFailedAt] = useState<
+    "uploading" | "parsing" | "chunking" | "embedding" | null
+  >(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<{
@@ -676,7 +685,7 @@ function AutomatedUploadPanel({
     fileName: string;
     parsedDocumentId: string;
   } | null>(null);
-  const isRunning = ["uploading", "parsing", "chunking"].includes(stage);
+  const isRunning = ["uploading", "parsing", "chunking", "embedding"].includes(stage);
 
   useEffect(
     () => () => {
@@ -718,7 +727,7 @@ function AutomatedUploadPanel({
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    let currentStage: "uploading" | "parsing" | "chunking" = "uploading";
+    let currentStage: "uploading" | "parsing" | "chunking" | "embedding" = "uploading";
     let didUpload = false;
     setErrorMessage(null);
     setResult(null);
@@ -747,7 +756,7 @@ function AutomatedUploadPanel({
         fileId: response.file.fileId,
         intervalMs: 1200,
         knowledgeBaseId: selectedKnowledgeBaseId,
-        onStage: (nextStage: "parsing" | "chunking" | "complete") => {
+        onStage: (nextStage: "parsing" | "chunking" | "embedding" | "complete") => {
           if (nextStage !== "complete") {
             currentStage = nextStage;
           }
@@ -806,8 +815,10 @@ function AutomatedUploadPanel({
         ? 1
         : stage === "chunking"
           ? 2
-          : stage === "complete"
+          : stage === "embedding"
             ? 3
+          : stage === "complete"
+            ? 4
             : stage === "failed"
               ? failedAt === "uploading"
                 ? 0
@@ -815,13 +826,19 @@ function AutomatedUploadPanel({
                   ? 1
                   : failedAt === "chunking"
                     ? 2
+                    : failedAt === "embedding"
+                      ? 3
                     : -1
               : -1;
-  const connectorWidth = stage === "complete" ? "100%" : `${Math.max(0, stageIndex) * 50}%`;
+  const connectorWidth =
+    stage === "complete"
+      ? "100%"
+      : `${Math.max(0, stageIndex) * (100 / 3)}%`;
   const steps = [
     { key: "upload", title: t("upload.automationStepUpload") },
     { key: "parse", title: t("upload.automationStepParse") },
     { key: "chunks", title: t("upload.automationStepChunks") },
+    { key: "embedding", title: t("upload.automationStepEmbedding") },
   ];
 
   return (
@@ -877,7 +894,7 @@ function AutomatedUploadPanel({
         <div className="relative">
           <div
             aria-hidden="true"
-            className="absolute left-[16.67%] right-[16.67%] top-4 h-px bg-border"
+            className="absolute left-[12.5%] right-[12.5%] top-4 h-px bg-border"
           >
             <div
               className="h-full bg-primary transition-[width] duration-500"
@@ -887,7 +904,7 @@ function AutomatedUploadPanel({
           <ol
             aria-label={t("upload.automationFlowLabel")}
             aria-live="polite"
-            className="grid grid-cols-3 gap-2"
+            className="grid grid-cols-4 gap-2"
           >
             {steps.map((step, index) => {
               const complete = stage === "complete" || (stageIndex >= 0 && index < stageIndex);
@@ -944,6 +961,8 @@ function AutomatedUploadPanel({
                 ? t("upload.automationParsing")
                 : stage === "chunking"
                   ? t("upload.automationChunking")
+                  : stage === "embedding"
+                    ? t("upload.automationEmbedding")
                   : stage === "failed"
                     ? t("upload.automationStopped")
                     : t("upload.automationReady")}

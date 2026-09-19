@@ -15,7 +15,7 @@ import {
   RefreshCwIcon,
   ScanTextIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +34,7 @@ import {
   getKnowledgeChunkSelectorKey,
 } from "@/lib/knowledgeChunkAction";
 import { cn } from "@/lib/utils";
+import { createSingleFlightPoller } from "./knowledgeFileLibraryPolling";
 
 type KnowledgeFile = {
   byteSize: number;
@@ -184,6 +185,8 @@ export function KnowledgeFileLibrary({
 }: Props) {
   const { i18n, t } = useTranslation();
   const [files, setFiles] = useState<KnowledgeFile[]>([]);
+  const [isFilesOpen, setIsFilesOpen] = useState(false);
+  const [hasLoadedFiles, setHasLoadedFiles] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -193,10 +196,15 @@ export function KnowledgeFileLibrary({
   const [error, setError] = useState<string | null>(null);
   const [parsedDocuments, setParsedDocuments] =
     useState<ParsedDocumentListResponse | null>(null);
-  const [isLoadingParsedDocuments, setIsLoadingParsedDocuments] = useState(true);
+  const [isParsedDocumentsOpen, setIsParsedDocumentsOpen] = useState(false);
+  const [hasLoadedParsedDocuments, setHasLoadedParsedDocuments] = useState(false);
+  const [isLoadingParsedDocuments, setIsLoadingParsedDocuments] = useState(false);
   const [parsedDocumentsError, setParsedDocumentsError] = useState<string | null>(
     null
   );
+  const filesAbortController = useRef<AbortController | null>(null);
+  const parsedDocumentsAbortController = useRef<AbortController | null>(null);
+  const refreshKeyRef = useRef(refreshKey);
 
   const loadFiles = useCallback(async () => {
     if (!knowledgeBaseId) {
@@ -204,14 +212,23 @@ export function KnowledgeFileLibrary({
       return;
     }
 
+    filesAbortController.current?.abort();
+    const controller = new AbortController();
+    filesAbortController.current = controller;
     setIsLoading(true);
     setError(null);
     try {
       const data = await requestBackend<KnowledgeFileListResponse>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/files`
+        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/files`,
+        { signal: controller.signal },
+        { timeoutMs: 20_000 }
       );
       setFiles(data.files);
+      setHasLoadedFiles(true);
     } catch (loadError) {
+      if (controller.signal.aborted) {
+        return;
+      }
       if (loadError instanceof BackendRequestError && loadError.status === 409) {
         setError(t("settings.ingestionDisabled"));
       } else {
@@ -223,7 +240,10 @@ export function KnowledgeFileLibrary({
       }
       setFiles([]);
     } finally {
-      setIsLoading(false);
+      if (filesAbortController.current === controller) {
+        filesAbortController.current = null;
+        setIsLoading(false);
+      }
     }
   }, [knowledgeBaseId, t]);
 
@@ -234,14 +254,23 @@ export function KnowledgeFileLibrary({
         return;
       }
 
+      parsedDocumentsAbortController.current?.abort();
+      const controller = new AbortController();
+      parsedDocumentsAbortController.current = controller;
       setIsLoadingParsedDocuments(true);
       setParsedDocumentsError(null);
       try {
         const data = await requestBackend<ParsedDocumentListResponse>(
-          `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/parsed-documents?offset=${offset}&limit=${PARSED_DOCUMENT_PAGE_SIZE}&block_offset=0&block_limit=${PARSED_BLOCK_PAGE_SIZE}`
+          `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/parsed-documents?offset=${offset}&limit=${PARSED_DOCUMENT_PAGE_SIZE}&block_offset=0&block_limit=0`,
+          { signal: controller.signal },
+          { timeoutMs: 20_000 }
         );
         setParsedDocuments(data);
+        setHasLoadedParsedDocuments(true);
       } catch (loadError) {
+        if (controller.signal.aborted) {
+          return;
+        }
         setParsedDocuments(null);
         if (loadError instanceof BackendRequestError && loadError.status === 409) {
           setParsedDocumentsError(t("settings.ingestionDisabled"));
@@ -253,21 +282,47 @@ export function KnowledgeFileLibrary({
           );
         }
       } finally {
-        setIsLoadingParsedDocuments(false);
+        if (parsedDocumentsAbortController.current === controller) {
+          parsedDocumentsAbortController.current = null;
+          setIsLoadingParsedDocuments(false);
+        }
       }
     },
     [knowledgeBaseId, t]
   );
 
   useEffect(() => {
-    void loadFiles();
-  }, [loadFiles, refreshKey]);
+    setFiles([]);
+    setHasLoadedFiles(false);
+    setIsFilesOpen(false);
+    setParsedDocuments(null);
+    setHasLoadedParsedDocuments(false);
+    setIsParsedDocumentsOpen(false);
+    setParsedDocumentsError(null);
+    setSelectedFileIds(new Set());
+    filesAbortController.current?.abort();
+    parsedDocumentsAbortController.current?.abort();
+  }, [knowledgeBaseId]);
 
   useEffect(() => {
-    setParsedDocuments(null);
-    setParsedDocumentsError(null);
-    void loadParsedDocuments(0);
-  }, [loadParsedDocuments]);
+    if (refreshKeyRef.current === refreshKey) {
+      return;
+    }
+    refreshKeyRef.current = refreshKey;
+    if (isFilesOpen) {
+      void loadFiles();
+    }
+    if (isParsedDocumentsOpen) {
+      void loadParsedDocuments(parsedDocuments?.offset ?? 0);
+    }
+  }, [
+    isFilesOpen,
+    isParsedDocumentsOpen,
+    loadFiles,
+    loadParsedDocuments,
+    parsedDocuments?.offset,
+    refreshKey,
+  ]);
 
   useEffect(() => {
     const availableIds = new Set(files.map(({ fileId }) => fileId));
@@ -279,26 +334,78 @@ export function KnowledgeFileLibrary({
     });
   }, [files]);
 
-  useEffect(() => {
-    if (!files.some(({ status }) => isProcessing(status))) {
+  const filesAreProcessing = files.some(({ status }) => isProcessing(status));
+  const parsedDocumentsAreProcessing = Boolean(
+    parsedDocuments?.items.some(({ chunkStatus }) => isProcessing(chunkStatus))
+  );
+
+  const toggleFiles = useCallback(() => {
+    if (isFilesOpen) {
+      setIsFilesOpen(false);
       return;
     }
-    const intervalId = window.setInterval(() => {
+    setIsFilesOpen(true);
+    if (!hasLoadedFiles) {
       void loadFiles();
-      void loadParsedDocuments(parsedDocuments?.offset ?? 0);
-    }, 1500);
-    return () => window.clearInterval(intervalId);
-  }, [files, loadFiles, loadParsedDocuments, parsedDocuments?.offset]);
+    }
+  }, [hasLoadedFiles, isFilesOpen, loadFiles]);
+
+  const toggleParsedDocuments = useCallback(() => {
+    if (isParsedDocumentsOpen) {
+      setIsParsedDocumentsOpen(false);
+      return;
+    }
+    setIsParsedDocumentsOpen(true);
+    if (!hasLoadedParsedDocuments) {
+      void loadParsedDocuments(0);
+    }
+  }, [hasLoadedParsedDocuments, isParsedDocumentsOpen, loadParsedDocuments]);
 
   useEffect(() => {
-    if (!parsedDocuments?.items.some(({ chunkStatus }) => isProcessing(chunkStatus))) {
+    if (
+      (!isFilesOpen || !filesAreProcessing) &&
+      (!isParsedDocumentsOpen || !parsedDocumentsAreProcessing)
+    ) {
       return;
     }
-    const intervalId = window.setInterval(() => {
-      void loadParsedDocuments(parsedDocuments.offset);
-    }, 1500);
-    return () => window.clearInterval(intervalId);
-  }, [loadParsedDocuments, parsedDocuments]);
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const poller = createSingleFlightPoller(async () => {
+      const requests: Promise<void>[] = [];
+      if (isFilesOpen && filesAreProcessing) {
+        requests.push(loadFiles());
+      }
+      if (isParsedDocumentsOpen && parsedDocumentsAreProcessing) {
+        requests.push(loadParsedDocuments(parsedDocuments?.offset ?? 0));
+      }
+      await Promise.all(requests);
+    });
+
+    const poll = async () => {
+      await poller.run();
+      if (!cancelled) {
+        timeoutId = window.setTimeout(() => void poll(), 3_000);
+      }
+    };
+    timeoutId = window.setTimeout(() => void poll(), 3_000);
+
+    return () => {
+      cancelled = true;
+      poller.dispose();
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    filesAreProcessing,
+    isFilesOpen,
+    isParsedDocumentsOpen,
+    loadFiles,
+    loadParsedDocuments,
+    parsedDocuments?.offset,
+    parsedDocumentsAreProcessing,
+  ]);
 
   const selectableFiles = useMemo(
     () => files.filter(({ status }) => !isProcessing(status)),
@@ -368,8 +475,12 @@ export function KnowledgeFileLibrary({
 
     setSelectedFileIds(new Set());
     setIsParsing(false);
-    await loadFiles();
-    await loadParsedDocuments(parsedDocuments?.offset ?? 0);
+    if (isFilesOpen) {
+      await loadFiles();
+    }
+    if (isParsedDocumentsOpen) {
+      await loadParsedDocuments(parsedDocuments?.offset ?? 0);
+    }
     if (failedCount === 0) {
       toast.success(
         t("settings.parseKnowledgeFilesStarted", { count: startedCount })
@@ -387,6 +498,8 @@ export function KnowledgeFileLibrary({
     knowledgeBaseId,
     loadFiles,
     loadParsedDocuments,
+    isFilesOpen,
+    isParsedDocumentsOpen,
     parsedDocuments?.offset,
     selectedFileIds,
     t,
@@ -422,8 +535,12 @@ export function KnowledgeFileLibrary({
 
       setSelectedFileIds(new Set());
       setIsGeneratingChunks(false);
-      await loadFiles();
-      await loadParsedDocuments(parsedDocuments?.offset ?? 0);
+      if (isFilesOpen) {
+        await loadFiles();
+      }
+      if (isParsedDocumentsOpen) {
+        await loadParsedDocuments(parsedDocuments?.offset ?? 0);
+      }
       if (failedCount === 0) {
         toast.success(
           t("settings.generateKnowledgeChunksStarted", { count: startedCount })
@@ -439,6 +556,8 @@ export function KnowledgeFileLibrary({
     [
       disabled,
       isGeneratingChunks,
+      isFilesOpen,
+      isParsedDocumentsOpen,
       knowledgeBaseId,
       loadFiles,
       loadParsedDocuments,
@@ -478,8 +597,21 @@ export function KnowledgeFileLibrary({
               label: files.length === 1 ? t("common.file") : t("common.files"),
             })}
           </Badge>
+          <Button onClick={toggleFiles} size="sm" variant="outline">
+            <ChevronDownIcon
+              className={cn(
+                "transition-transform duration-200",
+                isFilesOpen && "rotate-180"
+              )}
+            />
+            {t(
+              isFilesOpen
+                ? "settings.collapseKnowledgeFiles"
+                : "settings.loadKnowledgeFiles"
+            )}
+          </Button>
           <Button
-            disabled={isLoading || isParsing || isGeneratingChunks}
+            disabled={!isFilesOpen || isLoading || isParsing || isGeneratingChunks}
             onClick={() => void loadFiles()}
             size="icon-sm"
             variant="outline"
@@ -490,7 +622,11 @@ export function KnowledgeFileLibrary({
         </div>
       </div>
 
-      {error ? (
+      {!isFilesOpen ? (
+        <p className="px-5 py-8 text-center text-muted-foreground text-sm md:px-7">
+          {t("settings.knowledgeFilesCollapsedDescription")}
+        </p>
+      ) : error ? (
         <div
           aria-live="polite"
           className="border-b border-destructive/20 bg-destructive/5 px-5 py-3 text-destructive text-sm md:px-7"
@@ -500,7 +636,7 @@ export function KnowledgeFileLibrary({
         </div>
       ) : null}
 
-      <div className="p-5 md:p-7">
+      {isFilesOpen ? <div className="p-5 md:p-7">
         {isLoading ? (
           <InlineLoadingState message={t("common.loading")} />
         ) : files.length === 0 ? (
@@ -591,7 +727,7 @@ export function KnowledgeFileLibrary({
           </>
         )}
 
-      </div>
+      </div> : null}
       </section>
       <ParsedDocumentLibrary
         data={parsedDocuments}
@@ -620,6 +756,8 @@ export function KnowledgeFileLibrary({
         }}
         t={t}
         isGeneratingChunks={isGeneratingChunks}
+        isOpen={isParsedDocumentsOpen}
+        onToggle={toggleParsedDocuments}
       />
     </div>
   );
@@ -700,11 +838,13 @@ function ParsedDocumentLibrary({
   i18nLanguage,
   isLoading,
   isGeneratingChunks,
+  isOpen,
   knowledgeBaseId,
   onEmbeddingComplete,
   onGenerateChunks,
   onNext,
   onPrevious,
+  onToggle,
   t,
 }: {
   data: ParsedDocumentListResponse | null;
@@ -713,11 +853,13 @@ function ParsedDocumentLibrary({
   i18nLanguage: string;
   isLoading: boolean;
   isGeneratingChunks: boolean;
+  isOpen: boolean;
   knowledgeBaseId: string;
   onEmbeddingComplete: () => void;
   onGenerateChunks: (fileId: string) => void;
   onNext: () => void;
   onPrevious: () => void;
+  onToggle: () => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   return (
@@ -739,14 +881,33 @@ function ParsedDocumentLibrary({
             </p>
           </div>
         </div>
-        {data ? (
-          <Badge variant="outline">
-            {t("settings.parsedDocumentsCount", { count: data.total })}
-          </Badge>
-        ) : null}
+        <div className="flex items-center gap-2 self-start">
+          {data ? (
+            <Badge variant="outline">
+              {t("settings.parsedDocumentsCount", { count: data.total })}
+            </Badge>
+          ) : null}
+          <Button onClick={onToggle} size="sm" variant="outline">
+            <ChevronDownIcon
+              className={cn(
+                "transition-transform duration-200",
+                isOpen && "rotate-180"
+              )}
+            />
+            {t(
+              isOpen
+                ? "settings.collapseParsedDocuments"
+                : "settings.loadParsedDocuments"
+            )}
+          </Button>
+        </div>
       </div>
 
-      {error ? (
+      {!isOpen ? (
+        <p className="px-5 py-8 text-center text-muted-foreground text-sm">
+          {t("settings.parsedDocumentsCollapsedDescription")}
+        </p>
+      ) : error ? (
         <div
           className="m-5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm"
           role="alert"
@@ -832,15 +993,57 @@ function ParsedDocumentCard({
   onGenerateChunks: (fileId: string) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
-  const document = item.parsedDocument;
+  const [document, setDocument] = useState(item.parsedDocument);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isLoadingDocument, setIsLoadingDocument] = useState(false);
+  const [documentError, setDocumentError] = useState<string | null>(null);
   const [isBusinessImportOpen, setIsBusinessImportOpen] = useState(false);
+  const documentAbortController = useRef<AbortController | null>(null);
   const detailsId = `parsed-document-details-${item.parsedDocumentId}`;
   const displayChunkStatus = getKnowledgeChunkDisplayStatus(
     item.chunkStatus,
     item.chunkCount,
     item.embeddedChunkCount
   );
+
+  useEffect(() => {
+    if (!isExpanded || document.blocks.length > 0 || document.totalBlocks === 0) {
+      return;
+    }
+
+    documentAbortController.current?.abort();
+    const controller = new AbortController();
+    documentAbortController.current = controller;
+    setIsLoadingDocument(true);
+    setDocumentError(null);
+    void requestBackend<ParsedDocumentTaskResponse>(
+      `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/files/${encodeURIComponent(item.fileId)}/parsed-document?offset=0&limit=${PARSED_BLOCK_PAGE_SIZE}`,
+      { signal: controller.signal },
+      { timeoutMs: 20_000 }
+    )
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setDocument(data.parsedDocument);
+        }
+      })
+      .catch((loadError) => {
+        if (!controller.signal.aborted) {
+          setDocumentError(
+            loadError instanceof Error
+              ? loadError.message
+              : t("settings.unableToLoadParsedDocument")
+          );
+        }
+      })
+      .finally(() => {
+        if (documentAbortController.current === controller) {
+          documentAbortController.current = null;
+          setIsLoadingDocument(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [document.blocks.length, document.totalBlocks, isExpanded, item.fileId, knowledgeBaseId, t]);
 
   return (
     <article className="overflow-hidden rounded-xl border border-border/70 bg-background/60">
@@ -891,6 +1094,19 @@ function ParsedDocumentCard({
 
       {isExpanded ? (
         <div id={detailsId}>
+          {isLoadingDocument ? (
+            <div className="p-5">
+              <InlineLoadingState message={t("settings.loadingParsedDocument")} />
+            </div>
+          ) : documentError ? (
+            <div
+              className="m-4 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm"
+              role="alert"
+            >
+              {documentError}
+            </div>
+          ) : null}
+          {!isLoadingDocument && !documentError ? <>
           <div className="grid gap-3 border-b border-border/70 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Metadata
               label={t("settings.parser")}
@@ -953,6 +1169,7 @@ function ParsedDocumentCard({
             truncated={document.truncated}
             t={t}
           />
+          </> : null}
         </div>
       ) : null}
 

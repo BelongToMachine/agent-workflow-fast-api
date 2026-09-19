@@ -8,7 +8,7 @@ try {
   // Keep the red-phase failure specific to the missing workflow behavior.
 }
 
-test("tracks parsing and chunking separately until both are ready", async () => {
+test("tracks parsing, chunking, and embedding until all chunks are ready", async () => {
   assert.equal(
     typeof waitForAutomatedIngestion,
     "function",
@@ -17,8 +17,12 @@ test("tracks parsing and chunking separately until both are ready", async () => 
 
   const knowledgeBaseId = "knowledge base/1";
   const fileId = "file-1";
-  const fileStates = ["processing", "ready", "ready", "ready"];
-  const chunkStates = ["pending", "processing", "ready"];
+  const fileStates = ["processing", "ready", "ready", "ready", "ready"];
+  const parsedStates = ["pending", "processing", "ready", "ready"];
+  const chunkStates = [
+    { items: [{ isEmbedded: false }], total: 1 },
+    { items: [{ isEmbedded: true }], total: 1 },
+  ];
   const requestedPaths = [];
   const stages = [];
 
@@ -39,23 +43,42 @@ test("tracks parsing and chunking separately until both are ready", async () => 
           ],
         };
       }
-      return {
-        chunkCount: chunkStates.at(-1) === "ready" ? 4 : 0,
-        chunkStatus: chunkStates.shift(),
-      };
+      if (path.endsWith("/parsed-document")) {
+        const chunkStatus = parsedStates.shift();
+        return {
+          chunkCount: chunkStatus === "ready" ? 4 : 0,
+          chunkStatus,
+          parsedDocumentId: "parsed-1",
+        };
+      }
+      return chunkStates.shift() ?? chunkStates.at(-1);
     },
     sleep: async () => {},
     intervalMs: 0,
     maxAttempts: 5,
   });
 
-  assert.deepEqual(stages, ["parsing", "chunking", "chunking", "complete"]);
+  assert.deepEqual(stages, [
+    "parsing",
+    "chunking",
+    "chunking",
+    "embedding",
+    "embedding",
+    "complete",
+  ]);
   assert.equal(result.parsedDocument.chunkCount, 4);
+  assert.equal(result.chunks.items[0].isEmbedded, true);
   assert.deepEqual(requestedPaths.slice(0, 3), [
     "/api/knowledge-bases/knowledge%20base%2F1/files",
     "/api/knowledge-bases/knowledge%20base%2F1/files",
     "/api/knowledge-bases/knowledge%20base%2F1/files/file-1/parsed-document",
   ]);
+  assert.ok(
+    requestedPaths.some(
+      (path) =>
+        path === "/api/knowledge-bases/knowledge%20base%2F1/files/file-1/chunks"
+    )
+  );
 });
 
 test("stops polling and reports the backend error when parsing fails", async () => {
@@ -92,4 +115,35 @@ test("stops polling and reports the backend error when parsing fails", async () 
     /could not be parsed/
   );
   assert.equal(parsedDocumentRequested, false);
+});
+
+test("stops before chunk polling when the backend reports a chunk failure", async () => {
+  const stages = [];
+  await assert.rejects(
+    waitForAutomatedIngestion({
+      fileId: "file-1",
+      knowledgeBaseId: "knowledge-base-1",
+      onStage: (stage) => stages.push(stage),
+      request: async (path) => {
+        if (path.endsWith("/files")) {
+          return {
+            files: [{ fileId: "file-1", status: "ready" }],
+          };
+        }
+        if (path.endsWith("/parsed-document")) {
+          return {
+            chunkCount: 1,
+            chunkErrorMessage: "Embedding provider failed.",
+            chunkStatus: "failed",
+          };
+        }
+        throw new Error("chunks should not be loaded after a failure");
+      },
+      sleep: async () => {},
+      intervalMs: 0,
+      maxAttempts: 2,
+    }),
+    /Embedding provider failed/
+  );
+  assert.deepEqual(stages, []);
 });

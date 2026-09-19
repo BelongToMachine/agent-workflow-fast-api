@@ -23,7 +23,7 @@ function delay(milliseconds, signal) {
  *   intervalMs?: number;
  *   knowledgeBaseId: string;
  *   maxAttempts?: number;
- *   onStage?: (stage: "parsing" | "chunking" | "complete") => void;
+ *   onStage?: (stage: "parsing" | "chunking" | "embedding" | "complete") => void;
  *   request: (path: string, init?: RequestInit) => Promise<Record<string, any>>;
  *   signal?: AbortSignal;
  *   sleep?: (milliseconds: number) => Promise<void>;
@@ -32,6 +32,7 @@ function delay(milliseconds, signal) {
  * @returns {Promise<{
  *   file: { fileId: string; [key: string]: any };
  *   parsedDocument: { parsedDocumentId: string; chunkCount: number; [key: string]: any };
+ *   chunks: { items: Array<{ isEmbedded: boolean; [key: string]: any }>; total: number; [key: string]: any };
  * }>}
  */
 export async function waitForAutomatedIngestion({
@@ -49,6 +50,7 @@ export async function waitForAutomatedIngestion({
   const encodedFileId = encodeURIComponent(fileId);
   const filesPath = `/api/knowledge-bases/${encodedKnowledgeBaseId}/files`;
   const parsedDocumentPath = `${filesPath}/${encodedFileId}/parsed-document`;
+  const chunksPath = `${filesPath}/${encodedFileId}/chunks`;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { files } = await request(filesPath, { signal });
@@ -83,8 +85,27 @@ export async function waitForAutomatedIngestion({
       );
     }
     if (parsedDocument.chunkStatus === "ready") {
-      onStage("complete");
-      return { file, parsedDocument };
+      onStage("embedding");
+      let chunks = await request(chunksPath, { signal });
+      const chunkItems = [...(chunks.items ?? [])];
+      while (chunks.nextOffset !== null && chunks.nextOffset !== undefined) {
+        chunks = await request(
+          `${chunksPath}?offset=${encodeURIComponent(chunks.nextOffset)}`,
+          { signal }
+        );
+        chunkItems.push(...(chunks.items ?? []));
+      }
+      const allChunks = { ...chunks, items: chunkItems };
+      const allChunksEmbedded =
+        allChunks.total === 0 ||
+        (chunkItems.length >= allChunks.total &&
+          chunkItems.every((chunk) => chunk.isEmbedded));
+      if (allChunksEmbedded) {
+        onStage("complete");
+        return { file, parsedDocument, chunks: allChunks };
+      }
+      await sleep(intervalMs);
+      continue;
     }
 
     onStage("chunking");
