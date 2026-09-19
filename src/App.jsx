@@ -1,11 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Toaster } from "sonner";
-import { AppSidebar } from "./components/chat/appSidebar";
-import { ChatPage } from "./components/chat/chatPage";
-import { DataStreamProvider } from "./components/chat/dataStreamProvider";
-import { Preview } from "./components/chat/preview";
 import { BackendQueryProvider } from "./components/backendQueryProvider";
 import { AuthProvider, useSession } from "./lib/auth";
 import {
@@ -17,17 +12,58 @@ import { ThemeProvider } from "./components/themeProvider";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { LoadingState } from "./components/ui/loadingState";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
-import { KnowledgeBaseWorkspace } from "./components/settings/knowledgeBaseWorkspace";
-import { MemberPermissions } from "./components/settings/memberPermissions";
-import { AppearanceSettings } from "./components/settings/appearanceSettings";
-import { FastApiConnectionTest } from "./components/fastapiConnectionTest";
-import { UploadPage } from "./components/upload/uploadPage";
-import {
-  LocalActivationPage,
-  LocalChangePasswordPage,
-} from "./components/auth/localAccountPages";
 import { Link, usePathname, useRouter } from "./lib/router";
 import { applyAccentColor, getStoredAccentColor } from "./lib/accentColor";
+
+function lazyNamed(loader, exportName) {
+  return lazy(() =>
+    loader().then((module) => ({
+      default: module[exportName],
+    }))
+  );
+}
+
+const ChatPage = lazyNamed(
+  () => import("./components/chat/chatPage"),
+  "ChatPage"
+);
+const AppSidebar = lazyNamed(
+  () => import("./components/chat/appSidebar"),
+  "AppSidebar"
+);
+const Preview = lazyNamed(
+  () => import("./components/chat/preview"),
+  "Preview"
+);
+const Toaster = lazyNamed(() => import("sonner"), "Toaster");
+const KnowledgeBaseWorkspace = lazyNamed(
+  () => import("./components/settings/knowledgeBaseWorkspace"),
+  "KnowledgeBaseWorkspace"
+);
+const MemberPermissions = lazyNamed(
+  () => import("./components/settings/memberPermissions"),
+  "MemberPermissions"
+);
+const AppearanceSettings = lazyNamed(
+  () => import("./components/settings/appearanceSettings"),
+  "AppearanceSettings"
+);
+const FastApiConnectionTest = lazyNamed(
+  () => import("./components/fastapiConnectionTest"),
+  "FastApiConnectionTest"
+);
+const UploadPage = lazyNamed(
+  () => import("./components/upload/uploadPage"),
+  "UploadPage"
+);
+const LocalActivationPage = lazyNamed(
+  () => import("./components/auth/localAccountPages"),
+  "LocalActivationPage"
+);
+const LocalChangePasswordPage = lazyNamed(
+  () => import("./components/auth/localAccountPages"),
+  "LocalChangePasswordPage"
+);
 
 const BusinessDataTablesPage = lazy(() =>
   import("./components/businessTables/businessDataTablesPage").then((module) => ({
@@ -165,6 +201,16 @@ function AuthGuard({ children }) {
   return children;
 }
 
+function RouteSuspense({ children }) {
+  const { t } = useTranslation();
+
+  return (
+    <Suspense fallback={<LoadingState message={t("app.loadingAccess")} />}>
+      {children}
+    </Suspense>
+  );
+}
+
 function ChatLayout() {
   const { t } = useTranslation();
   const { data } = useSession();
@@ -213,8 +259,8 @@ function ChatLayout() {
   }
 
   return (
-    <DataStreamProvider>
-      <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen>
+      <RouteSuspense>
         <AppSidebar
           canManageKnowledgeBases={
             authStatus === "authenticated" && hasPermission("knowledge.manage")
@@ -224,24 +270,41 @@ function ChatLayout() {
           }
           user={user}
         />
-        <SidebarInset>
-          <Toaster
-            position="top-center"
-            theme="system"
-            toastOptions={{
-              className:
-                "!bg-card !text-foreground !border-border/50 !shadow-[var(--shadow-float)]",
-            }}
-          />
+      </RouteSuspense>
+      <SidebarInset>
+          <RouteSuspense>
+            <Toaster
+              position="top-center"
+              theme="system"
+              toastOptions={{
+                className:
+                  "!bg-card !text-foreground !border-border/50 !shadow-[var(--shadow-float)]",
+              }}
+            />
+          </RouteSuspense>
           <Routes>
-            <Route element={<ChatPage />} index />
-            <Route element={<ChatPage />} path="chat/:id" />
+            <Route
+              element={
+                <RouteSuspense>
+                  <ChatPage />
+                </RouteSuspense>
+              }
+              index
+            />
+            <Route
+              element={
+                <RouteSuspense>
+                  <ChatPage />
+                </RouteSuspense>
+              }
+              path="chat/:id"
+            />
             <Route
               element={
                 <PermissionRoute permission="knowledge.manage">
-                  <Suspense fallback={<LoadingState message={t("app.loadingAccess")} />}>
+                  <RouteSuspense>
                     <BusinessDataTablesPage />
-                  </Suspense>
+                  </RouteSuspense>
                 </PermissionRoute>
               }
               path="admin/data-tables"
@@ -249,9 +312,11 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="members.read">
-                  <SettingsPage titleKey="settings.workspacePermissions">
-                    <MemberPermissions />
-                  </SettingsPage>
+                  <RouteSuspense>
+                    <SettingsPage titleKey="settings.workspacePermissions">
+                      <MemberPermissions />
+                    </SettingsPage>
+                  </RouteSuspense>
                 </PermissionRoute>
               }
               path="settings/members"
@@ -259,12 +324,14 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="knowledge.manage">
-                  <SettingsPage
-                    descriptionKey="settings.knowledgeBaseWorkspaceDescription"
-                    titleKey="settings.knowledgeBases"
-                  >
-                    <KnowledgeBaseWorkspace />
-                  </SettingsPage>
+                  <RouteSuspense>
+                    <SettingsPage
+                      descriptionKey="settings.knowledgeBaseWorkspaceDescription"
+                      titleKey="settings.knowledgeBases"
+                    >
+                      <KnowledgeBaseWorkspace />
+                    </SettingsPage>
+                  </RouteSuspense>
                 </PermissionRoute>
               }
               path="settings/knowledge-bases"
@@ -272,7 +339,9 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="knowledge.manage">
-                  <UploadPage />
+                  <RouteSuspense>
+                    <UploadPage />
+                  </RouteSuspense>
                 </PermissionRoute>
               }
               path="upload"
@@ -280,44 +349,55 @@ function ChatLayout() {
             <Route
               element={
                 <PermissionRoute permission="knowledge.manage">
-                  <SettingsPage
-                    descriptionKey="settings.knowledgeBaseWorkspaceDescription"
-                    titleKey="settings.knowledgeBases"
-                  >
-                    <KnowledgeBaseWorkspace />
-                  </SettingsPage>
+                  <RouteSuspense>
+                    <SettingsPage
+                      descriptionKey="settings.knowledgeBaseWorkspaceDescription"
+                      titleKey="settings.knowledgeBases"
+                    >
+                      <KnowledgeBaseWorkspace />
+                    </SettingsPage>
+                  </RouteSuspense>
                 </PermissionRoute>
               }
               path="settings/knowledge-bases/files"
             />
             <Route
               element={
-                <SettingsPage
-                  descriptionKey="settings.accentColorPageDescription"
-                  titleKey="settings.accentColor"
-                >
-                  <AppearanceSettings />
-                </SettingsPage>
+                <RouteSuspense>
+                  <SettingsPage
+                    descriptionKey="settings.accentColorPageDescription"
+                    titleKey="settings.accentColor"
+                  >
+                    <AppearanceSettings />
+                  </SettingsPage>
+                </RouteSuspense>
               }
               path="settings/appearance"
             />
             <Route
-              element={<SettingsPage titleKey="settings.fastApiConnection"><FastApiConnectionTest /></SettingsPage>}
+              element={
+                <RouteSuspense>
+                  <SettingsPage titleKey="settings.fastApiConnection">
+                    <FastApiConnectionTest />
+                  </SettingsPage>
+                </RouteSuspense>
+              }
               path="fastapi-test"
             />
             <Route
               element={
-                <SettingsPage titleKey="auth.changePassword">
-                  <LocalChangePasswordPage />
-                </SettingsPage>
+                <RouteSuspense>
+                  <SettingsPage titleKey="auth.changePassword">
+                    <LocalChangePasswordPage />
+                  </SettingsPage>
+                </RouteSuspense>
               }
               path="settings/password"
             />
             <Route element={<NotFoundPage />} path="*" />
           </Routes>
-        </SidebarInset>
-      </SidebarProvider>
-    </DataStreamProvider>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
@@ -574,7 +654,9 @@ function LocalSessionAuthPage({ mode }) {
         </div>
       </div>
       <div className="hidden flex-1 overflow-hidden pl-12 pt-8 xl:block">
-        <Preview />
+        <RouteSuspense>
+          <Preview />
+        </RouteSuspense>
       </div>
     </div>
   );
@@ -585,7 +667,14 @@ function App() {
     <BrowserRouter>
       <AuthGuard>
         <Routes>
-          <Route element={<LocalActivationPage />} path="/activate" />
+          <Route
+            element={
+              <RouteSuspense>
+                <LocalActivationPage />
+              </RouteSuspense>
+            }
+            path="/activate"
+          />
           <Route element={<PasswordHelpPage />} path="/forgot-password" />
           <Route element={<PasswordHelpPage />} path="/reset-password" />
           <Route element={<WorkspaceAccessPendingPage />} path="/access-pending" />

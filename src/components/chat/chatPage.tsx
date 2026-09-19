@@ -1,10 +1,13 @@
 import { ActiveChatProvider } from "@/hooks/useActiveChat";
+import { DataStreamProvider } from "./dataStreamProvider";
 import { ChatShell } from "./shell";
 
 export function ChatPage() {
   return (
-    <ActiveChatProvider>
-      <ChatShell />
-    </ActiveChatProvider>
+    <DataStreamProvider>
+      <ActiveChatProvider>
+        <ChatShell />
+      </ActiveChatProvider>
+    </DataStreamProvider>
   );
 }

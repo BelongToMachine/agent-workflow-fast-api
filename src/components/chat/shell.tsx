@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
@@ -21,12 +21,15 @@ import {
 } from "@/hooks/useArtifact";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Artifact } from "./artifact";
 import { ChatHeader } from "./chatHeader";
 import { DataStreamHandler } from "./dataStreamHandler";
 import { submitEditedMessage } from "./messageEditor";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodalInput";
+
+const Artifact = lazy(() =>
+  import("./artifact").then((module) => ({ default: module.Artifact }))
+);
 
 export function ChatShell() {
   const { t } = useTranslation();
@@ -182,22 +185,26 @@ export function ChatShell() {
           </div>
         </div>
 
-        <Artifact
-          addToolApprovalResponse={addToolApprovalResponse}
-          attachments={attachments}
-          input={input}
-          isReadonly={isReadonly}
-          messages={messages}
-          regenerate={regenerate}
-          selectedModelId={currentModelId}
-          selectedVisibilityType={visibilityType}
-          sendMessage={sendMessage}
-          setAttachments={setAttachments}
-          setInput={setInput}
-          setMessages={setMessages}
-          status={status}
-          stop={stop}
-        />
+        {isArtifactVisible ? (
+          <Suspense fallback={<LoadingState message={t("common.loading")} />}>
+            <Artifact
+              addToolApprovalResponse={addToolApprovalResponse}
+              attachments={attachments}
+              input={input}
+              isReadonly={isReadonly}
+              messages={messages}
+              regenerate={regenerate}
+              selectedModelId={currentModelId}
+              selectedVisibilityType={visibilityType}
+              sendMessage={sendMessage}
+              setAttachments={setAttachments}
+              setInput={setInput}
+              setMessages={setMessages}
+              status={status}
+              stop={stop}
+            />
+          </Suspense>
+        ) : null}
       </div>
 
       <DataStreamHandler />
