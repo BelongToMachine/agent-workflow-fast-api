@@ -1,0 +1,279 @@
+.business-data-page {
+  --business-grid-shadow: 0 1px 2px oklch(0 0 0 / 0.035);
+}
+
+.business-mock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid color-mix(in oklch, var(--primary) 16%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--primary) 4%, var(--card));
+  padding: 0.4rem 0.7rem;
+  color: var(--foreground);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.business-table-button {
+  display: inline-flex;
+  min-width: 178px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--card);
+  padding: 0.62rem 0.75rem;
+  color: var(--foreground);
+  text-align: left;
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.business-table-button:hover {
+  border-color: color-mix(in oklch, var(--primary) 24%, var(--border));
+  background: color-mix(in oklch, var(--muted) 45%, var(--card));
+}
+
+.business-table-button:focus-visible,
+.business-toolbar-button:focus-visible,
+.business-mini-button:focus-visible,
+.business-text-button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--primary) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.business-table-button-active {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  background: color-mix(in oklch, var(--primary) 5%, var(--card));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 7%, transparent);
+}
+
+.business-table-button-active > svg {
+  color: var(--primary);
+}
+
+.business-toolbar-button {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: var(--card);
+  padding: 0.4rem 0.65rem;
+  color: var(--foreground);
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.business-toolbar-button:hover,
+.business-toolbar-button-active {
+  border-color: color-mix(in oklch, var(--primary) 28%, var(--border));
+  background: color-mix(in oklch, var(--muted) 58%, var(--card));
+}
+
+.business-icon-button {
+  width: 2.25rem;
+  padding: 0;
+}
+
+.business-columns-panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: min(34rem, calc(100vw - 2rem));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-float);
+}
+
+.business-column-row {
+  display: flex;
+  min-height: 2.2rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-radius: 0.35rem;
+  padding: 0.25rem 0.35rem 0.25rem 0.55rem;
+}
+
+.business-column-row:hover {
+  background: var(--muted);
+}
+
+.business-mini-button {
+  display: grid;
+  width: 1.55rem;
+  height: 1.55rem;
+  place-items: center;
+  border-radius: 0.3rem;
+  color: var(--muted-foreground);
+}
+
+.business-mini-button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.business-mini-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.business-pin-select {
+  max-width: 5.75rem;
+  height: 1.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--card);
+  padding: 0 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.62rem;
+}
+
+.business-text-button {
+  border-radius: 0.3rem;
+  padding: 0.25rem 0.4rem;
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+}
+
+.business-text-button:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.business-status {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.business-status-positive {
+  background: color-mix(in oklch, #18865c 11%, var(--card));
+  color: color-mix(in oklch, #08774d 86%, var(--foreground));
+}
+
+.dark .business-status-positive {
+  background: color-mix(in oklch, #46bc89 14%, var(--card));
+  color: #8fdfbc;
+}
+
+.business-status-pending {
+  background: color-mix(in oklch, #b58118 12%, var(--card));
+  color: color-mix(in oklch, #865c0d 88%, var(--foreground));
+}
+
+.dark .business-status-pending {
+  background: color-mix(in oklch, #e1ae39 15%, var(--card));
+  color: #e9c66e;
+}
+
+.business-status-muted {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.business-detail-tab {
+  flex: 1;
+  border-radius: 0.4rem;
+  padding: 0.42rem 0.6rem;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 500;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.business-detail-tab-active {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-card);
+}
+
+.business-detail-field {
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  padding-bottom: 0.85rem;
+}
+
+.business-detail-field dt {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.business-detail-field dt code {
+  border-radius: 0.25rem;
+  background: var(--muted);
+  padding: 0.05rem 0.3rem;
+  color: var(--muted-foreground);
+  font-size: 0.61rem;
+}
+
+.business-detail-field dd {
+  margin: 0.4rem 0 0;
+  color: var(--foreground);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.business-detail-field dd.business-long-value {
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--muted) 58%, var(--card));
+  padding: 0.7rem 0.8rem;
+  white-space: pre-wrap;
+}
+
+.business-data-grid .ag-root-wrapper {
+  border: 0;
+  border-radius: 0;
+}
+
+.business-data-grid .ag-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.business-data-grid .ag-header-cell-text {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+}
+
+.business-data-grid .ag-cell {
+  display: flex;
+  align-items: center;
+  line-height: 1.45;
+}
+
+.business-data-grid .ag-row-hover::before {
+  background: color-mix(in oklch, var(--accent) 58%, transparent);
+}
+
+@media (max-width: 640px) {
+  .business-table-button {
+    min-width: min(100%, 164px);
+    flex: 1 1 calc(50% - 0.5rem);
+  }
+
+  .business-data-grid {
+    height: 62vh !important;
+    min-height: 360px !important;
+  }
+}

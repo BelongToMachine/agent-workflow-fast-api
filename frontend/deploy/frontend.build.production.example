@@ -1,0 +1,16 @@
+# Public build-time values only. Vite embeds these values into the browser
+# bundle. Do not put passwords, API keys, or other secrets in this file.
+FRONTEND_ENVIRONMENT=production
+# Keep browser API calls on the SG Caddy origin. Caddy forwards /api/* to the
+# local FastAPI service, while Cloudflare Pages serves only static assets.
+FRONTEND_API_URL=https://copilot.asianodeatlas.com
+VITE_ASSET_BASE_URL=https://static.asianodeatlas.com/
+# The deploy script injects the current Git SHA as VITE_RELEASE_ID.
+VITE_WORKSPACE_ID=00000000-0000-0000-0000-000000000001
+VITE_SINGLE_WORKSPACE_MODE=true
+NEXT_PUBLIC_API_MODE=fastapi-direct
+NEXT_PUBLIC_USE_FASTAPI_BACKEND=1
+
+# Cloudflare Tunnel should target this loopback port after verification.
+FRONTEND_BIND_ADDRESS=127.0.0.1
+FRONTEND_HOST_PORT=18100
