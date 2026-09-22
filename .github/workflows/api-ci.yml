@@ -1,0 +1,68 @@
+name: API CI
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "deploy/**"
+      - "infra/**"
+      - "migrations/**"
+      - "scripts/**"
+      - "tests/**"
+      - "compose*.yaml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "Makefile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/api-ci.yml"
+  push:
+    paths:
+      - "app/**"
+      - "deploy/**"
+      - "infra/**"
+      - "migrations/**"
+      - "scripts/**"
+      - "tests/**"
+      - "compose*.yaml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "Makefile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/api-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.15"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked backend dependencies
+        run: uv sync --frozen
+
+      - name: Ruff
+        run: make lint
+
+      - name: Pytest
+        run: make test

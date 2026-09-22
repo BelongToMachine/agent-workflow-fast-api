@@ -1,9 +1,11 @@
-# Asianode Copilot
+# Manulio
 
-Asianode Copilot（项目内部名称：Asianode Agent）是一个面向中小型企业的本地知识库 AI Agent 助手。
+Manulio（项目内部名称：Asianode Agent）是一个面向中小型企业的本地知识库 AI Agent 助手。
 它把企业的产品资料、内部文档、FAQ、操作手册和业务知识集中到可管理的知识库中，再通过具备权限边界的 AI 对话和 Agent 查询能力，让员工和客户能够更快地找到可信、可追溯的答案。
 
-项目采用前后端分离架构：本仓库负责浏览器端体验；同级的 [`asianode-fastapi`](../asianode-fastapi) 仓库负责认证、权限、知识库处理、Agent 工作流、模型调用和数据持久化。
+项目采用低耦合 monorepo：当前目录 `frontend/` 是独立的 React + Vite 前端应用；仓库根目录的 [`app/`](../app) 是 FastAPI 后端，负责认证、权限、知识库处理、Agent 工作流、模型调用和数据持久化。前后端仍分别构建和部署。
+
+> 生产部署边界：本次 monorepo 整理不切换 Cloudflare Pages 或 SG 前端部署来源。它们继续使用原独立前端仓库；SG FastAPI 继续使用根目录后端部署流程。相关脚本、Pages 仓库/根目录设置和 VPS 配置均未在此变更。详见 [`docs/monorepo-architecture.md`](../docs/monorepo-architecture.md)。
 
 ## 产品定位
 
@@ -78,7 +80,7 @@ Workspace 是企业数据隔离边界。权限在 FastAPI 数据访问层执行�
  本地文件或 S3-compatible 存储
 ```
 
-### 前端：本仓库
+### 前端：`frontend/` 工作区
 
 前端是独立的 React 19 + Vite 应用，主要负责：
 
@@ -91,7 +93,7 @@ Workspace 是企业数据隔离边界。权限在 FastAPI 数据访问层执行�
 
 前端不会把 `userId`、`role`、`permissions` 或 workspace 所有权当作可信身份，也不会新增 Next.js API route、Server Action 或 BFF 业务逻辑。
 
-### 后端：[`../asianode-fastapi`](../asianode-fastapi)
+### 后端：仓库根目录的 FastAPI 应用
 
 FastAPI 后端负责所有需要信任边界的工作：
 
@@ -103,25 +105,23 @@ FastAPI 后端负责所有需要信任边界的工作：
 - PostgreSQL/pgvector、Redis 及本地或 S3-compatible 存储访问；
 - 限流、错误标准化和审计日志。
 
-详细的 API、数据库迁移、Feature Flag 和后端测试命令请参考 [`asianode-fastapi/README.md`](../asianode-fastapi/README.md)。
+详细的 API、数据库迁移、Feature Flag 和后端测试命令请参考[仓库根 README](../README.md)。
 
 ## 目录概览
 
 ```text
-asianode-agent/
-├── asianodeagent-front/         # 当前仓库：React + Vite 前端
+manulio/
+├── frontend/                    # React + Vite 前端（独立 Bun 项目）
 │   ├── src/components/chat/     # 聊天壳层、消息、侧边栏和 Artifact
 │   ├── src/components/settings/ # 成员与知识库管理页面
 │   ├── src/hooks/               # 聊天、Artifact、滚动等浏览器 hooks
 │   ├── src/lib/backend/         # FastAPI 请求、路由映射和 React Query
 │   ├── src/lib/auth/             # 前端会话状态与认证页面
 │   └── src/artifacts/            # 文本、代码、图片、表格 Artifact
-└── asianode-fastapi/             # 同级仓库：API、Agent、权限和数据层
-    ├── app/api/routes/            # HTTP API 路由
-    ├── app/core/                 # 认证、权限、workspace 和安全逻辑
-    ├── app/services/             # Agent、Embedding、存储和流恢复服务
-    ├── migrations/               # 知识库、权限和认证相关迁移
-    └── tests/                    # 后端单元及集成测试
+├── app/                          # FastAPI API、Agent、权限和数据层
+├── migrations/                   # 后端数据库迁移
+├── deploy/                       # 后端 VPS 部署脚本
+└── docs/                         # 架构、API 和运维文档
 ```
 
 ## 本地开发
@@ -137,10 +137,9 @@ asianode-agent/
 
 ### 启动后端
 
-进入同级 FastAPI 项目：
+从 monorepo 根目录启动后端：
 
 ```bash
-cd ../asianode-fastapi
 make setup
 make infra-up
 make dev
@@ -158,12 +157,12 @@ make provision-local-admin EMAIL=owner@example.com NAME="Workspace Owner"
 
 ### 启动前端
 
-回到当前目录：
+从 monorepo 根目录启动前端：
 
 ```bash
-bun install
-cp .env.example .env.local
-bun run dev
+make frontend-install
+cp frontend/.env.example frontend/.env.local
+make frontend-dev
 ```
 
 前端默认运行在 Vite 开发服务器，通常为 `http://localhost:5173`，并将 `/api` 请求代理到 `http://127.0.0.1:8000`。
@@ -216,16 +215,19 @@ NEXT_PUBLIC_USE_FASTAPI_BACKEND=1
 ## 检查命令
 
 ```bash
-bun run lint
-bun run build
+make frontend-lint
+make frontend-test
+make frontend-build
 ```
 
-后端检查请在 `../asianode-fastapi` 中执行：
+后端检查在 monorepo 根目录执行：
 
 ```bash
 make lint
 make test
 ```
+
+前后端完整本地检查可在根目录执行 `make check-all`。这些命令只运行本地 lint、测试和静态构建，不会部署。
 
 涉及聊天、知识库或权限变更时，还应验证登录、聊天发送与 SSE、历史读取/删除、Artifact 流式打开与保存、移动端布局，以及不同权限下的前端入口和后端拒绝行为。
 
