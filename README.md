@@ -1,6 +1,32 @@
-# Asianode FastAPI
+# Manulio
 
-Asianode Agent 的独立 FastAPI 后端项目。当前版本已经接管聊天生成链路，后续逐步加入认证、企业隔离、知识库和 AI Agent 能力。
+Manulio 是面向企业知识协作的应用。此仓库采用低耦合 monorepo：FastAPI 后端保持在仓库根目录，React + Vite 前端位于 `frontend/`；两边继续使用各自的依赖管理、构建和发布单元。
+
+## Monorepo 布局与生产边界
+
+```text
+.
+├── app/                 # FastAPI 应用（路径保持不变）
+├── migrations/          # FastAPI 数据库迁移
+├── deploy/              # FastAPI VPS 部署脚本
+├── frontend/            # React + Vite 前端及其独立部署文件
+│   ├── package.json     # Bun 项目清单
+│   └── bun.lock         # 前端锁文件
+├── docs/                # 架构、API 与运维文档
+├── pyproject.toml       # Python/uv 项目清单
+└── uv.lock              # 后端锁文件
+```
+
+- Python 后端仍从仓库根目录运行；前端命令可从根目录通过 `make frontend-*` 执行。两侧没有共享锁文件或隐式工作区。
+- 将前端纳入本仓库并不会自动切换生产部署源。Cloudflare Pages 和 SG 前端发布仍按现有独立前端仓库配置运行；SG FastAPI 发布仍由现有后端部署 checkout 和脚本负责。
+- 本仓库的 GitHub Actions 仅运行 lint、测试和构建，不含 deploy job、Cloudflare 凭据或 VPS 凭据。
+- 不要删除或停用原前端仓库。只有在单独批准并完成 Pages 项目仓库/根目录设置、SG 前端发布脚本的 monorepo 适配和回滚验证后，才考虑切换生产来源。
+
+更完整的目录职责、依赖边界、现行发布来源和未来切换检查表见 [`docs/monorepo-architecture.md`](docs/monorepo-architecture.md)。前端开发说明见 [`frontend/README.md`](frontend/README.md)。
+
+## FastAPI 后端
+
+以下部分记录 FastAPI 的本地运行、API、数据库和运维约定；后端仍在仓库根目录，路径未移动。
 
 ## 技术栈
 
@@ -126,7 +152,7 @@ make dev \
 这是用于检查数据库和 SQLAdmin 界面的独立本地登录，不替代正式 OIDC/Bearer 认证；生产环境会
 拒绝启用该预览。
 
-本地运行时，FastAPI 会读取 `asianode-fastapi` 仓库根目录的 `.env.local`，因此可以复用
+本地运行时，FastAPI 会读取 monorepo 根目录的 `.env.local`，因此可以复用
 `DEEPSEEK_API_KEY`。模型 provider 请求默认在 60 秒后超时，可通过
 `CHAT_PROVIDER_TIMEOUT_SECONDS` 调整（范围 1–300 秒）。部署到其他环境时，请通过环境变量提供 API Key。
 
@@ -135,7 +161,7 @@ FastAPI 内部回退到 `deepseek-chat`，不会把客户端提交的任意 prov
 
 ## 当前前端切换状态
 
-当 `asianodeagent-front/.env.local` 中设置以下变量时，Web 端聊天请求会进入 FastAPI：
+当 `frontend/.env.local` 中设置以下变量时，Web 端聊天请求会进入 FastAPI：
 
 ```env
 USE_FASTAPI_BACKEND=1
@@ -156,7 +182,7 @@ FastAPI 会保留 Web 消息中的 JPEG/PNG 图片附件：文字部分继续使
 会转换为 OpenAI-compatible `image_url` content。仅允许 `http://`、`https://` 和
 `data:image/...` URL；PDF、其他文件类型或本地文件路径不会被转发给模型。
 
-Web Chat 图片上传默认关闭。要切换到 FastAPI 上传管道，需要在 FastAPI 和前端仓库的 `.env.local` 中分别
+Web Chat 图片上传默认关闭。要切换到 FastAPI 上传管道，需要在 FastAPI 和 `frontend/.env.local` 中分别
 设置：
 
 ```env

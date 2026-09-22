@@ -118,7 +118,8 @@ TABLE_SPECS: dict[str, SeedTableSpec] = {
     "productPrices": SeedTableSpec(
         table_name="ProductPrice",
         allowed_columns=_columns(
-            "id", "researchId", "sourceFileId", "sourceRow", "sourceSheet", "variant", "priceMin", "priceMax",
+            "id", "researchId", "sourceFileId", "sourceRow", "sourceSheet", "variant",
+            "priceMin", "priceMax",
             "currency", "priceType", "rawText",
         ),
         required_columns=_columns(

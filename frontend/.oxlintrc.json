@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "oxc"],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": [
+      "warn",
+      {
+        "allowConstantExport": true,
+        "allowExportNames": [
+          "artifactDefinitions",
+          "badgeVariants",
+          "buttonGroupVariants",
+          "buttonVariants",
+          "codeArtifact",
+          "getStatusBadge",
+          "highlightCode",
+          "LocalReferencedSourcesContext",
+          "messagesToMarkdown",
+          "signOut",
+          "slashCommands",
+          "toast",
+          "useActiveChat",
+          "useDataStream",
+          "useLocationSearch",
+          "usePathname",
+          "usePromptInputAttachments",
+          "usePromptInputController",
+          "usePromptInputReferencedSources",
+          "useProviderAttachments",
+          "useReasoning",
+          "useRouter",
+          "useSession",
+          "useSidebar"
+        ]
+      }
+    ]
+  }
+}

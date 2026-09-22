@@ -1,7 +1,9 @@
-.PHONY: setup dev test test-integration lint infra-up infra-down infra-status infra-logs migration-status auth-migration-status auth-migration-preflight local-auth-status migrate-local-auth provision-local-admin knowledge-integrity migrate-knowledge migrate-auth-identity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings grant-first-owner seed-knowledge seed-content seed-products seed-operations
+.PHONY: setup dev test test-integration lint frontend-install frontend-dev frontend-lint frontend-test frontend-build frontend-check check-all infra-up infra-down infra-status infra-logs migration-status auth-migration-status auth-migration-preflight local-auth-status migrate-local-auth provision-local-admin knowledge-integrity migrate-knowledge migrate-auth-identity migrate-knowledge-grants migrate-knowledge-ingestion migrate-knowledge-bases migrate-knowledge-embeddings grant-first-owner seed-knowledge seed-content seed-products seed-operations
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= compose.yaml
+BUN ?= bun
+FRONTEND_DIR ?= frontend
 SQLADMIN_ENABLED ?= false
 SQLADMIN_USERNAME ?= admin
 SQLADMIN_PASSWORD ?=
@@ -37,6 +39,29 @@ test-integration:
 
 lint:
 	uv run ruff check .
+
+# Frontend commands run in their own Bun project. Existing backend targets above
+# keep their behavior and working directory unchanged.
+frontend-install:
+	cd "$(FRONTEND_DIR)" && $(BUN) install --frozen-lockfile
+
+frontend-dev:
+	cd "$(FRONTEND_DIR)" && $(BUN) run dev
+
+frontend-lint:
+	cd "$(FRONTEND_DIR)" && $(BUN) run lint
+
+frontend-test:
+	cd "$(FRONTEND_DIR)" && $(BUN) run test:business-tables
+	cd "$(FRONTEND_DIR)" && $(BUN) run test:chat-toolchain
+	cd "$(FRONTEND_DIR)" && $(BUN) run test:knowledge-search-scope
+
+frontend-build:
+	cd "$(FRONTEND_DIR)" && $(BUN) run build
+
+frontend-check: frontend-lint frontend-test frontend-build
+
+check-all: lint test frontend-check
 
 migration-status:
 	uv run python -m app.db.migration_status
