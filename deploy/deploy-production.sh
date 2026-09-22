@@ -128,9 +128,9 @@ if [[ -e "$RELEASE" ]]; then
 else
   mkdir -m 0750 "$RELEASE"
 
-  # Export only files committed at this SHA. This excludes .git, untracked
-  # files, local build output, and server-side runtime secrets.
-  git archive --format=tar "$SHA" | tar -x -C "$RELEASE"
+  # Export only backend build inputs. Frontend sources and their full asset
+  # tree stay out of each immutable API release and its Docker build context.
+  bash "$SOURCE/deploy/archive-backend-release.sh" "$SOURCE" "$SHA" "$RELEASE"
 
   # The Compose file must be included by git archive with the application
   # source. Do not copy a server-side file into a new release.
