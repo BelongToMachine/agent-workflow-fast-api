@@ -1,2 +1,2 @@
-"""Asianode FastAPI application package."""
+"""pallas FastAPI application package."""
 

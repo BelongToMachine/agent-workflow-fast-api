@@ -12,7 +12,7 @@ export const createSearchContentTool = ({
 }) =>
   tool({
     description:
-      "Search the Asianode content operations workspace. Find content topics, copywriting, shooting plans, editing plans, and account channels by keyword, product, language, status, submitter, account, record type, or exact source file name. When the user names source files, pass them in sourceFileNames and only use records from those files; do not invent schedules or scripts.",
+      "Search the pallas content operations workspace. Find content topics, copywriting, shooting plans, editing plans, and account channels by keyword, product, language, status, submitter, account, record type, or exact source file name. When the user names source files, pass them in sourceFileNames and only use records from those files; do not invent schedules or scripts.",
     execute: async (input) => {
       const startedAt = Date.now();
       logEvent("info", "tool.search_content.start", {

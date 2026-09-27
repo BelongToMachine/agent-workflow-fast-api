@@ -1,4 +1,4 @@
-# Asianode MinIO infrastructure
+# pallas MinIO infrastructure
 
 This directory contains the independent object-storage stack. It is not part
 of the API release lifecycle and must not be copied into

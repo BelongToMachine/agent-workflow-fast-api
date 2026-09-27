@@ -6,7 +6,7 @@ from app.core.auth import AuthenticatedUser
 
 DEV_WORKSPACE_ID = UUID("00000000-0000-0000-0000-000000000001")
 DEV_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
-DEV_WORKSPACE_NAME = "Asianode Development Workspace"
+DEV_WORKSPACE_NAME = "pallas Development Workspace"
 
 
 def get_persistence_user_id(current_user: AuthenticatedUser) -> UUID:
@@ -41,7 +41,7 @@ async def ensure_development_identity(
 
     user_id = get_persistence_user_id(current_user)
     email = current_user.email or f"dev-{user_id.hex}@asianode.local"
-    name = current_user.email or "Asianode Development User"
+    name = current_user.email or "pallas Development User"
 
     await connection.execute(
         text(

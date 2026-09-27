@@ -575,7 +575,7 @@ function LocalSessionAuthPage({ mode }) {
             </p>
           </div>
           <h1 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-foreground md:text-4xl">
-            Asianode Copilot
+            pallas
           </h1>
           <p className="mt-4 max-w-sm text-sm leading-6 text-muted-foreground">
             {t("auth.productDescription")}

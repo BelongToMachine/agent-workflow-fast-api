@@ -12,7 +12,7 @@ export const createSearchProductsTool = ({
 }) =>
   tool({
     description:
-      "Search the active Asianode enterprise product research and operations data. Supports product keywords, category, price, lead time, MOQ, promotion status, sales channel, proposer, logistics, qualification, document presence, missing-field filters, and exact source file names. When the user names source files, pass them in sourceFileNames and only use products from those files.",
+      "Search the active pallas enterprise product research and operations data. Supports product keywords, category, price, lead time, MOQ, promotion status, sales channel, proposer, logistics, qualification, document presence, missing-field filters, and exact source file names. When the user names source files, pass them in sourceFileNames and only use products from those files.",
     execute: async (input) => {
       const startedAt = Date.now();
       logEvent("info", "tool.search_products.start", {

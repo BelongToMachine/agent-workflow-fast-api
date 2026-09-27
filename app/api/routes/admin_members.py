@@ -378,7 +378,7 @@ async def list_members(
     except SQLAlchemyError:
         return _database_error("FastAPI could not query workspace members.")
 
-    workspace_name = members[0].workspace_name if members else "Asianode Workspace"
+    workspace_name = members[0].workspace_name if members else "pallas Workspace"
     return MembersResponse(
         members=members,
         workspace={"id": str(workspace_id), "name": workspace_name},

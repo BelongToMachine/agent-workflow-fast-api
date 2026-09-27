@@ -71,7 +71,7 @@ export async function getWorkspaceMembershipForUser(userId: string) {
       status: "active" as const,
       userId,
       workspaceId: DEFAULT_WORKSPACE_ID,
-      workspaceName: "Asianode Default Workspace",
+      workspaceName: "pallas Default Workspace",
     };
   }
 

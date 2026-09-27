@@ -43,7 +43,7 @@ def test_member_views_include_role_defaults_and_overrides() -> None:
                 "workspace_id": UUID("00000000-0000-0000-0000-000000000012"),
                 "email": "viewer@example.com",
                 "name": "Viewer",
-                "workspace_name": "Asianode",
+                "workspace_name": "pallas",
             }
         ],
         [
@@ -90,7 +90,7 @@ def test_member_views_mark_standard_role_permissions_as_not_custom() -> None:
                 "workspace_id": UUID("00000000-0000-0000-0000-000000000012"),
                 "email": "viewer@example.com",
                 "name": "Viewer",
-                "workspace_name": "Asianode",
+                "workspace_name": "pallas",
             }
         ],
         [],
@@ -112,7 +112,7 @@ def test_member_views_apply_agent_tool_permission_denials() -> None:
                 "workspace_id": UUID("00000000-0000-0000-0000-000000000012"),
                 "email": "employee@example.com",
                 "name": "Employee",
-                "workspace_name": "Asianode",
+                "workspace_name": "pallas",
             }
         ],
         [

@@ -581,7 +581,7 @@ export function BusinessDataTablesPage() {
           <div>
             <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
               <DatabaseIcon aria-hidden="true" className="size-3.5" />
-              <span>{locale === "zh" ? "Asianode · 数据浏览" : "Asianode · Data explorer"}</span>
+              <span>{locale === "zh" ? "pallas · 数据浏览" : "pallas · Data explorer"}</span>
             </div>
             <h1 className="m-0 text-2xl font-semibold tracking-tight text-foreground md:text-[28px]">
               {copy.title}

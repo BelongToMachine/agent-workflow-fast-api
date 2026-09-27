@@ -22,7 +22,7 @@ def test_health_check() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "service": "Asianode FastAPI",
+        "service": "pallas FastAPI",
         "environment": "development",
     }
 

@@ -1,4 +1,4 @@
-# Asianode FastAPI + Redis 同机隔离 Docker 部署计划
+# pallas FastAPI + Redis 同机隔离 Docker 部署计划
 
 ## 1. 文档信息
 
@@ -392,7 +392,7 @@ networks:
 示例：
 
 ```env
-ASIANODE_APP_NAME=Asianode FastAPI Preview
+ASIANODE_APP_NAME=pallas FastAPI Preview
 ASIANODE_ENVIRONMENT=staging
 ASIANODE_DEBUG=false
 
@@ -825,7 +825,7 @@ docker compose \
 - API 和 Redis 使用 `restart: unless-stopped`。
 - rootless Docker 使用用户级 systemd 自动启动。
 - 启用 linger 后执行一次 VPS 重启演练。
-- 重启演练必须同时验证中继服务和 Asianode 服务。
+- 重启演练必须同时验证中继服务和 pallas 服务。
 
 ## 16. 备份策略
 
@@ -848,7 +848,7 @@ docker compose \
 
 ### 17.1 应用级回滚
 
-停止 Asianode 项目：
+停止 pallas 项目：
 
 ```bash
 docker compose \
@@ -916,7 +916,7 @@ rootful Docker 安装导致中继异常时：
 - [ ] Redis、数据库、认证、SSE 和真实模型 smoke test 通过
 - [ ] 10～30 分钟并发测试未影响中继
 - [ ] 应用停止和镜像回滚演练通过
-- [ ] VPS 重启后中继与 Asianode 都能恢复
+- [ ] VPS 重启后中继与 pallas 都能恢复
 
 ### 18.2 NO-GO 条件
 

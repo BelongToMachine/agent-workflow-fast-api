@@ -1,4 +1,4 @@
-# Asianode FastAPI API Contracts
+# pallas FastAPI API Contracts
 
 这份文档以当前 FastAPI 路由和 `/openapi.json` 为准，记录 Web 迁移阶段的稳定接口边界。
 具体字段定义由各路由中的 Pydantic model 生成；接口变更时需要同步更新本文件和 OpenAPI

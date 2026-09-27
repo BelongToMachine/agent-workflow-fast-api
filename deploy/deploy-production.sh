@@ -205,7 +205,7 @@ else
 fi
 
 # Intentional cutover point: both stacks use host port 18000, so a short outage
-# is expected. Stop only the old Asianode project.
+# is expected. Stop only the old `asianode-preview` project.
 log "Stopping the old asianode-preview API and Redis."
 old_compose stop api redis
 OLD_STOPPED=1

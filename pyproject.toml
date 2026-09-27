@@ -1,7 +1,7 @@
 [project]
 name = "asianode-fastapi"
 version = "0.1.0"
-description = "FastAPI backend for Asianode Agent"
+description = "FastAPI backend for pallas"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

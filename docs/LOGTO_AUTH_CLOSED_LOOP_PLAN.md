@@ -398,7 +398,7 @@ require_workspace_permission
     {
       "membershipId": "uuid",
       "workspaceId": "uuid",
-      "workspaceName": "Asianode",
+      "workspaceName": "pallas",
       "role": "viewer",
       "status": "active",
       "permissions": ["knowledge.read", "chat.read", "chat.write"],
@@ -585,7 +585,7 @@ Post sign-out redirect:   https://<frontend-domain>/
 建议：
 
 ```text
-API Name:       Asianode FastAPI
+API Name:       pallas FastAPI
 API Identifier: https://api.<your-domain>
 Token TTL:      3600 秒（先使用默认值）
 ```
@@ -994,7 +994,7 @@ bun run build
 
 - [ ] Google 网页登录通过真实账号验收；
 - [ ] 微信网页登录通过真实账号验收（暂缓，不作为本期完成条件）；
-- [ ] Access Token 的 audience 是 Asianode FastAPI API Resource；
+- [ ] Access Token 的 audience 是 pallas FastAPI API Resource；
 - [x] FastAPI 不再把 Logto `sub` 当作本地 UUID；
 - [x] 同一个 Logto `sub` 始终映射到同一个本地 User UUID；
 - [~] 微信无 email 用户可正常初始化（延期：微信登录暂不纳入 MVP）；

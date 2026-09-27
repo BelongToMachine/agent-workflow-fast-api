@@ -44,7 +44,7 @@ class _Connection:
         sql = str(query)
         self.calls.append((sql, params))
         if 'FROM "Workspace"' in sql:
-            return _Result({"id": WORKSPACE_ID, "name": "Asianode"})
+            return _Result({"id": WORKSPACE_ID, "name": "pallas"})
         if 'FROM "User" AS user_record' in sql:
             return _Result(self.account)
         return _Result()

@@ -34,7 +34,7 @@ def test_effective_permissions_apply_role_defaults_and_overrides() -> None:
             {
                 "membership_id": membership_id,
                 "workspace_id": workspace_id,
-                "workspace_name": "Asianode",
+                "workspace_name": "pallas",
                 "role": "viewer",
                 "status": "active",
             }
@@ -79,7 +79,7 @@ def test_employee_role_can_read_knowledge_but_not_manage_it() -> None:
             {
                 "membership_id": membership_id,
                 "workspace_id": workspace_id,
-                "workspace_name": "Asianode",
+                "workspace_name": "pallas",
                 "role": "employee",
                 "status": "active",
             }

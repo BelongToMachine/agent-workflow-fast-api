@@ -1,4 +1,4 @@
-# Asianode Agent CI/CD 自动化实施架构计划
+# pallas CI/CD 自动化实施架构计划
 
 ## 1. 文档信息
 
@@ -549,7 +549,7 @@ Compose 和 deploy script 可以在初次 bootstrap 时由人工核对后安装�
 真实值只由 VPS 持有，至少覆盖：
 
 ```dotenv
-APP_NAME=Asianode FastAPI
+APP_NAME=pallas FastAPI
 ENVIRONMENT=production
 DEBUG=false
 
@@ -616,7 +616,7 @@ sudo docker ...
 ```
 
 镜像清理应是独立低频维护任务，并且只删除明确超过保留数量、不被任何容器使用的
-Asianode 镜像。
+pallas 镜像。
 
 ## 11. 健康检查、可观测性与回滚
 

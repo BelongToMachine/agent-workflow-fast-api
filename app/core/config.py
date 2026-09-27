@@ -22,7 +22,7 @@ class Settings(BaseSettings):
         return value.strip().lower()
 
     app_name: str = Field(
-        default="Asianode FastAPI",
+        default="pallas FastAPI",
         validation_alias=AliasChoices("APP_NAME", "ASIANODE_APP_NAME"),
     )
     environment: str = Field(

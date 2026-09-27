@@ -1,11 +1,11 @@
-# Asianode Agent Frontend Development Guide
+# pallas Frontend Development Guide
 
 本文件适用于 `asianodeagent-front` 及其子目录。前端必须遵守 React/Vite + FastAPI 分离架构：
 浏览器端功能放在本仓库，API、鉴权、权限和业务逻辑放在同级的 `asianode-fastapi` 仓库。
 
 ## 项目定位
 
-这是 Asianode Agent 的独立 React + Vite 前端，不是 Next.js 应用。前端负责：
+这是 pallas 的独立 React + Vite 前端，不是 Next.js 应用。前端负责：
 
 - 页面、路由、交互、浏览器端状态和响应式 UI；
 - 通过 FastAPI API 合同发起聊天、历史、文档、知识库、成员权限和文件请求；

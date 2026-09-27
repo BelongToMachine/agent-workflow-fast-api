@@ -11,8 +11,8 @@ export const languageOptions: Array<{ code: AppLanguage; label: string }> = [
 ];
 
 const en = {
-  "app.name": "Asianode Agent",
-  "app.documentTitle": "Atlas Trade Copilot",
+  "app.name": "pallas",
+  "app.documentTitle": "pallas",
   "app.documentDescription": "A multilingual AI workspace for teams connecting Chinese suppliers and Turkish sellers.",
   "app.loadingAuth": "Checking authentication status…",
   "app.loadingAccess": "Loading workspace access…",
@@ -942,7 +942,7 @@ const zh: Record<string, string> = {
   "settings.accentColorSage": "青绿色",
   "settings.accentColorAmber": "琥珀色",
   "settings.accentColorRose": "玫红色",
-  "app.documentTitle": "Atlas Trade Copilot",
+  "app.documentTitle": "pallas",
   "app.documentDescription": "连接中国供应商与土耳其卖家的多语言团队 AI 工作区。",
   "roles.adminDescription": "管理成员、数据和工作区设置。",
   "roles.editorDescription": "使用知识库、聊天和文档。",
@@ -978,7 +978,7 @@ const zh: Record<string, string> = {
   "common.suggestion": "建议",
   "common.apply": "应用",
   "common.dismiss": "忽略",
-  "app.name": "Asianode Agent", "app.loadingAuth": "正在检查登录状态…", "app.loadingAccess": "正在加载工作区权限…", "app.unableToLoadAccess": "无法加载工作区权限", "app.accessLoadDescription": "账号已登录，但无法加载工作区权限。", "app.retry": "重试", "app.accountCreated": "账号已创建", "app.accountCreatedDescription": "账号已登录，但还没有加入工作区。请联系工作区管理员授予访问权限，然后刷新此页面。", "app.accountSuspended": "账号已停用", "app.accountSuspendedDescription": "此账号无法访问工作区。如果你认为这是误判，请联系工作区管理员。", "app.permissionRequired": "需要权限", "app.permissionRequiredDescription": "你的账号没有权限打开此工作区区域。", "app.routeStatus": "路由状态", "app.missing": "不存在", "app.notFoundTitle": "这条路走不通。", "app.notFoundDescription": "你访问的页面不存在，或者链接已经失效。返回工作区继续操作吧。", "app.requestedRouteMissing": "请求的路由无法解析。", "app.error404": "错误 / 404",
+  "app.name": "pallas", "app.loadingAuth": "正在检查登录状态…", "app.loadingAccess": "正在加载工作区权限…", "app.unableToLoadAccess": "无法加载工作区权限", "app.accessLoadDescription": "账号已登录，但无法加载工作区权限。", "app.retry": "重试", "app.accountCreated": "账号已创建", "app.accountCreatedDescription": "账号已登录，但还没有加入工作区。请联系工作区管理员授予访问权限，然后刷新此页面。", "app.accountSuspended": "账号已停用", "app.accountSuspendedDescription": "此账号无法访问工作区。如果你认为这是误判，请联系工作区管理员。", "app.permissionRequired": "需要权限", "app.permissionRequiredDescription": "你的账号没有权限打开此工作区区域。", "app.routeStatus": "路由状态", "app.missing": "不存在", "app.notFoundTitle": "这条路走不通。", "app.notFoundDescription": "你访问的页面不存在，或者链接已经失效。返回工作区继续操作吧。", "app.requestedRouteMissing": "请求的路由无法解析。", "app.error404": "错误 / 404",
   "common.back": "返回", "common.backToWorkspace": "返回工作区", "common.previousPage": "返回上一页", "common.cancel": "取消", "common.continue": "继续", "common.close": "关闭", "common.delete": "删除", "common.deleteAll": "全部删除", "common.saveChanges": "保存更改", "common.saving": "保存中", "common.deleting": "删除中", "common.loading": "加载中…", "common.loadingShort": "加载中...", "common.copyLink": "复制链接", "common.copied": "已复制到剪贴板！", "common.copiedImage": "图片已复制到剪贴板！", "common.copiedCsv": "CSV 已复制到剪贴板！", "common.file": "个文件", "common.files": "个文件", "common.grant": "项授权", "common.grants": "项授权", "common.unknownDate": "未知日期", "common.optional": "可选", "common.output": "输出", "common.result": "结果", "common.error": "错误", "common.parameters": "参数", "common.days": "天", "common.docs": "份文档", "common.uploaded": "上传于", "common.expires": "到期时间", "common.latest": "最新版本", "common.restore": "恢复", "common.showChanges": "查看更改", "common.versionOf": "第 {{current}} / {{total}} 个版本", "common.moq": "MOQ",
   "language.label": "语言", "language.english": "English", "language.chinese": "中文", "theme.toggleDark": "切换到深色模式", "theme.toggleLight": "切换到浅色模式",
   "sidebar.open": "打开侧边栏", "sidebar.newChat": "新建聊天", "sidebar.permissions": "成员权限", "sidebar.knowledgeAccess": "知识库授权", "sidebar.knowledgeFiles": "知识库文件", "sidebar.upload": "上传文件", "sidebar.deleteAll": "全部删除", "sidebar.history": "历史记录", "sidebar.loginToSave": "登录后即可保存和查看历史聊天！", "sidebar.emptyHistory": "开始聊天后，你的对话会显示在这里。", "sidebar.today": "今天", "sidebar.yesterday": "昨天", "sidebar.last7Days": "最近 7 天", "sidebar.last30Days": "最近 30 天", "sidebar.older": "更早", "sidebar.more": "更多", "sidebar.share": "分享", "sidebar.private": "私有", "sidebar.public": "公开", "sidebar.deleteAllTitle": "删除全部聊天？", "sidebar.deleteAllDescription": "此操作无法撤销。所有聊天都会被永久删除，并从服务器移除。", "sidebar.deleteChatTitle": "确定要继续吗？", "sidebar.deleteChatDescription": "此操作无法撤销。此聊天会被永久删除，并从服务器移除。", "sidebar.allChatsDeleted": "已删除全部聊天", "sidebar.chatDeleted": "聊天已删除", "sidebar.loginToAccount": "登录你的账号", "sidebar.signOut": "退出登录", "sidebar.guest": "访客", "sidebar.authStatusLoading": "正在检查登录状态，请稍后再试！",

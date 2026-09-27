@@ -154,7 +154,7 @@ def install_sqladmin(application: FastAPI, settings: Settings, engine: AsyncEngi
         application,
         engine,
         base_url="/admin",
-        title="Asianode Admin Preview",
+        title="pallas Admin Preview",
         authentication_backend=LocalAdminAuthentication(settings),
     )
     admin.add_view(UserAdminView)

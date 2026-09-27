@@ -28,7 +28,7 @@ def create_app() -> FastAPI:
     application = FastAPI(
         title=settings.app_name,
         version="0.1.0",
-        description="Backend service for the Asianode Agent platform.",
+        description="Backend service for the pallas platform.",
         lifespan=lifespan,
     )
     application.add_middleware(

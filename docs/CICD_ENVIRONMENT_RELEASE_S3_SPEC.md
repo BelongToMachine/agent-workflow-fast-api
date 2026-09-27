@@ -1,8 +1,8 @@
-# Asianode 环境、CI/CD 与 S3/MinIO 存储规范
+# pallas 环境、CI/CD 与 S3/MinIO 存储规范
 
 ## 1. 文档目的
 
-本文定义 Asianode 的 staging 和 production 环境边界、域名规划、配置隔离、分支策略、CI/CD 流程、S3/MinIO 对象存储、数据库迁移、回滚和上线验收标准。
+本文定义 pallas 的 staging 和 production 环境边界、域名规划、配置隔离、分支策略、CI/CD 流程、S3/MinIO 对象存储、数据库迁移、回滚和上线验收标准。
 
 本文是长期维护规范。具体的 GitHub Actions、VPS 初始化脚本和 Cloudflare 配置属于实施任务，应按照本文执行；现有的 `CICD_AUTOMATION_IMPLEMENTATION_PLAN.md` 是此前的 draft，后续必须按本文修订其中冲突的 staging 部署和数据库配置。
 
@@ -791,7 +791,7 @@ bash /home/asianode/asianode-production/deploy/deploy-production.sh
 
 #### 8.3.1 当前 production 手工部署命令
 
-以下命令在 production VPS `sg-vps` 上以 `asianode` 用户、同一个 shell 会话执行。`<full-sha>` 必须替换为已经准备好的 release commit；例如当前 release 使用 `d653130cb971042fc9a580ce7dda12091abcdb68`。该流程只切换指定的 Asianode 服务，不执行全局清理。
+以下命令在 production VPS `sg-vps` 上以 `asianode` 用户、同一个 shell 会话执行。`<full-sha>` 必须替换为已经准备好的 release commit；例如当前 release 使用 `d653130cb971042fc9a580ce7dda12091abcdb68`。该流程只切换指定的 pallas 服务，不执行全局清理。
 
 1. 设置 release 变量并确认文件存在：
 
@@ -1114,7 +1114,7 @@ FRONTEND_HOST_PORT=18100
 staging 配置示例：
 
 ```env
-APP_NAME=Asianode FastAPI Staging
+APP_NAME=pallas FastAPI Staging
 ENVIRONMENT=staging
 DEBUG=false
 AUTH_REQUIRED=true

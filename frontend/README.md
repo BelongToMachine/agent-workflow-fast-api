@@ -1,6 +1,6 @@
-# Manulio
+# pallas
 
-Manulio（项目内部名称：Asianode Agent）是一个面向中小型企业的本地知识库 AI Agent 助手。
+pallas 是一个面向中小型企业的本地知识库 AI Agent 助手。
 它把企业的产品资料、内部文档、FAQ、操作手册和业务知识集中到可管理的知识库中，再通过具备权限边界的 AI 对话和 Agent 查询能力，让员工和客户能够更快地找到可信、可追溯的答案。
 
 项目采用低耦合 monorepo：当前目录 `frontend/` 是独立的 React + Vite 前端应用；仓库根目录的 [`app/`](../app) 是 FastAPI 后端，负责认证、权限、知识库处理、Agent 工作流、模型调用和数据持久化。前后端仍分别构建和部署。
@@ -9,7 +9,7 @@ Manulio（项目内部名称：Asianode Agent）是一个面向中小型企业�
 
 ## 产品定位
 
-Asianode Copilot 不只是“上传文件后聊天”的机器人，而是企业知识的使用与治理入口：
+pallas 不只是“上传文件后聊天”的机器人，而是企业知识的使用与治理入口：
 
 ```text
 导入知识 → 解析与检索 → 按权限回答 → 引用来源 → 收集反馈 → 持续更新知识
@@ -110,7 +110,7 @@ FastAPI 后端负责所有需要信任边界的工作：
 ## 目录概览
 
 ```text
-manulio/
+pallas/
 ├── frontend/                    # React + Vite 前端（独立 Bun 项目）
 │   ├── src/components/chat/     # 聊天壳层、消息、侧边栏和 Artifact
 │   ├── src/components/settings/ # 成员与知识库管理页面
