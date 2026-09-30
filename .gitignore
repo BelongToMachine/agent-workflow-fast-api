@@ -8,6 +8,10 @@ storage/
 *.env.minio
 infra/minio/.env.minio
 docs/OPS_SSH_PORT_FORWARDING.md
+docs/FRONTEND_PRODUCTION_DEPLOYMENT.md
+docs/CICD_AUTOMATION_IMPLEMENTATION_PLAN.md
+docs/CICD_ENVIRONMENT_RELEASE_S3_SPEC.md
+docs/FRONTEND_BUSINESS_TABLE_PLAN.md
 !.env.example
 !.env.*.example
 *.py[cod]
