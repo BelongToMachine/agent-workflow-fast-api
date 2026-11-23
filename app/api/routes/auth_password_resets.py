@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.api.routes.auth_invitations import INSERT_AUTH_AUDIT_QUERY
+from app.api.routes.auth_invitations import (
+    ADVISORY_EMAIL_LOCK_QUERY,
+    INSERT_AUTH_AUDIT_QUERY,
+)
 from app.api.routes.auth_local import (
     LocalSessionResponse,
     _ensure_local_auth_mode,
@@ -21,9 +25,11 @@ from app.api.routes.auth_local import (
     _set_session_cookie,
     normalize_email,
 )
+from app.core.auth import AuthenticatedUser, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.one_time_tokens import hash_one_time_token, new_one_time_token
 from app.core.passwords import PasswordPolicyError, hash_password, normalize_password
+from app.core.workspace_access import require_workspace_permission
 from app.db.auth_sessions import AuthSessionRepository
 from app.db.session import get_db_connection
 
@@ -44,6 +50,14 @@ class PasswordResetRequestResponse(BaseModel):
 
     requested: bool
     reset_url: str | None = Field(default=None, alias="resetUrl")
+
+
+class AdminPasswordResetLinkResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    email: str
+    expires_at: datetime = Field(alias="expiresAt")
+    reset_url: str = Field(alias="resetUrl")
 
 
 class ConfirmPasswordResetRequest(BaseModel):
@@ -90,6 +104,40 @@ INSERT_PASSWORD_RESET_QUERY = text(
     VALUES (
         :token_id, :user_id, :normalized_email, 'password_reset', :token_hash,
         :expires_at, CURRENT_TIMESTAMP
+    )
+    """
+)
+
+TARGET_ACCOUNT_FOR_ADMIN_RESET_QUERY = text(
+    """
+    SELECT
+        user_record."id" AS user_id,
+        user_record."email" AS email,
+        user_record."status" AS status,
+        user_record."isAnonymous" AS is_anonymous,
+        member."role" AS workspace_role
+    FROM "User" AS user_record
+    INNER JOIN "PasswordCredential" AS credential
+        ON credential."userId" = user_record."id"
+    INNER JOIN "WorkspaceMember" AS member
+        ON member."userId" = user_record."id"
+    WHERE user_record."id" = :user_id
+      AND member."workspaceId" = :workspace_id
+      AND member."status" = 'active'
+    LIMIT 1
+    FOR UPDATE OF user_record
+    """
+)
+
+INSERT_ADMIN_PASSWORD_RESET_QUERY = text(
+    """
+    INSERT INTO "AuthOneTimeToken" (
+        "id", "userId", "normalizedEmail", "purpose", "tokenHash",
+        "workspaceId", "expiresAt", "createdBy", "createdAt"
+    )
+    VALUES (
+        :token_id, :user_id, :normalized_email, 'password_reset', :token_hash,
+        :workspace_id, :expires_at, :created_by, CURRENT_TIMESTAMP
     )
     """
 )
@@ -153,6 +201,12 @@ router = APIRouter(
     dependencies=[Depends(_ensure_local_auth_mode)],
 )
 
+admin_router = APIRouter(
+    prefix="/admin/auth",
+    tags=["local-auth-admin"],
+    dependencies=[Depends(_ensure_local_auth_mode)],
+)
+
 
 def _auth_error(status_code: int, code: str, message: str) -> HTTPException:
     return HTTPException(
@@ -170,6 +224,134 @@ def _storage_error(error: Exception) -> HTTPException:
         status.HTTP_503_SERVICE_UNAVAILABLE,
         "auth:storage_unavailable",
         "Authentication storage is unavailable.",
+    )
+
+
+@admin_router.post(
+    "/users/{user_id}/password-reset",
+    response_model=AdminPasswordResetLinkResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_admin_password_reset_link(
+    user_id: UUID,
+    request: Request,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    _: Annotated[None, Depends(_require_csrf)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    workspace_id: Annotated[UUID, Query(alias="workspace_id")],
+) -> AdminPasswordResetLinkResponse:
+    """Issue a one-time reset URL for an existing workspace account.
+
+    The URL is returned once for an authorized member manager to share
+    privately. The raw token is never persisted, and prior pending reset links
+    for the account are revoked.
+    """
+    try:
+        access = await require_workspace_permission(
+            current_user,
+            workspace_id,
+            "members.manage",
+        )
+    except HTTPException:
+        raise
+    except (RuntimeError, SQLAlchemyError) as error:
+        raise _storage_error(error) from error
+
+    token = new_one_time_token()
+    expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
+        seconds=settings.auth_password_reset_ttl_seconds
+    )
+    try:
+        actor_id = None if current_user.is_development else UUID(current_user.user_id)
+    except ValueError as error:
+        raise _auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "auth:admin_actor_invalid",
+            "The authenticated administrator is not linked to a local account.",
+        ) from error
+
+    try:
+        async with get_db_connection() as connection:
+            async with connection.begin():
+                account_result = await connection.execute(
+                    TARGET_ACCOUNT_FOR_ADMIN_RESET_QUERY,
+                    {"user_id": user_id, "workspace_id": workspace_id},
+                )
+                account = account_result.mappings().first()
+                if account is None or account["status"] != "active" or account["is_anonymous"]:
+                    raise _auth_error(
+                        status.HTTP_404_NOT_FOUND,
+                        "auth:reset_account_not_found",
+                        "The active local account was not found in this workspace.",
+                    )
+
+                if account["workspace_role"] == "owner" and access.role != "owner":
+                    raise _auth_error(
+                        status.HTTP_403_FORBIDDEN,
+                        "workspace:owner_required",
+                        "Only the workspace owner can reset another owner's password.",
+                    )
+
+                normalized_email = normalize_email(str(account["email"]))
+                await connection.execute(
+                    ADVISORY_EMAIL_LOCK_QUERY,
+                    {"normalized_email": normalized_email},
+                )
+                await connection.execute(
+                    REVOKE_PENDING_PASSWORD_RESETS_QUERY,
+                    {"normalized_email": normalized_email},
+                )
+                await connection.execute(
+                    INSERT_ADMIN_PASSWORD_RESET_QUERY,
+                    {
+                        "token_id": uuid4(),
+                        "user_id": user_id,
+                        "normalized_email": normalized_email,
+                        "token_hash": token.token_hash,
+                        "workspace_id": workspace_id,
+                        "expires_at": expires_at,
+                        "created_by": actor_id,
+                    },
+                )
+                await connection.execute(
+                    INSERT_AUTH_AUDIT_QUERY,
+                    {
+                        "event_type": "auth.password_reset_admin_issued",
+                        "user_id": user_id,
+                        "session_id": None,
+                        "ip_hash": _metadata_hash(
+                            request.client.host if request.client else None,
+                            settings,
+                        ),
+                        "user_agent_hash": _metadata_hash(
+                            request.headers.get("user-agent"),
+                            settings,
+                        ),
+                        "metadata": json.dumps(
+                            {
+                                "actorUserId": str(actor_id) if actor_id else None,
+                                "workspaceId": str(workspace_id),
+                                "delivery": "administrator_copy_link",
+                            },
+                            separators=(",", ":"),
+                        ),
+                    },
+                )
+    except HTTPException:
+        raise
+    except IntegrityError as error:
+        raise _auth_error(
+            status.HTTP_409_CONFLICT,
+            "auth:reset_link_conflict",
+            "The password reset link could not be issued because the account changed.",
+        ) from error
+    except (RuntimeError, SQLAlchemyError) as error:
+        raise _storage_error(error) from error
+
+    return AdminPasswordResetLinkResponse(
+        email=normalized_email,
+        expiresAt=expires_at,
+        resetUrl=_reset_url(token.token, settings),
     )
 
 

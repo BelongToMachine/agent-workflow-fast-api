@@ -92,7 +92,7 @@ def _path_limit(path: str, default_limit: int, auth_limit: int = 10) -> int:
         "/api/v1/auth/login",
         "/api/v1/auth/password-reset/confirm",
         "/api/v1/auth/password-reset/request",
-    } or path.startswith("/api/v1/admin/auth/invitations"):
+    } or path.startswith("/api/v1/admin/auth/"):
         return min(default_limit, auth_limit)
     if path == "/api/v1/chat":
         return min(default_limit, 20)
