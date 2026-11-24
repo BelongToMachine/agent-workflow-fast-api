@@ -3,7 +3,7 @@
 # Deploy the production FastAPI service from the latest approved main commit.
 #
 # This script is intended to run as the `asianode` user on the production VPS.
-# It keeps the old `asianode-preview` containers for rollback and never runs a
+# It keeps the previous release's containers for rollback and never runs a
 # global `docker compose down`, `docker system prune`, or database migration.
 
 set -Eeuo pipefail
@@ -15,9 +15,31 @@ ROOT="${ROOT:-/home/asianode/asianode-production}"
 BUILD_ENV="${BUILD_ENV:-$ROOT/shared/build/build.env}"
 RUNTIME_ENV="${RUNTIME_ENV:-$ROOT/shared/env/.env.production}"
 
-NEW_PROJECT="${NEW_PROJECT:-asianode-production}"
-OLD_PROJECT="${OLD_PROJECT:-asianode-preview}"
-OLD_COMPOSE="${OLD_COMPOSE:-/home/asianode/asianode-preview/app/compose.preview.yaml}"
+NEW_PROJECT="${NEW_PROJECT:-}"
+OLD_PROJECT="${OLD_PROJECT:-}"
+OLD_COMPOSE="${OLD_COMPOSE:-}"
+CURRENT_RELEASE="$(readlink -f "$ROOT/current" 2>/dev/null || true)"
+
+if [[ -z "$OLD_PROJECT" ]]; then
+  if [[ -n "$CURRENT_RELEASE" ]]; then
+    OLD_PROJECT="$(sed -n 's/^project=//p' "$CURRENT_RELEASE/release-info" 2>/dev/null | head -n 1)"
+  fi
+  if [[ -z "$OLD_PROJECT" ]]; then
+    if [[ -n "$CURRENT_RELEASE" && -d "$CURRENT_RELEASE" ]]; then
+      OLD_PROJECT="asianode-production"
+    else
+      OLD_PROJECT="asianode-preview"
+    fi
+  fi
+fi
+
+if [[ -z "$OLD_COMPOSE" ]]; then
+  if [[ -f "$CURRENT_RELEASE/compose.production.yaml" ]]; then
+    OLD_COMPOSE="$CURRENT_RELEASE/compose.production.yaml"
+  else
+    OLD_COMPOSE="/home/asianode/asianode-preview/app/compose.preview.yaml"
+  fi
+fi
 
 PUBLIC_HEALTH_URL="${PUBLIC_HEALTH_URL:-https://api.asianodeatlas.com/api/v1/healthz}"
 LOCAL_HEALTH_URL="${LOCAL_HEALTH_URL:-http://127.0.0.1:18000/api/v1/healthz}"
@@ -70,7 +92,7 @@ on_error() {
   fi
 
   if (( OLD_STOPPED == 1 )); then
-    log "Deployment failed; restoring the old asianode-preview service."
+    log "Deployment failed; restoring the previous $OLD_PROJECT service."
     new_compose stop api redis >/dev/null 2>&1 || true
     old_compose start api redis || true
     log "Rollback attempt finished. Check the old service manually."
@@ -110,6 +132,10 @@ git pull --ff-only origin main
 
 SHA="$(git rev-parse HEAD)"
 RELEASE="$ROOT/releases/$SHA"
+if [[ -z "$NEW_PROJECT" ]]; then
+  NEW_PROJECT="asianode-production-${SHA:0:8}"
+fi
+[[ "$NEW_PROJECT" != "$OLD_PROJECT" ]] || fail "New and previous Compose project names must differ"
 log "Preparing commit $SHA."
 
 # Require the production Compose file to be tracked in the pulled commit. This
@@ -178,6 +204,7 @@ commit=$SHA
 source=git
 remote=$(git -C "$SOURCE" remote get-url origin)
 branch=$(git -C "$SOURCE" branch --show-current)
+project=$NEW_PROJECT
 pulled_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 compose=compose.production.yaml
 runtime_env=$RUNTIME_ENV
@@ -193,6 +220,7 @@ chmod 0640 "$RELEASE/release-info"
 # recreate containers.
 log "Validating production Compose configuration."
 new_compose config -q
+docker network inspect asianode-production-internal asianode-storage >/dev/null
 
 # Build the API image while the old production service is still serving.
 log "Building the API image from release $SHA."
@@ -205,8 +233,8 @@ else
 fi
 
 # Intentional cutover point: both stacks use host port 18000, so a short outage
-# is expected. Stop only the old `asianode-preview` project.
-log "Stopping the old asianode-preview API and Redis."
+# is expected. Stop only the previous release's API and Redis.
+log "Stopping the previous $OLD_PROJECT API and Redis."
 old_compose stop api redis
 OLD_STOPPED=1
 
@@ -259,4 +287,4 @@ printf 'deployed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$RELEASE/release-
 
 log "Production deployment succeeded: $SHA"
 log "Current release: $ROOT/current"
-log "The old asianode-preview containers remain stopped for rollback."
+log "The previous $OLD_PROJECT containers remain stopped for rollback."

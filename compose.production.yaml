@@ -87,6 +87,7 @@ services:
 
 networks:
   asianode_internal:
+    external: true
     name: asianode-production-internal
   asianode-storage:
     external: true
